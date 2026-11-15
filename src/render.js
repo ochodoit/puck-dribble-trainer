@@ -2,11 +2,19 @@
 import { PUCK_R, FLYER_R } from './game.js';
 import { C, F, rgba, inkStroke, text, pill, sparks } from './theme.js';
 
+/** 퍽 피하기의 평면 경기장 사각형 (캔버스 px). topInset: 상단 HUD가 가리는 높이 비율 */
+export function dodgeField(W, H, topInset = 0) {
+  const m = W * 0.05;
+  const top = Math.max(m, topInset * H + m * 0.5);
+  return { x: m, y: top, w: W - 2 * m, h: Math.max(10, H - top - m) };
+}
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.topInset = 0;
   }
 
   resize(cssW, cssH) {
@@ -30,7 +38,7 @@ export class Renderer {
     const uvToC = (u, v) => { const [px, py] = mapping.toPx(u, v); return toC(px, py); };
     const unit = Math.min(W, H);                 // 크기 기준
     const fs = Math.max(11 * this.dpr, unit * 0.03);        // 본문 글자 (CSS 11px 이상)
-    const hair = Math.max(1.2 * this.dpr * 0.75, unit * 0.0022);   // 기본 선 굵기
+    const hair = Math.max(this.dpr, unit * 0.0014);   // 헤어라인 (화면상 약 1px)
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
     // ---- 게임 영역 ----
@@ -76,6 +84,13 @@ export class Renderer {
     if (game.mode.id === 'arcade') {
       game.arcade.draw(ctx, W, H, now, puck);
       // 실제 퍽 위치를 작은 고리로 표시해 매핑 관계를 보여줌
+      if (vision.puck) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.012, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.7); ctx.stroke(); }
+      return;
+    }
+
+    // ---- 퍽 피하기: 바닥 원근이 아니라 평면에서 ----
+    if (game.mode.id === 'obstacle') {
+      this._drawDodge(ctx, W, H, game, puck, now);
       if (vision.puck) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.012, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.7); ctx.stroke(); }
       return;
     }
@@ -127,37 +142,6 @@ export class Renderer {
       ctx.fillStyle = C.paper; ctx.fillRect(cx - r * 0.5, cy - h * 0.55, r, h * 0.12);
     }
 
-    // ---- 날아오는 퍽 (퍽 피하기): 레드 원반 + 잉크 외곽선 + 속도선 ----
-    for (const f of game.flyers || []) {
-      const ang = Math.atan2(f.vy, f.vx);
-      if (now < f.launchAt) {
-        // 출발 지점 경고: 가장자리의 레드 삼각형
-        const ex = Math.min(0.99, Math.max(0.01, f.x)), ey = Math.min(0.99, Math.max(0.01, f.y));
-        const [cx, cy] = uvToC(ex, ey);
-        const sz = unit * 0.026;
-        ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
-        ctx.globalAlpha = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(now / 60));
-        ctx.beginPath(); ctx.moveTo(sz, 0); ctx.lineTo(-sz * 0.7, -sz * 0.72); ctx.lineTo(-sz * 0.7, sz * 0.72); ctx.closePath();
-        ctx.fillStyle = C.red; ctx.fill(); ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
-        ctx.restore();
-        continue;
-      }
-      const [cx, cy] = uvToC(f.x, f.y);
-      if (cx < -W * 0.2 || cx > W * 1.2 || cy < -H * 0.2 || cy > H * 1.2) continue;
-      const r = R(FLYER_R);
-      // 속도선: 진행 반대 방향의 짧은 잉크 선 세 개
-      const [tx, ty] = uvToC(f.x - f.vx * 0.1, f.y - f.vy * 0.1);
-      const dx = tx - cx, dy = ty - cy, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
-      ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.75);
-      for (const k of [-0.55, 0, 0.55]) {
-        const ox = nx * r * k, oy = ny * r * k * 0.72, s0 = 1.25, s1 = k === 0 ? 2.3 : 1.8;
-        ctx.beginPath(); ctx.moveTo(cx + ox + (dx / len) * r * s0, cy + oy + (dy / len) * r * s0); ctx.lineTo(cx + ox + (dx / len) * r * s1, cy + oy + (dy / len) * r * s1); ctx.stroke();
-      }
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.72, 0, 0, Math.PI * 2);
-      ctx.fillStyle = f.hit ? rgba(C.red, 0.35) : C.red; ctx.fill();
-      inkStroke(ctx, hair * 1.3, C.ink, 1.6);
-    }
-
     this._drawStick(ctx, vision.stick, toC, unit, hair);
 
     // ---- 퍽 궤적 + 마커 ----
@@ -199,15 +183,98 @@ export class Renderer {
 
   _floorPx(uvToC) { const a = uvToC(1, 0.5), b = uvToC(0, 0.5); return Math.hypot(a[0] - b[0], a[1] - b[1]); }
 
+  /** 퍽 피하기 평면: 종이색 경기장 + 네 변 헤어라인. 빨간 정원 = 피할 퍽, 잉크 정원 = 나 */
+  _drawDodge(ctx, W, H, game, puck, now) {
+    const dpr = this.dpr, hair = Math.max(1, dpr), fs = Math.max(11 * dpr, W * 0.017);
+    const f = dodgeField(W, H, this.topInset), S = f.w, A = game.plane.A;
+    const P = (x, y) => [f.x + x * S, f.y + y * S];
+    ctx.save();
+    // 종이 워시: 경기장 안쪽은 영상이 은은하게, 바깥은 종이로 덮는다
+    ctx.fillStyle = rgba(C.paper, 0.88); ctx.fillRect(f.x, f.y, f.w, f.h);
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(0, 0, W, f.y); ctx.fillRect(0, f.y + f.h, W, H - f.y - f.h); ctx.fillRect(0, f.y, f.x, f.h); ctx.fillRect(f.x + f.w, f.y, W - f.x - f.w, f.h);
+    ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.strokeRect(f.x, f.y, f.w, f.h);
+    text(ctx, 'FIELD', f.x + W * 0.012, f.y + fs * 0.95, fs * 0.66, { weight: 600, color: C.mute, align: 'left', halo: false });
+    const flip = game.plane.flip;
+    text(ctx, flip ? '↑ 카메라쪽 · 밀기' : '↑ 몸쪽 · 당기기', f.x + f.w / 2, f.y + fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
+    text(ctx, flip ? '↓ 몸쪽 · 당기기' : '↓ 카메라쪽 · 밀기', f.x + f.w / 2, f.y + f.h - fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
+
+    // 날아오는 퍽 (경기장 안에서만 보이게 클립)
+    ctx.save(); ctx.beginPath(); ctx.rect(f.x, f.y, f.w, f.h); ctx.clip();
+    for (const fl of game.flyers || []) {
+      if (now < fl.launchAt) continue;
+      const [cx, cy] = P(fl.x, fl.y);
+      ctx.globalAlpha = fl.hit ? 0.3 : 1;
+      ctx.beginPath(); ctx.arc(cx, cy, FLYER_R * S, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, FLYER_R * S * 0.62, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.4); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+    // 출발 경고: 테두리 위의 작은 레드 삼각형 (진행 방향)
+    for (const fl of game.flyers || []) {
+      if (now >= fl.launchAt) continue;
+      const [cx, cy] = P(Math.min(1, Math.max(0, fl.x)), Math.min(A, Math.max(0, fl.y)));
+      const sz = Math.max(7 * dpr, W * 0.011);
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.atan2(fl.vy, fl.vx));
+      ctx.globalAlpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(now / 60));
+      ctx.beginPath(); ctx.moveTo(sz * 1.3, 0); ctx.lineTo(-sz * 0.2, -sz * 0.8); ctx.lineTo(-sz * 0.2, sz * 0.8); ctx.closePath(); ctx.fillStyle = C.red; ctx.fill();
+      ctx.restore();
+    }
+
+    // 나: 잉크 정원 + 한 겹 떨어진 헤어라인 고리, 궤적은 헤어라인
+    const me = puck.pos ? game.toPlane(puck.pos.x, puck.pos.y) : null;
+    if (puck.trail.length > 1) {
+      ctx.lineWidth = hair;
+      for (let i = 1; i < puck.trail.length; i++) {
+        const a = game.toPlane(puck.trail[i - 1].x, puck.trail[i - 1].y), b = game.toPlane(puck.trail[i].x, puck.trail[i].y);
+        const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.45;
+        if (alpha <= 0) continue;
+        const [ax, ay] = P(a.x, a.y), [bx, by] = P(b.x, b.y);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.strokeStyle = rgba(C.ink, alpha); ctx.stroke();
+      }
+    }
+    if (me) {
+      const [cx, cy] = P(me.x, me.y), r = PUCK_R * S;
+      const predicted = puck.state === 'predicted';
+      if (game.running && now < game.invulnUntil && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = predicted ? rgba(C.ink, 0.4) : C.ink; ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      text(ctx, '퍽이 인식되면 여기에 표시됩니다', f.x + f.w / 2, f.y + f.h / 2, fs * 0.9, { weight: 500, color: C.mute, halo: false });
+    }
+    if (!game.running) {
+      // 범례
+      const y = f.y + f.h * 0.3, r = fs * 0.55;
+      ctx.beginPath(); ctx.arc(f.x + f.w / 2 - fs * 5.2, y, r, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+      text(ctx, '사방에서 오는 빨간 퍽 — 피하기', f.x + f.w / 2 - fs * 5.2 + r * 1.8, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
+    }
+
+    // 이펙트
+    for (const e of game.effects) {
+      if (e.type === 'pop') {
+        const [cx, cy] = P(Math.min(0.86, Math.max(0.14, e.x)), Math.min(A, Math.max(0.06, e.y)));
+        ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
+        const script = e.style === 'script';
+        text(ctx, e.text, cx, cy - e.age * W * 0.04, script ? W * 0.055 : W * 0.026, { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color });
+        ctx.globalAlpha = 1;
+      } else if (e.type === 'flash') {
+        ctx.fillStyle = rgba(C.red, 0.1 * (1 - e.age)); ctx.fillRect(f.x, f.y, f.w, f.h);
+        ctx.lineWidth = hair * 3; ctx.strokeStyle = rgba(C.red, 1 - e.age); ctx.strokeRect(f.x, f.y, f.w, f.h);
+      }
+    }
+    ctx.restore();
+  }
+
   /** 퍽 마커: 종이 헤일로 + 잉크 고리 + 레드 중심점 */
   _drawPuck(ctx, puck, uvToC, unit, hair, now, rFloor) {
     if (!puck.pos) return;
     const [cx, cy] = uvToC(puck.pos.x, puck.pos.y);
     const r = Math.max(unit * 0.02, rFloor * 1.5);
     const predicted = puck.state === 'predicted';
-    ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.72, 0, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
     if (predicted) ctx.setLineDash([hair * 3, hair * 3]);
-    inkStroke(ctx, hair * 1.5, C.ink);
+    inkStroke(ctx, hair * 1.2, C.ink);
     ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(cx, cy, Math.max(2.5, unit * 0.006), 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
     if (puck.speed > 1.2) sparks(ctx, cx, cy, r * 1.25, r * 1.6, 8, rgba(C.ink, 0.7), hair, now / 300);

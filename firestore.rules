@@ -1,0 +1,23 @@
+rules_version = '2';
+// 온라인 랭킹용 Firestore 보안 규칙 (Firebase 콘솔 > Firestore > 규칙에 붙여넣기)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.nick is string && request.resource.data.nick.size() <= 12
+        && request.resource.data.team is string && request.resource.data.team.size() <= 20
+        && request.resource.data.age is int && request.resource.data.age >= 3 && request.resource.data.age <= 99;
+    }
+    match /nicks/{nick} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+    }
+    match /{col}/{uid} {
+      allow read: if col.matches('scores_.*');
+      allow write: if col.matches('scores_.*') && request.auth != null && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.score is int && request.resource.data.score >= 0 && request.resource.data.score <= 1000000;
+    }
+  }
+}

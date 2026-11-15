@@ -9,6 +9,7 @@
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
   import { Arcade, PUCK_R } from '../src/arcade.js';
+  import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
 
   const scene = document.getElementById('scene');
   const sctx = scene.getContext('2d');
@@ -376,6 +377,44 @@
     land.update(0.033, fakePuck(0.05, 0.05), 1000); port.update(0.033, fakePuck(0.05, 0.05), 1000);
     const vl = land.obstacles.find((o) => o.type !== 'beam')?.vy, vp = port.obstacles.find((o) => o.type !== 'beam')?.vy;
     check('P2 portrait fall speed scaled (x2 cap)', port.fallScale === 2 && land.fallScale === 1 && (!vl || !vp || Math.abs(vp / vl - 2) < 0.3), { vl, vp, fs: port.fallScale });
+
+    // ===== 계정 / 랭킹 (기기 내 저장소, 메모리 스토리지로 격리) =====
+    const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
+    const st = mem();
+    let acc = new LocalAccountStore(st);
+    check('C1 age groups', ageGroupOf(7) === 'U8' && ageGroupOf(9) === 'U10' && ageGroupOf(11) === 'U12' && ageGroupOf(13) === 'U14' && ageGroupOf(15) === 'U16' && ageGroupOf(17) === 'U18' && ageGroupOf(25) === '성인' && ageGroupOf(45) === '시니어');
+    check('C1 validation: pin must be 6 digits', !!validateProfile({ nick: '번개손', pin: '12345', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: '번개손', pin: 'abcdef', country: 'KR', team: 'A', age: 11 }) && !validateProfile({ nick: '번개손', pin: '123456', country: 'KR', team: 'A', age: 11 }));
+    check('C1 validation: nick length/age range', !!validateProfile({ nick: 'a', pin: '123456', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: 'ok', pin: '123456', country: 'KR', team: 'A', age: 150 }));
+    const u1 = await acc.register({ nick: '번개손', pin: '123456', country: 'KR', team: '서울 유스', age: 11 });
+    check('C2 register logs in with age group', u1.nick === '번개손' && u1.ageGroup === 'U12' && acc.current()?.id === '번개손');
+    let dup = null; try { await acc.register({ nick: ' 번개손 ', pin: '000000', country: 'US', team: 'X', age: 30 }); } catch (e) { dup = e.message; }
+    check('C2 duplicate nick rejected (case/space-insensitive)', /사용 중/.test(dup || ''), dup);
+    acc.logout();
+    let wrong = null; try { await acc.login('번개손', '654321'); } catch (e) { wrong = e.message; }
+    check('C2 wrong pin rejected', /맞지 않/.test(wrong || '') && !acc.current(), wrong);
+    await acc.login('번개손', '123456');
+    check('C2 login works and session persists', acc.current()?.nick === '번개손' && new LocalAccountStore(st).current()?.nick === '번개손');
+    // 점수: 최고 기록만 유지
+    let r1 = await acc.submitScore('arcade', 500);
+    let r2 = await acc.submitScore('arcade', 300);
+    let r3 = await acc.submitScore('arcade', 900);
+    check('C3 best score kept, plays counted', r1.improved && !r2.improved && r2.best === 500 && r3.improved && r3.best === 900 && r3.entry.plays === 3, { r1, r2, r3 });
+    // 다른 선수들 등록 (연령대/국가/팀 다양)
+    const others = [['민준', 'KR', '서울 유스', 10, 1200], ['Ava', 'US', 'Boston Jr', 11, 700], ['Hana', 'KR', '부산 키즈', 14, 1500], ['Coach', 'KR', '서울 유스', 35, 2000], ['Liam', 'CA', 'Toronto', 9, 400]];
+    for (const [nick, country, team, age, score] of others) { acc.logout(); await acc.register({ nick, pin: '111111', country, team, age }); await acc.submitScore('arcade', score); await acc.submitScore('wide', score / 100); }
+    acc.logout(); await acc.login('번개손', '123456');
+    const all = await acc.leaderboard('arcade');
+    check('C4 leaderboard sorted desc with ranks', all.length === 6 && all[0].nick === 'Coach' && all[0].rank === 1 && all[5].rank === 6 && all.every((r, i) => i === 0 || all[i - 1].score >= r.score), all.map((r) => [r.nick, r.score]));
+    const u12 = await acc.leaderboard('arcade', { ageGroup: 'U12' });
+    check('C4 age-group ranking (U12: 10~11세)', u12.map((r) => r.nick).join(',') === '민준,번개손,Ava', u12.map((r) => r.nick));
+    const kr = await acc.leaderboard('arcade', { country: 'KR' });
+    const team = await acc.leaderboard('arcade', { team: '서울 유스' });
+    check('C4 country / team filters', kr.length === 4 && team.map((r) => r.nick).join(',') === 'Coach,민준,번개손', { kr: kr.length, team: team.map((r) => r.nick) });
+    const myAll = await acc.myRank('arcade'), myU12 = await acc.myRank('arcade', { ageGroup: 'U12' });
+    check('C4 my rank overall and in age group', myAll.rank === 4 && myAll.total === 6 && myU12.rank === 2 && myU12.total === 3, { myAll, myU12 });
+    const wide = await acc.leaderboard('wide');
+    check('C4 per-mode separation', wide.length === 5 && !wide.some((r) => r.nick === '번개손'), wide.length);
+    check('C4 no scores for guest', await (async () => { acc.logout(); try { await acc.submitScore('arcade', 1); return false; } catch { return true; } })());
 
     // 9) 성능: 240x180 프레임 처리 시간
     settings.debug = true;

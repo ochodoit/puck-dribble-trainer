@@ -79,8 +79,8 @@
           <li><b>휴대폰</b>: 거치대에 세우고 <b>전면 카메라</b>(기본)로 자신과 바닥이 보이게 둡니다. 🔄 버튼으로 전·후면 전환. 멀리서도 퍽을 가운데 원에 3초 두면 자동 시작·재시작됩니다.</li>
           <li><b>노트북 웹캠</b>: 노트북을 바닥 가까이 두고 화면을 뒤로 젖혀 연습 공간을 비춥니다. 흰 바닥이 없으면 설정 &gt; 게임 영역을 <b>카메라 화면 전체</b>로 바꾸고, 퍽은 밝은 색(주황 볼·연습용 퍽)을 터치로 지정하세요.</li>
           <li>퍽은 기본 검정색으로 인식됩니다. 스틱은 블레이드에 <b>눈에 띄는 색 테이프</b>를 감으면 가장 잘 인식됩니다.</li>
-          <li>시작 후 <b>보정</b>에서 퍽과 스틱을 화면에서 터치해 색을 지정하세요. 스틱을 지정하면 세게 쳤을 때도 퍽을 놓치지 않습니다.</li>
-          <li>바닥 위에 퍽과 같은 색의 다른 물체(검정 신발·가방 등)를 두지 마세요. 앱이 가려지거나 화면이 꺼지면 추적이 멈춥니다.</li>
+          <li><b>아무 바닥·매트에서 아무 물체나</b>: 카메라 시작 후 화면 가운데 원 안에 퍽으로 쓸 물체(공, 뚜껑, 실제 퍽…)를 놓고 3초 기다리면 자동 인식됩니다. 배경과 색만 다르면 됩니다. 흰 바닥이 없으면 카메라 화면 전체가 게임 영역이 됩니다.</li>
+          <li>바닥 위에 퍽과 같은 색의 다른 물체를 두지 마세요. 앱이 가려지거나 화면이 꺼지면 추적이 멈춥니다.</li>
         </ol>
         <form id="pin-form" class="pin-form hidden" autocomplete="off">
           <input id="pin-input" type="password" inputmode="numeric" placeholder="접속 코드" aria-label="접속 코드" />
@@ -204,17 +204,19 @@
     <div id="panel-calib" class="panel modal hidden">
       <div class="modal-card">
         <header><h2>인식 보정</h2><button class="btn btn-ghost btn-close" data-close="panel-calib">닫기</button></header>
-        <p class="muted">물체를 바닥 위에 놓고 버튼을 누른 뒤, 화면에서 해당 물체를 정확히 터치하세요. 색과 크기를 자동으로 학습합니다.</p>
+        <p class="muted"><b>자동 지정(추천)</b>: 버튼을 누른 뒤 퍽으로 쓸 물체(공·뚜껑·실제 퍽 등 배경과 색이 다른 것)를 화면 가운데 원 안에 놓고 3초만 기다리면 색과 크기를 스스로 학습합니다. 어떤 바닥·매트에서도 됩니다. <b>터치로 지정</b>은 화면 속 물체를 직접 터치하는 방식입니다.</p>
         <div class="calib-grid">
           <div class="calib-item">
             <span class="swatch" id="swatch-puck"></span>
             <div><b>퍽</b><small id="calib-puck-desc">기본: 검정</small></div>
+            <button class="btn btn-primary" data-autocalib="puck">원 안에 3초 (자동)</button>
             <button class="btn" data-calib="puck">터치로 지정</button>
             <button class="btn btn-ghost" data-calib-reset="puck">기본값</button>
           </div>
           <div class="calib-item">
             <span class="swatch" id="swatch-stick"></span>
             <div><b>스틱(블레이드/테이프)</b><small id="calib-stick-desc">미지정</small></div>
+            <button class="btn btn-primary" data-autocalib="stick">원 안에 3초 (자동)</button>
             <button class="btn" data-calib="stick">터치로 지정</button>
             <button class="btn btn-ghost" data-calib-reset="stick">해제</button>
           </div>

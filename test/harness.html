@@ -10,10 +10,10 @@
   import { Tracker } from '../src/tracker.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
-  import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS } from '../src/arcade.js';
+  import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
   import { rankKey, FLYER_R } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
-  import { decideIdle, stepChoice, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
+  import { decideIdle, stepChoice, stepDwell, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
 
   const scene = document.getElementById('scene');
   const sctx = scene.getContext('2d');
@@ -53,8 +53,8 @@
     ar.score = 1830; ar.combo = 12; ar.maxCombo = 12; ar.level = 1;
     ar.avatar = ar.toZone(0.42, 0.55);
     const P = (x, y, r, c) => ar.obstacles.push({ x, y, r, vy: 0.26, color: PUCK_COLORS[c], minDist: 1, passed: false, hit: false, nearMiss: false });
-    P(0.22, 0.10, 0.040, 0); P(0.58, 0.05, 0.030, 1); P(0.82, 0.19, 0.036, 2); P(0.36, 0.27, 0.028, 3); P(0.68, 0.33, 0.042, 0); P(0.14, 0.36, 0.031, 1); P(0.50, 0.44, 0.034, 2);
-    ar.pickups.push({ x: 0.75, y: 0.42, r: 0.028, vy: 0.3, born: 0 });
+    P(0.22, 0.10, 0.020, 0); P(0.58, 0.05, 0.015, 1); P(0.82, 0.19, 0.018, 2); P(0.36, 0.27, 0.014, 3); P(0.68, 0.33, 0.021, 0); P(0.14, 0.36, 0.016, 1); P(0.50, 0.40, 0.017, 2); P(0.30, 0.46, 0.019, 3); P(0.88, 0.42, 0.015, 0); P(0.46, 0.16, 0.02, 2);
+    ar.pickups.push({ x: 0.75, y: 0.44, r: 0.013, vy: 0.3, born: 0 }); ar.pickups.push({ x: 0.2, y: 0.22, r: 0.013, vy: 0.3, born: 0 });
     ar.effects.push({ type: 'pop', x: 0.42, y: ar.avatar.y - 0.09, text: 'Deke! +100 ×2', color: '#E03C31', style: 'script', t0: performance.now(), dur: 900, age: 0.2 });
     ar.draw(ctx, cv.width, cv.height, 1234, { trail: [], state: 'tracked' });
     return true;
@@ -359,11 +359,21 @@
     const s3 = ar.score; ar._addScore(50); check('A6 multiplier applies to points', ar.score - s3 === 150);
 
     // A7) 스폰: 막대 없이 정원 퍽만, 색은 여러 가지, 속도는 모두 같고 테두리 안쪽 무작위 위치
-    ar = mk(); t = toPlay(ar, 60000); ar.spawnTimer = 0;
-    const seen = [];
-    for (let i = 0; i < 600; i++) { ar.update(0.033, fakePuck(0.02, 0.98, 'predicted'), t); t += 33; ar.obstacles.forEach((o) => { if (!seen.includes(o)) seen.push(o); }); if (ar.spawnTimer > 0.15) ar.spawnTimer = 0.15; }
+    ar = mk(); t = toPlay(ar, 60000); ar.spawnTimer = 0; ar.pickupTimer = 0.3;
+    const seen = []; let overlaps = 0, coinsSeen = 0;
+    for (let i = 0; i < 600; i++) {
+      ar.update(0.033, fakePuck(0.02, 0.98, 'predicted'), t); t += 33;
+      ar.obstacles.forEach((o) => { if (!seen.includes(o)) seen.push(o); });
+      coinsSeen = Math.max(coinsSeen, ar.pickups.length);
+      const all = [...ar.obstacles, ...ar.pickups];
+      for (let a2 = 0; a2 < all.length; a2++) for (let b2 = a2 + 1; b2 < all.length; b2++) if (Math.hypot(all[a2].x - all[b2].x, all[a2].y - all[b2].y) < all[a2].r + all[b2].r) overlaps++;
+      if (ar.spawnTimer > 0.15) ar.spawnTimer = 0.15;
+      if (ar.pickupTimer > 0.6) ar.pickupTimer = 0.6;
+    }
+    check('A7 falling pucks and coins never overlap each other', overlaps === 0 && coinsSeen >= 1 && seen.length > 60, { overlaps, pucks: seen.length });
+    check('A7 falling pucks are half size', seen.every((o) => o.r >= FALL_R[0] && o.r <= FALL_R[1]) && FALL_R[1] === 0.021 && COIN_R === 0.013 && ar.pickups.every((p) => p.r === COIN_R));
     const vys = new Set(seen.map((o) => o.vy.toFixed(6))), cols = new Set(seen.map((o) => o.color));
-    check('A7 only round pucks spawn (no bars)', seen.length > 40 && seen.every((o) => o.type === undefined && o.r > 0.02 && o.w === undefined), seen.length);
+    check('A7 only round pucks spawn (no bars)', seen.length > 40 && seen.every((o) => o.type === undefined && o.r > 0 && o.w === undefined), seen.length);
     check('A7 all pucks fall at the same constant speed', vys.size === 1 && Math.abs(seen[0].vy - 0.26) < 1e-9, [...vys]);
     check('A7 several colors, never red or yellow', cols.size >= 3 && [...cols].every((c) => PUCK_COLORS.includes(c)) && !PUCK_COLORS.includes('#E03C31') && !PUCK_COLORS.includes('#FFC72C'), [...cols]);
     check('A7 random x inside the side borders', seen.every((o) => o.x - o.r >= FIELD_MARGIN - 1e-9 && o.x + o.r <= 1 - FIELD_MARGIN + 1e-9) && Math.max(...seen.map((o) => o.x)) - Math.min(...seen.map((o) => o.x)) > 0.6, { min: Math.min(...seen.map((o) => o.x)), max: Math.max(...seen.map((o) => o.x)) });
@@ -372,6 +382,13 @@
     ar.flipY = false;
     check('A8 depth direction can be flipped', Math.abs(ar.toZone(0.5, 0).y - ar.zoneTop) < 1e-9 && Math.abs(ar.toZone(0.5, 1).y - ar.aspect) < 1e-9);
     ar.flipY = true;
+    // 난이도별 개수·속도: 쉬움 < 보통 < 어려움, 어려움은 간격 0.4초(이전 0.8초의 2배 개수)
+    {
+      const count = (diff) => { const a = new Arcade(null); a.aspect = 0.5625; a.start(fakePuck(0.5, 0.5), diff, true); a.pickupTimer = 1e9; let n = 0, tt = 900000; const seenO = new Set(); for (let i = 0; i < 606; i++) { a.update(0.033, fakePuck(0.02, 0.98, 'predicted'), tt); tt += 33; a.score = 0; a.obstacles.forEach((o) => seenO.add(o)); } return { n: seenO.size, speed: a.speed, iv: a.interval() }; };
+      const e = count('easy'), n = count('normal'), h = count('hard');
+      check('A7 difficulty changes speed (easy < normal < hard)', e.speed < n.speed && n.speed < h.speed && Math.abs(h.speed - 0.36) < 1e-9, { e: e.speed, n: n.speed, h: h.speed });
+      check('A7 difficulty changes puck count; hard is about 2x the old hard rate', e.n < n.n && n.n < h.n && h.iv === 0.4 && h.n >= 42 && h.n <= 58, { easy: e.n, normal: n.n, hard: h.n });
+    }
     // A8) 내 퍽은 테두리 안쪽에 매핑됨
     check('A8 player mapped inside the borders', Math.abs(ar.toZone(0, 0.5).x - FIELD_MARGIN) < 1e-9 && Math.abs(ar.toZone(1, 0.5).x - (1 - FIELD_MARGIN)) < 1e-9 && ar.toZone(0.5, 0.5).x === 0.5);
 
@@ -552,6 +569,16 @@
       check('F3d losing the puck resets the hold', f2 === null && c2.hold === 0);
       let n2 = 0; while (!f2 && n2++ < 200) f2 = stepChoice(c2, { u: 0.9, tracked: true, dt: 0.033, armed: true });
       check('F3d right zone fires "mode" after 2s', f2 === 'R');
+      // 모드 카드 머무름: 같은 카드 2초 -> 선택, 카드가 바뀌면 처음부터, 카드 밖(null)은 세지 않음
+      const d = { key: null, hold: 0 }; let fd = null;
+      for (let i = 0; i < 40; i++) fd = stepDwell(d, 2, 0.033) ?? fd;
+      for (let i = 0; i < 40; i++) fd = stepDwell(d, 4, 0.033) ?? fd;
+      check('F3d dwell resets when the card changes', fd === null && d.key === 4);
+      for (let i = 0; i < 30; i++) fd = stepDwell(d, 4, 0.033) ?? fd;
+      check('F3d dwelling 2s on one card selects it', fd === 4);
+      const d2 = { key: null, hold: 0 }; let fd2 = null;
+      for (let i = 0; i < 200; i++) fd2 = stepDwell(d2, null, 0.033) ?? fd2;
+      check('F3d no card under the cursor never selects', fd2 === null && d2.hold === 0);
     }
 
     // F4) 흰 바닥 히스테리시스: 10프레임 연속 검출 시 흰 바닥, 90프레임 미검출 시 전체 화면 복귀

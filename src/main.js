@@ -8,7 +8,7 @@ import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
 import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel } from './account.js';
-import { decideIdle, stepChoice, CHOICE_HOLD_S } from './idle-logic.js';
+import { decideIdle, stepChoice, stepDwell, CHOICE_HOLD_S } from './idle-logic.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -498,8 +498,11 @@ function loop(now) {
   const dt = app.lastLoop ? Math.min(0.1, (now - app.lastLoop) / 1000) : 1 / 60;
   app.lastLoop = now;
   game.update(dt, tracker, now);
+  const modeOpen = !els.panelMode.classList.contains('hidden');
+  if (!modeOpen && app.modePick) { app.modePick = null; $('#mode-cursor').classList.add('hidden'); }
   if (app.calib.manual) updateAutoCalibration(dt);
   else if (!els.panelResult.classList.contains('hidden')) updateResultChoice(dt);
+  else if (modeOpen) updateModeChoice(dt);
   else updateIdleCircle(dt);
 
   game.arcade.idleAutoStart = settings.autoStart;
@@ -531,6 +534,45 @@ function updateResultChoice(dt) {
   ch.side = null; ch.hold = 0; paintChoice(null);
   if (fire === 'L') (els.btnNext.classList.contains('hidden') ? els.btnAgain : els.btnNext).click();
   else $('#btn-result-mode').click();
+}
+
+/**
+ * 모드 선택 화면을 퍽으로 고르기: 퍽의 (좌우, 앞뒤) 위치를 카드 목록 위의 빨간 커서로 옮기고,
+ * 카드 위에 2초 머물면 그 모드를 선택한다. 창이 열릴 때 커서가 올라가 있던 카드는 한 번 벗어났다가 다시 와야 한다
+ * (결과 화면에서 퍽을 오른쪽에 둔 채 넘어왔을 때 엉뚱한 카드가 바로 선택되는 것을 방지).
+ */
+function updateModeChoice(dt) {
+  const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
+  $('#btn-replace-puck').classList.add('hidden');
+  const cursor = $('#mode-cursor');
+  const enabled = settings.autoStart;
+  $('#mode-pick-hint').classList.toggle('hidden', !enabled);
+  if (!app.modePick) app.modePick = { key: null, hold: 0, tick: -1, armAt: performance.now() + 800, blocked: undefined };
+  const mp = app.modePick;
+  const cards = $$('#mode-list .mode-card');
+  const tracked = enabled && tracker.state === 'tracked' && !!tracker.pos;
+  let idx = null;
+  if (tracked) {
+    const r = els.modeList.getBoundingClientRect();
+    const u = clamp(tracker.pos.x, 0, 1), v = clamp(settings.flipDepth ? 1 - tracker.pos.y : tracker.pos.y, 0, 1);
+    const cx = r.left + u * r.width, cy = r.top + v * r.height;
+    cursor.style.left = `${cx}px`; cursor.style.top = `${cy}px`;
+    cursor.classList.remove('hidden');
+    const hit = cards.findIndex((card) => { const b = card.getBoundingClientRect(); return cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom; });
+    idx = hit >= 0 ? hit : null;
+    if (mp.blocked === undefined) mp.blocked = idx;               // 열릴 때 올라가 있던 카드
+    else if (mp.blocked !== null && idx !== mp.blocked) mp.blocked = null; // 한 번 벗어나면 해제
+  } else cursor.classList.add('hidden');
+  const armed = performance.now() >= mp.armAt;
+  const key = tracked && armed && idx !== null && idx !== mp.blocked ? idx : null;
+  const fire = stepDwell(mp, key, dt, CHOICE_HOLD_S);
+  const pct = Math.min(100, (mp.hold / CHOICE_HOLD_S) * 100);
+  cards.forEach((card, i) => { card.style.setProperty('--dwell', i === mp.key ? `${pct}%` : '0%'); card.classList.toggle('hover', i === idx); });
+  if (mp.key !== null && mp.hold > 0) { const remain = Math.ceil(CHOICE_HOLD_S - mp.hold); if (remain !== mp.tick) { mp.tick = remain; sfx.tick(); if (idx !== null) cards[idx].scrollIntoView({ block: 'nearest' }); } } else mp.tick = -1;
+  if (fire === null || fire === undefined) return;
+  app.modePick = null;
+  cursor.classList.add('hidden');
+  cards[fire].click();
 }
 
 function paintChoice(u) {

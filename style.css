@@ -193,7 +193,14 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .mode-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .mode-card { position: relative; text-align: left; background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--radius); padding: 14px 16px 16px; cursor: pointer;
   display: grid; grid-template-columns: 1fr auto; row-gap: 2px; transition: background 0.15s, color 0.15s; }
-.mode-card:hover { background: var(--paper-2); }
+.mode-card { overflow: hidden; }
+.mode-card:hover, .mode-card.hover { background: var(--paper-2); }
+.mode-card.selected.hover { background: var(--ink); }
+/* 퍽 커서가 머무는 동안 아래에서 차오르는 진행 띠 */
+.mode-card::after { content: ""; position: absolute; left: 0; bottom: 0; height: 5px; width: var(--dwell, 0%); background: var(--red); transition: width 0.12s linear; }
+.pick-hint { margin: 0 0 12px; }
+.pick-cursor { position: fixed; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--red);
+  box-shadow: 0 0 0 3px var(--paper), 0 0 0 4px var(--ink); pointer-events: none; z-index: 30; transition: left 0.08s linear, top 0.08s linear; }
 .mode-card .no { font-family: var(--display); font-weight: 900; font-size: 14px; color: var(--mute); }
 .mode-card .time { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; border: 1px solid currentColor; border-radius: 999px; padding: 1px 9px; align-self: start; }
 .mode-card b { grid-column: 1 / -1; font-family: var(--display); font-weight: 900; font-variation-settings: "SOFT" 100; font-size: 23px; line-height: 1.15; margin-top: 6px; }

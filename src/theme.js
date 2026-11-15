@@ -1,4 +1,5 @@
 // 디자인 토큰 (캔버스용). CSS 변수와 같은 값을 유지할 것 — style.css :root 참고.
+import { tr } from './i18n.js';
 // 컨셉: 종이 바탕 + 잉크 블랙 + 포인트 레드 한 색. 보조로 옐로는 '수집 아이템'에만 사용.
 export const C = {
   paper: '#F4F1EA',   // 따뜻한 종이색
@@ -31,6 +32,7 @@ export function inkStroke(ctx, width, color = C.ink, halo = 2.2) {
 
 /** 헤일로가 있는 텍스트 */
 export function text(ctx, str, x, y, size, { family = F.sans, weight = 600, color = C.ink, align = 'center', baseline = 'middle', halo = true } = {}) {
+  str = tr(str); // 화면 언어에 맞춰 번역 (한국어면 그대로)
   ctx.font = font(family, size, weight);
   ctx.textAlign = align; ctx.textBaseline = baseline;
   if (halo) { ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(3, Math.min(size * 0.2, 4 + size * 0.05)); ctx.strokeStyle = rgba(C.paper, 0.92); ctx.strokeText(str, x, y); }
@@ -39,6 +41,7 @@ export function text(ctx, str, x, y, size, { family = F.sans, weight = 600, colo
 
 /** 알약형 라벨: 종이 바탕 + 잉크 테두리 (inverse면 잉크/레드 바탕 + 종이 글자) */
 export function pill(ctx, str, x, y, size, { bg = C.paper, fg = C.ink, border = C.ink, weight = 600, family = F.sans, align = 'center', alpha = 0.94 } = {}) {
+  str = tr(str);
   ctx.font = font(family, size, weight);
   const w = ctx.measureText(str).width + size * 1.5, h = size * 1.9;
   const left = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;

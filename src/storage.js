@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS = {
   puckOpacity: 100,                           // 플레이 중 내 퍽 표시 농도(%): 100 = 또렷이, 0 = 안 보임 (10 단위, 헤드업 훈련)
   courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
   course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (평면 경기장 비율)
+  courseRecord: null,                         // 현재 코스로 세운 내 최고 기록: {sig, avg, best, at} (커뮤니티 공유용)
   bgTransparency: 12,                         // 게임 배경 투명도(%): 0 = 종이색으로 완전히 덮음, 100 = 카메라 영상 그대로
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
   cameraId: '',
@@ -73,6 +74,9 @@ export function sanitizeSettings(s) {
     ? s.course.filter((p) => p && Number.isInteger(p.n) && p.n >= 1 && p.n <= 10 && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)
       .filter((p, i, arr) => arr.findIndex((q) => q.n === p.n) === i).map((p) => ({ n: p.n, x: p.x, y: p.y }))
     : [];
+  const cr = s.courseRecord;
+  s.courseRecord = cr && typeof cr === 'object' && typeof cr.sig === 'string' && Number.isFinite(cr.avg) && cr.avg > 0 && Number.isFinite(cr.best) && cr.best > 0
+    ? { sig: cr.sig, avg: cr.avg, best: cr.best, at: Number(cr.at) || 0 } : null;
   s.cameraId = typeof s.cameraId === 'string' ? s.cameraId : '';
   s.facing = s.facing === 'environment' ? 'environment' : 'user';
   s.autoStart = typeof s.autoStart === 'boolean' ? s.autoStart : d.autoStart;

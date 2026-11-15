@@ -78,9 +78,17 @@
 3. 인증서 경고가 뜨면 iPhone Safari는 "세부사항 보기 > 이 웹 사이트 방문", Android Chrome은 "고급 > 이동"으로 계속합니다.
 4. 안 열리면 순서대로 확인: 휴대폰과 컴퓨터가 같은 Wi-Fi인지(휴대폰 데이터 끄기) → 처음 실행 시 뜨는 방화벽 팝업에서 Python 허용(개인 네트워크) → 공유기의 "AP 격리/기기 간 통신 차단" 해제 → 포트 변경(`python3 serve.py 9443`).
 
-### 방법 B. GitHub Pages에 올려서 (컴퓨터 없이, 추천)
+### 방법 B. GitHub Pages 링크로 바로 열기 (컴퓨터 없이, 추천)
 
-저장소 **Settings > Pages > Build and deployment > Source**를 `GitHub Actions`로 바꾸고 이 브랜치를 `main`에 합치면 `.github/workflows/pages.yml` 이 자동으로 배포합니다. 이후에는 `https://<깃허브계정>.github.io/<저장소이름>/` 을 휴대폰에서 바로 열면 됩니다. HTTPS라 카메라가 바로 허용되고 인증서 경고도 없습니다.
+`main` 브랜치에 푸시하면 `.github/workflows/pages.yml` 이 **https://ochodoit.github.io/semple/** 에 자동 배포합니다. 워크플로가 Pages를 자동 활성화하지 못하면 저장소 **Settings > Pages > Source**를 `GitHub Actions`로 한 번만 바꿔 주세요. HTTPS라 휴대폰 카메라가 바로 허용되고 인증서 경고도 없습니다.
+
+**접속 코드(본인만 사용)**: 공개 주소이므로 첫 화면에서 접속 코드를 묻습니다. 한 번 맞게 입력하면 그 기기에서는 다시 묻지 않습니다. 코드를 바꾸려면 아래를 실행하고 커밋·푸시하세요(빈 문자열이면 잠금 해제).
+
+```bash
+node tools/set-pin.mjs 5678
+```
+
+GitHub 무료 계정에서는 Pages 사이트 자체를 비공개로 만들 수 없어서(Enterprise 전용) 이 클라이언트 측 잠금으로 대신합니다. 소스를 읽으면 우회할 수 있는 수준이므로 개인 정보가 없는 게임용 보호로 생각하세요.
 
 ### 플레이 설정
 

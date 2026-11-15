@@ -234,19 +234,28 @@ let failed = false;
   await page.waitForSelector('#panel-result:not(.hidden)');
   const resultText = await page.textContent('#result-body');
   console.log(`${resultText.includes('최고 콤보') && resultText.includes('DEKE') ? 'PASS' : 'FAIL'} arcade result report`);
-  // 핸즈프리 재시작: 결과 패널이 열린 채로 퍽이 가운데 원 안에 3초 머물면 자동 시작 (측정값을 중앙으로 고정)
-  await page.evaluate(() => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: 0.5, v: 0.5 }, now); }; });
-  await page.waitForTimeout(1500);
-  const notYet = (await page.textContent('#btn-start')).trim() === '시작';
-  await page.waitForTimeout(2300);
-  const autoStarted = (await page.textContent('#btn-start')).trim() === '중지' && (await page.isHidden('#panel-result'));
-  const arcadePhase = await page.evaluate(() => window.__puckTrainer.game.arcade.phase);
-  console.log(`${notYet && autoStarted && arcadePhase === 'play' ? 'PASS' : 'FAIL'} hands-free restart from result panel after 3s hold (phase=${arcadePhase})`);
-  if (!(notYet && autoStarted && arcadePhase === 'play')) failed = true;
+  // 게임 종료 후 선택: 결과 창이 열린 채로 퍽을 왼쪽에 2초 두면 한 번 더, 오른쪽에 두면 모드 선택
+  const forceU = (u) => page.evaluate((uu) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: 0.5 }, now); }; }, u);
+  await forceU(0.5);
+  await page.waitForTimeout(3200);
+  const centerNoop = (await page.isVisible('#panel-result')) && (await page.textContent('#btn-start')).trim() === '시작';
+  await forceU(0.15);
+  await page.waitForTimeout(900);
+  const fillPct = await page.evaluate(() => parseFloat(document.querySelector('#btn-result-again .choice-fill').style.width) || 0);
+  const dotLeft = await page.evaluate(() => parseFloat(document.querySelector('#choice-dot').style.left));
+  await page.waitForTimeout(1900);
+  const again = (await page.textContent('#btn-start')).trim() === '중지' && (await page.isHidden('#panel-result'));
+  console.log(`${centerNoop && fillPct > 5 && fillPct < 100 && Math.abs(dotLeft - 15) < 2 && again ? 'PASS' : 'FAIL'} result choice: puck left 2s -> play again (center no-op=${centerNoop}, fill ${fillPct.toFixed(0)}%, dot ${dotLeft}%)`);
+  if (!(centerNoop && again)) failed = true;
+  await page.click('#btn-start'); // 중지 -> 결과 창
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  await forceU(0.85);
+  await page.waitForTimeout(3200);
+  const toMode = (await page.isVisible('#panel-mode')) && (await page.isHidden('#panel-result')) && (await page.textContent('#btn-start')).trim() === '시작';
+  console.log(`${toMode ? 'PASS' : 'FAIL'} result choice: puck right 2s -> mode selection`);
+  if (!toMode) failed = true;
   await page.evaluate(() => { const t = window.__puckTrainer.tracker; delete t.update; });
-  await page.click('#btn-start');
-  await page.waitForTimeout(200);
-  if (await page.isVisible('#panel-result')) await page.click('[data-close="panel-result"]');
+  if (await page.isVisible('#panel-mode')) await page.click('[data-close="panel-mode"]');
   // 전면/후면 전환 버튼: 스트림 재시작, 오류 없음, 설정 저장
   await page.click('#btn-flip');
   await page.waitForTimeout(1200);

@@ -126,29 +126,42 @@
     const result = game.stop('manual');
     check('result built', result && result.items.length >= 2, result && result.items);
 
-    // 7) 장애물 모드: 타겟 위치로 퍽 이동 시 점수 증가, 콘 충돌 시 생명 감소
-    // 타겟이 움직이는 콘의 이동 범위와 겹치지 않는지 (200판 반복)
-    let unsafe = 0;
-    for (let i = 0; i < 200; i++) {
-      const g4 = new Game(null); g4.setMode('obstacle'); g4.difficulty = 'hard'; g4.start({ pos: { x: 0.5, y: 0.5 } });
-      const tg = g4.targets[0];
-      for (const c of g4.cones) { const x0 = c.moving ? c.baseX - c.amp : c.x, x1 = c.moving ? c.baseX + c.amp : c.x; const dx = tg.x - Math.min(x1, Math.max(x0, tg.x)); if (Math.hypot(dx, tg.y - c.y) < c.r + 0.03) unsafe++; }
-    }
-    check('target never spawns in a moving cone path', unsafe === 0, unsafe);
+    // 7) 퍽 피하기 서바이벌: 사방에서 직선으로 날아오는 빨간 퍽, 개수 증가, 충돌/무적, 회피 카운트
     game.setMode('obstacle');
     game.difficulty = 'normal';
-    game.start(tracker);
-    const target = game.targets[0];
-    tracker.pos = { x: target.x, y: target.y }; tracker.state = 'tracked';
-    game.update(0.033, tracker, now); now += 33;
-    check('obstacle target scores', game.score === 10 && game.stats.targets === 1, { score: game.score });
-    const cone = game.cones[0];
-    tracker.pos = { x: cone.x, y: cone.y };
-    game.update(0.033, tracker, now); now += 33;
-    check('cone hit costs life', game.lives === 2 && game.stats.hits === 1, { lives: game.lives });
-    game.update(0.033, tracker, now); now += 33;
-    check('invulnerability after hit', game.lives === 2);
-    game.stop('manual');
+    const tr7 = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', touches: 0, distance: 0, speed: 0, frames: 10, trackedFrames: 10, trackRate: 1 };
+    let t7 = 100000;
+    game.start(tr7);
+    for (let i = 0; i < 60; i++) { game.update(0.033, tr7, t7); t7 += 33; } // 2초
+    const early = game.stats.maxFlyers;
+    check('flyers spawned from the four sides', game.flyers.length >= 1 && game.flyers.every((f) => f.side >= 0 && f.side <= 3), game.flyers.length);
+    const f0 = game.flyers[0];
+    const dir0 = Math.atan2(f0.vy, f0.vx), sp0 = Math.hypot(f0.vx, f0.vy);
+    check('flyer speed within difficulty range', sp0 >= 0.35 - 1e-9 && sp0 <= 0.75 + 1e-9, sp0);
+    const x1 = f0.x, y1 = f0.y;
+    for (let i = 0; i < 10; i++) { game.update(0.033, tr7, t7); t7 += 33; }
+    const moved = Math.atan2(f0.y - y1, f0.x - x1);
+    check('flyer travels in a straight line at constant speed', Math.abs(moved - dir0) < 1e-6 && Math.abs(Math.hypot(f0.vx, f0.vy) - sp0) < 1e-9, { dir0, moved });
+    // 20초 경과 -> 동시 퍽 수 증가 (normal: 2 + floor(20/9) = 4)
+    tr7.state = 'predicted'; // 피격 없이 시간만 흐르게
+    for (let i = 0; i < 600; i++) { game.update(0.033, tr7, t7); t7 += 33; }
+    check('flyer count grows over time', game.stats.maxFlyers >= 4 && game.stats.maxFlyers > early, { early, max: game.stats.maxFlyers });
+    check('dodged pucks are counted', game.stats.dodged > 0 && game.score >= 200, { dodged: game.stats.dodged, score: game.score });
+    // 충돌: 플레이어를 날아오는 퍽 위에 둠
+    tr7.state = 'tracked';
+    const fl = game.flyers.find((f) => t7 >= f.launchAt) || game.flyers[0];
+    fl.launchAt = 0; tr7.pos = { x: fl.x, y: fl.y };
+    game.update(0.033, tr7, t7); t7 += 33;
+    check('flyer hit costs a life', game.lives === 2 && game.stats.hits === 1, { lives: game.lives });
+    const fl2 = game.flyers.find((f) => !f.hit) || fl; if (fl2) { fl2.launchAt = 0; tr7.pos = { x: fl2.x, y: fl2.y }; }
+    game.update(0.033, tr7, t7); t7 += 33;
+    check('invulnerable 1.2s after flyer hit', game.lives === 2);
+    const res7 = game.stop('manual');
+    check('survival result report', res7.items.some(([k]) => k === '생존 시간') && res7.items.some(([k]) => k === '최대 동시 퍽'), res7.items);
+    // 출발 지점은 항상 바닥 바깥, 플레이어와 0.25 이상 떨어짐
+    let badSpawn = 0;
+    for (let i = 0; i < 300; i++) { const g5 = new Game(null); g5.setMode('obstacle'); g5.difficulty = 'hard'; g5.start(tr7); const f = g5._spawnFlyer({ x: 0.5, y: 0.5 }, { flyMin: 0.5, flyMax: 1 }, 0); if (!f) continue; const outside = f.x < 0 || f.x > 1 || f.y < 0 || f.y > 1; if (!outside || Math.hypot(f.x - 0.5, f.y - 0.5) < 0.25) badSpawn++; }
+    check('flyers always spawn outside the floor away from player', badSpawn === 0, badSpawn);
 
     // 8) 수동 바닥 모드 + 거울
     settings.floorMode = 'manual';
@@ -227,11 +240,6 @@
     check('R7 reaction excludes travel time', g2.stats.times.length === 1 && g2.stats.times[0] > 0.45 && g2.stats.times[0] < 0.6 && g2.stats.travel[0] > 0.9, g2.stats);
     const res2 = g2.stop('manual');
     check('R7 result includes track rate', res2.items.some(([k]) => k === '퍽 추적률'), res2.items);
-
-    // R8) 콘이 가장자리에도 생성됨 (안전지대 제거)
-    let edge = 0;
-    for (let i = 0; i < 40; i++) { const g3 = new Game(null); g3.setMode('obstacle'); g3.difficulty = 'hard'; g3.start({ pos: { x: 0.5, y: 0.5 } }); if (g3.cones.some((c) => c.x < 0.1 || c.x > 0.9 || c.y < 0.12 || c.y > 0.88)) edge++; }
-    check('R8 cones can spawn near edges', edge > 10, edge);
 
     // R9) 손상된 저장값 검증
     const bad = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), whiteV: 'x', puckTol: 9999, puckModel: { r: -1 }, stickModel: 'orange', floorMode: 'manual', manualQuad: [[0, 0], [2, 0]], difficulty: 'nightmare', p1: '' });

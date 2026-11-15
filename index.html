@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#0b1220" />
+  <meta name="theme-color" content="#F4F1EA" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="퍽 드리블" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <title>퍽 드리블 트레이너</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght,SOFT@9..144,600..900,0..100&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@700;900&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link href="style.css" rel="stylesheet" />
 </head>
 <body>
@@ -34,20 +37,22 @@
       <!-- 상단 HUD -->
       <header id="hud" class="hud">
         <div class="hud-left">
-          <span id="hud-mode" class="hud-mode">아케이드 서바이벌</span>
+          <span id="hud-mode" class="hud-mode">아케이드</span>
           <span id="hud-instruction" class="hud-instruction"></span>
         </div>
         <div class="hud-center">
+          <span class="hud-label">Time</span>
           <span id="hud-timer" class="hud-timer">--</span>
         </div>
         <div class="hud-right">
+          <span class="hud-label">Score</span>
+          <span id="hud-combo" class="hud-combo"></span>
           <span id="hud-score" class="hud-score">0</span>
           <span id="hud-lives" class="hud-lives"></span>
-          <span id="hud-combo" class="hud-combo"></span>
         </div>
       </header>
 
-      <button id="btn-flip" class="btn-flip" aria-label="전면/후면 카메라 전환" title="카메라 전환">🔄</button>
+      <button id="btn-flip" class="btn-flip" aria-label="전면/후면 카메라 전환" title="카메라 전환"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 0 1 14.5-3.5M20 4v4h-4M20 15a8 8 0 0 1-14.5 3.5M4 20v-4h4"/></svg></button>
       <button id="btn-replace-puck" class="btn btn-primary btn-replace hidden">이 물체로 퍽 교체 (3초)</button>
 
       <!-- 영역 편집 바 -->
@@ -83,17 +88,18 @@
     <!-- 시작 화면 -->
     <div id="splash" class="panel splash">
       <div class="splash-inner">
-        <div class="logo">🏒</div>
-        <h1>퍽 드리블 트레이너</h1>
-        <p>노트북 웹캠이나 아이패드 카메라로 퍽의 위치를 실시간 추적해, 수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하는 체감형 아케이드와 드리블 훈련을 진행합니다.</p>
-        <ol class="tips">
-          <li><b>아이패드</b>: 거치대에 세워 흰 바닥(연습판)이 화면에 가득 차도록 비춥니다.</li>
-          <li><b>휴대폰</b>: 거치대에 세우고 <b>전면 카메라</b>(기본)로 자신과 바닥이 보이게 둡니다. 🔄 버튼으로 전·후면 전환. 멀리서도 퍽을 가운데 원에 3초 두면 자동 시작·재시작됩니다.</li>
-          <li><b>노트북 웹캠</b>: 노트북을 바닥 가까이 두고 화면을 뒤로 젖혀 연습 공간을 비춥니다. 흰 바닥이 없으면 설정 &gt; 게임 영역을 <b>카메라 화면 전체</b>로 바꾸고, 퍽은 밝은 색(주황 볼·연습용 퍽)을 터치로 지정하세요.</li>
-          <li>퍽은 기본 검정색으로 인식됩니다. 스틱은 블레이드에 <b>눈에 띄는 색 테이프</b>를 감으면 가장 잘 인식됩니다.</li>
-          <li><b>아무 바닥·매트에서 아무 물체나</b>: 카메라 시작 후 화면 가운데 원 안에 퍽으로 쓸 물체(공, 뚜껑, 실제 퍽…)를 놓고 3초 기다리면 자동 인식됩니다. 배경과 색만 다르면 됩니다. 흰 바닥이 없으면 카메라 화면 전체가 게임 영역이 됩니다.</li>
-          <li>바닥 위에 퍽과 같은 색의 다른 물체를 두지 마세요. 앱이 가려지거나 화면이 꺼지면 추적이 멈춥니다.</li>
-        </ol>
+        <div class="masthead"><span>by camera</span><span>iPad · Phone · Laptop</span></div>
+        <h1 class="lockup">Puck Dribble<span class="lockup-script">Trainer</span></h1>
+        <svg class="hero-art" viewBox="0 0 420 150" role="img" aria-label="스틱과 퍽 일러스트" fill="none" stroke="#161616" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M318 8 L206 112 Q196 122 180 122 L128 122" />
+          <path d="M140 122 l6 -9 M154 122 l6 -9 M168 122 l6 -9" stroke-width="2.2" />
+          <ellipse cx="86" cy="116" rx="26" ry="11" fill="#E03C31" />
+          <path d="M60 116 v9 a26 11 0 0 0 52 0 v-9" />
+          <path d="M40 106 h-16 M36 118 h-22 M40 130 h-14" stroke-width="2.4" />
+          <path d="M214 86 l10 -8 M226 100 l13 -3 M196 78 l2 -12" stroke-width="2.2" />
+          <path d="M12 144 H150 M176 144 H408" stroke-width="1.6" />
+        </svg>
+        <p class="lead">카메라 하나로 퍽을 읽는 스틱핸들링 게임 — 1분, 점수로 겨룹니다.</p>
         <form id="pin-form" class="pin-form hidden" autocomplete="off">
           <input id="pin-input" type="password" inputmode="numeric" placeholder="접속 코드" aria-label="접속 코드" />
           <button type="submit" class="btn btn-primary">확인</button>
@@ -135,13 +141,31 @@
           </div>
           <pre id="diag-info" class="diag-info"></pre>
         </div>
+        <details class="howto">
+          <summary>처음이라면 — 사용 방법</summary>
+          <ol class="tips">
+            <li><span><b>세우기</b> — 휴대폰·아이패드·노트북을 거치대에 세워 전면 카메라로 자신과 바닥이 보이게 둡니다.</span></li>
+            <li><span><b>퍽 등록</b> — 공·뚜껑·퍽 무엇이든, 화면 가운데 원 안에 3초 두면 인식됩니다. 배경과 색만 다르면 됩니다.</span></li>
+            <li><span><b>시작</b> — 등록된 퍽을 원 안에 3초 더 두면 손대지 않고 시작합니다. 끝나면 같은 방법으로 다시 시작.</span></li>
+            <li><span><b>영역</b> — 뒤쪽이 좁아 보이는 바닥은 "영역" 버튼으로 네 모서리를 맞추면 원근이 보정됩니다.</span></li>
+            <li><span><b>주의</b> — 같은 색 물체를 바닥에 두지 마세요. 화면이 가려지면 추적이 멈춥니다.</span></li>
+          </ol>
+        </details>
       </div>
     </div>
 
     <!-- 모드 선택 -->
     <div id="panel-mode" class="panel modal hidden">
       <div class="modal-card">
-        <header><h2>모드 선택</h2><button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button></header>
+        <header><h2>Mode</h2><button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button></header>
+        <div class="time-row">
+          <div id="time-seg" class="seg" role="group" aria-label="게임 시간">
+            <button type="button" data-min="1">1분</button>
+            <button type="button" data-min="3">3분</button>
+            <button type="button" data-min="5">5분</button>
+          </div>
+          <p class="muted">게임 시간 — 아케이드·퍽 피하기에 적용. 랭킹은 시간별로 따로 집계됩니다.</p>
+        </div>
         <div id="mode-list" class="mode-list"></div>
         <div class="versus-row">
           <label class="switch"><input type="checkbox" id="versus-toggle" /><span>2인 대결 (번갈아 플레이)</span></label>
@@ -156,7 +180,7 @@
     <!-- 설정 -->
     <div id="panel-settings" class="panel modal hidden">
       <div class="modal-card">
-        <header><h2>설정</h2><button class="btn btn-ghost btn-close" data-close="panel-settings">닫기</button></header>
+        <header><h2>Settings</h2><button class="btn btn-ghost btn-close" data-close="panel-settings">닫기</button></header>
         <div class="settings-grid">
           <label>카메라
             <select id="sel-camera"></select>
@@ -223,7 +247,7 @@
     <!-- 보정 -->
     <div id="panel-calib" class="panel modal hidden">
       <div class="modal-card">
-        <header><h2>인식 보정</h2><button class="btn btn-ghost btn-close" data-close="panel-calib">닫기</button></header>
+        <header><h2>Calibration</h2><button class="btn btn-ghost btn-close" data-close="panel-calib">닫기</button></header>
         <p class="muted"><b>자동 지정(추천)</b>: 버튼을 누른 뒤 퍽으로 쓸 물체(공·뚜껑·실제 퍽 등 배경과 색이 다른 것)를 화면 가운데 원 안에 놓고 3초만 기다리면 색과 크기를 스스로 학습합니다. 어떤 바닥·매트에서도 됩니다. <b>터치로 지정</b>은 화면 속 물체를 직접 터치하는 방식입니다.</p>
         <div class="calib-grid">
           <div class="calib-item">
@@ -248,9 +272,10 @@
     <!-- 랭킹 -->
     <div id="panel-rank" class="panel modal hidden">
       <div class="modal-card">
-        <header><h2>랭킹</h2><button class="btn btn-ghost btn-close" data-close="panel-rank">닫기</button></header>
+        <header><h2>Ranking</h2><button class="btn btn-ghost btn-close" data-close="panel-rank">닫기</button></header>
         <div class="rank-filters">
           <select id="rank-mode"></select>
+          <select id="rank-time" aria-label="게임 시간"></select>
           <select id="rank-age"><option value="">전체 연령</option></select>
           <select id="rank-scope">
             <option value="all">전 세계</option>

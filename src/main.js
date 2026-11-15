@@ -2,7 +2,7 @@
 import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
-import { Game, MODES } from './game.js';
+import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
 import { Renderer } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
@@ -63,6 +63,8 @@ function init() {
   setupAccessGate();
   setupAuth();
   game.difficulty = settings.difficulty;
+  game.playSeconds = settings.playMinutes * 60;
+  game.resetState();
   renderModeList();
   updateHud(true);
   if (!Camera.isSupported()) {
@@ -86,15 +88,16 @@ async function setupAuth() {
   $('#btn-logout').addEventListener('click', doLogout);
   $('#btn-settings-logout').addEventListener('click', doLogout);
   els.btnRank.addEventListener('click', () => openRank());
-  [els.rankMode, els.rankAge, els.rankScope].forEach((e) => e.addEventListener('change', () => renderRank()));
-  MODES.filter((m) => m.id !== 'free').forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.icon} ${m.name}`; els.rankMode.appendChild(o); });
+  [els.rankMode, els.rankAge, els.rankScope, $('#rank-time')].forEach((e) => e.addEventListener('change', () => renderRank()));
+  MODES.filter((m) => m.id !== 'free').forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name; els.rankMode.appendChild(o); });
+  PLAY_MINUTES.forEach((min) => { const o = document.createElement('option'); o.value = String(min * 60); o.textContent = `${min}분`; $('#rank-time').appendChild(o); });
   AGE_GROUPS.forEach((g) => { const o = document.createElement('option'); o.value = g; o.textContent = g; els.rankAge.appendChild(o); });
 
   app.account = await createAccountStore();
   window.__puckTrainer.account = app.account;
   els.authNote.textContent = app.account.kind === 'firebase'
-    ? '온라인 랭킹: 모든 기기의 기록이 함께 집계됩니다.'
-    : '이 기기 안에서 등록·랭킹이 저장됩니다 (여러 선수가 같은 기기로 경쟁 가능). 온라인 공유 랭킹은 README의 Firebase 설정 참고.';
+    ? '온라인 랭킹 — 모든 기기의 기록이 함께 집계됩니다.'
+    : '기록은 이 기기에 저장됩니다. 여러 선수가 같은 기기로 겨룰 수 있어요.';
   refreshAuthUI();
 }
 
@@ -155,13 +158,16 @@ function rankFilters() {
 async function openRank(modeId) {
   if (modeId) els.rankMode.value = modeId;
   else if (game.mode.id !== 'free') els.rankMode.value = game.mode.id;
+  $('#rank-time').value = String(game.playSeconds);
   open(els.panelRank);
   await renderRank();
 }
 
 async function renderRank() {
   if (!app.account) return;
-  const mode = els.rankMode.value;
+  const timed = MODES.find((m) => m.id === els.rankMode.value)?.timed;
+  $('#rank-time').classList.toggle('hidden', !timed);
+  const mode = rankKey(els.rankMode.value, Number($('#rank-time').value) || 60); // 시간제 모드는 시간별 랭킹
   const u = app.account.current();
   els.rankBody.innerHTML = '<tr><td colspan="6" class="muted">불러오는 중…</td></tr>';
   try {
@@ -182,13 +188,14 @@ async function submitResult(result) {
   const u = app.account?.current();
   if (!u || result.mode.id === 'free' || result.reason === 'manual' || app.versus) return;
   try {
-    const { best, improved } = await app.account.submitScore(result.mode.id, result.score);
-    const all = await app.account.myRank(result.mode.id, {});
-    const age = await app.account.myRank(result.mode.id, { ageGroup: u.ageGroup });
+    const key = result.rankKey || result.mode.id;
+    const { best, improved } = await app.account.submitScore(key, result.score);
+    const all = await app.account.myRank(key, {});
+    const age = await app.account.myRank(key, { ageGroup: u.ageGroup });
     const parts = [];
     if (all) parts.push(`전체 ${all.rank}위/${all.total}명`);
     if (age) parts.push(`${u.ageGroup} ${age.rank}위/${age.total}명`);
-    els.resultRank.innerHTML = `${improved ? '🏆 개인 최고 기록 갱신!' : `개인 최고 ${best}점`} · ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
+    els.resultRank.innerHTML = `<span class="script">${improved ? 'New best!' : `best ${best}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
     els.resultRank.classList.remove('hidden');
     $('#btn-result-rank').addEventListener('click', () => { close(els.panelResult); openRank(result.mode.id); });
   } catch (err) {
@@ -225,6 +232,12 @@ function bindUI() {
   $('#area-full').addEventListener('click', () => { settings.floorMode = 'full'; $('#set-floorMode').value = 'full'; applyFloorMode(); persist(); toast('카메라 화면 전체가 게임 영역입니다'); endAreaEdit(false); });
   $('#area-reset').addEventListener('click', () => { settings.manualQuad = defaultTrapezoid(); positionHandles(); persist(); });
   els.btnFlip.addEventListener('click', flipCamera);
+  $$('#time-seg button').forEach((b) => b.addEventListener('click', () => {
+    if (game.running) game.stop('manual');
+    settings.playMinutes = Number(b.dataset.min); persist();
+    game.playSeconds = settings.playMinutes * 60; game.resetState();
+    renderModeList(); updateHud();
+  }));
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
   $$('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) close(m); }));
@@ -479,7 +492,7 @@ function loop(now) {
 
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, autoStart: settings.autoStart, calib: app.calib, areaEditing: app.areaEditing });
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing });
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
@@ -560,20 +573,21 @@ function updateHud(force) {
   const who = app.account?.current();
   els.hudMode.textContent = game.mode.name + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
   els.hudInstruction.textContent = game.running ? game.instruction : (app.started ? '시작을 누르세요' : '');
-  if (game.mode.duration > 0) {
-    const t = game.running ? game.timeLeft : game.mode.duration;
-    els.hudTimer.textContent = `${Math.floor(t / 60)}:${String(Math.ceil(t % 60)).padStart(2, '0')}`;
-    if (game.running && t <= 5) els.hudTimer.style.color = '#f59e0b'; else els.hudTimer.style.color = '';
+  $('#app').classList.toggle('playing', game.running);
+  if (game.limit > 0) {
+    const t = Math.ceil(game.running ? game.timeLeft : game.limit);
+    els.hudTimer.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    els.hudTimer.classList.toggle('urgent', game.running && t <= 5);
   } else {
+    els.hudTimer.classList.remove('urgent');
     const e = game.running ? game.elapsed : 0;
     els.hudTimer.textContent = `${Math.floor(e / 60)}:${String(Math.floor(e % 60)).padStart(2, '0')}`;
   }
   els.hudScore.textContent = String(game.score);
-  els.hudLives.textContent = game.lives > 0 ? '❤️'.repeat(game.lives) : '';
+  els.hudLives.textContent = game.running && game.mode.timed && game.hits > 0 ? `충돌 ${game.hits}` : '';
   if (game.mode.id === 'arcade' && game.running) {
     const a = game.arcade;
-    els.hudCombo.textContent = a.combo > 0 ? `COMBO ${a.combo}  ×${a.multiplier}` : '';
-    els.hudCombo.className = 'hud-combo' + (a.combo >= 20 ? ' fever' : a.combo >= 10 ? ' gold' : '');
+    els.hudCombo.textContent = a.combo >= 2 ? `combo ${a.combo}${a.multiplier > 1 ? ` ×${a.multiplier}` : ''}` : '';
   } else els.hudCombo.textContent = '';
   els.btnStart.textContent = game.running ? '중지' : '시작';
   els.btnStart.classList.toggle('stop', game.running);
@@ -608,7 +622,7 @@ function startRun(opts = {}) {
   app.calib.active = false;
   if (!app.lastVision?.floor?.mapping) { toast('바닥이 인식되지 않았습니다. 흰 바닥이 보이게 카메라를 조정하거나 설정에서 수동 지정하세요.'); return; }
   if (settings.controller === 'stick' && !settings.stickModel) { toast('조작 대상이 스틱입니다. 보정에서 스틱 색을 먼저 지정하세요.'); return; }
-  if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(주황 마름모)된 뒤 시작하세요.' : '퍽을 바닥 위에 놓아 인식(파란 원)된 뒤 시작하세요.'); }
+  if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(마름모 표시)된 뒤 시작하세요.' : '퍽이 인식(빨간 점 표시)된 뒤 시작하세요.'); }
   tracker.resetStats();
   game.start(tracker, opts);
   updateHud();
@@ -616,18 +630,18 @@ function startRun(opts = {}) {
 
 game.onEnd = (result) => {
   app.lastResult = result;
-  const isBest = result.mode.id !== 'free' && result.reason !== 'manual' ? saveBest(result.mode.id, result.score) : false;
+  const isBest = result.mode.id !== 'free' && result.reason !== 'manual' ? saveBest(result.rankKey || result.mode.id, result.score) : false;
   showResult(result, isBest);
   submitResult(result);
   updateHud();
 };
 
 function showResult(result, isBest) {
-  let title = `${result.mode.name} 결과`;
-  if (result.reason === 'lives') title = '생명 소진!';
+  let title = result.mode.timed ? `${result.mode.name} · ${Math.round(result.limit / 60)}분` : result.mode.name;
+  if (result.reason === 'time') title += ' — Time up';
   const body = [];
-  if (isBest) body.push(`<div class="stat full winner"><small>신기록</small><b>🏆 ${result.score}</b></div>`);
-  for (const [k, v] of result.items) body.push(`<div class="stat"><small>${k}</small><b>${v}</b></div>`);
+  if (isBest) body.push(`<div class="stat full winner"><small>New best</small><b>${result.score}</b></div>`);
+  for (const [k, v] of result.items) { if (isBest && k === '점수') continue; body.push(`<div class="stat"><small>${k}</small><b>${v}</b></div>`); }
 
   if (app.versus) {
     const vs = app.versus;
@@ -661,11 +675,14 @@ function showResult(result, isBest) {
 function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
-  for (const m of MODES) {
+  $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
+  MODES.forEach((m, i) => {
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
-    const best = scores[m.id] !== undefined ? `<div class="best">최고 기록: ${scores[m.id]}</div>` : '';
-    card.innerHTML = `<b>${m.icon} ${m.name}${m.duration ? ` <small style="display:inline">· ${m.duration}초</small>` : ''}</b><small>${m.desc}</small>${best}`;
+    const key = rankKey(m.id, game.playSeconds);
+    const best = scores[key] !== undefined ? `<span class="best">best ${scores[key]}</span>` : '';
+    const time = m.timed ? `${settings.playMinutes}분` : m.duration ? `${m.duration}초` : '자유';
+    card.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span><span class="time">${time}</span><b>${m.name}</b><em>${m.en}</em><small>${m.desc}</small>${best}`;
     card.addEventListener('click', () => {
       if (game.running) game.stop('manual');
       game.setMode(m.id);
@@ -678,7 +695,7 @@ function renderModeList() {
       toast(`${m.name} 선택됨`);
     });
     els.modeList.appendChild(card);
-  }
+  });
   els.p1.value = settings.p1; els.p2.value = settings.p2;
 }
 

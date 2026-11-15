@@ -1,5 +1,6 @@
-// 오버레이 캔버스 렌더링
+// 오버레이 캔버스 렌더링 — 영상 위에 얇은 잉크 선(종이색 헤일로)과 알약 라벨, 포인트 레드
 import { PUCK_R, FLYER_R } from './game.js';
+import { C, F, rgba, inkStroke, text, pill, sparks } from './theme.js';
 
 export class Renderer {
   constructor(canvas) {
@@ -18,7 +19,7 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, autoStart = false, calib = null, areaEditing = false }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false }) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
@@ -27,131 +28,60 @@ export class Renderer {
     const floor = vision?.floor;
     const mapping = floor?.mapping;
     const uvToC = (u, v) => { const [px, py] = mapping.toPx(u, v); return toC(px, py); };
-    const unit = Math.min(W, H); // 크기 기준
-    const fontPx = Math.round(unit * 0.035);
+    const unit = Math.min(W, H);                 // 크기 기준
+    const fs = Math.max(11 * this.dpr, unit * 0.03);        // 본문 글자 (CSS 11px 이상)
+    const hair = Math.max(1.2 * this.dpr * 0.75, unit * 0.0022);   // 기본 선 굵기
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
-    // ---- 바닥 ----
-    if (floor?.polygon?.length > 2 && floor.mode === 'auto') {
-      ctx.beginPath();
-      floor.polygon.forEach(([x, y], i) => { const [cx, cy] = toC(x, y); i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy); });
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(56,189,248,0.06)';
-      ctx.fill();
-    }
+    // ---- 게임 영역 ----
     if (floor?.quad) {
+      const full = floor.mode === 'full' || floor.fallback;
       ctx.beginPath();
       floor.quad.forEach(([x, y], i) => { const [cx, cy] = toC(x, y); i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy); });
       ctx.closePath();
-      const full = floor.mode === 'full' || floor.fallback;
-      ctx.lineWidth = unit * (full ? 0.003 : 0.005);
-      ctx.setLineDash(floor.locked || floor.mode !== 'auto' || full ? [] : [unit * 0.02, unit * 0.012]);
-      ctx.strokeStyle = full ? 'rgba(56,189,248,0.35)' : floor.detected ? 'rgba(56,189,248,0.9)' : 'rgba(245,158,11,0.9)';
-      ctx.stroke();
-      ctx.setLineDash([]);
+      if (full) { ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.25); ctx.stroke(); }
+      else {
+        ctx.setLineDash(floor.locked || floor.mode !== 'auto' ? [] : [unit * 0.018, unit * 0.012]);
+        inkStroke(ctx, hair * 1.3, floor.detected ? C.ink : C.red);
+        ctx.setLineDash([]);
+      }
     }
-    // 원근 격자: 영역 편집 중에는 진하게, 평소 사다리꼴/흰 바닥 모드에서는 은은하게
+    // 원근 격자: 영역 편집 중에는 또렷하게, 평소에는 은은하게
     if (mapping && (areaEditing || floor.mode === 'manual' || (floor.mode === 'auto' && !floor.fallback))) {
       const strong = areaEditing;
-      ctx.lineWidth = unit * (strong ? 0.003 : 0.0015);
-      ctx.strokeStyle = strong ? 'rgba(56,189,248,0.75)' : 'rgba(56,189,248,0.22)';
       const N = strong ? 6 : 4;
+      ctx.lineWidth = strong ? hair : hair * 0.6; ctx.strokeStyle = rgba(C.ink, strong ? 0.55 : 0.16);
       for (let i = 1; i < N; i++) {
         const t = i / N;
         ctx.beginPath(); let [ax, ay] = uvToC(t, 0); ctx.moveTo(ax, ay); [ax, ay] = uvToC(t, 1); ctx.lineTo(ax, ay); ctx.stroke();
         ctx.beginPath(); [ax, ay] = uvToC(0, t); ctx.moveTo(ax, ay); [ax, ay] = uvToC(1, t); ctx.lineTo(ax, ay); ctx.stroke();
       }
       if (strong) {
-        ctx.font = `700 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center';
-        ctx.lineWidth = unit * 0.006; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.fillStyle = '#fff';
-        let [tx, ty] = uvToC(0.5, 0); ctx.textBaseline = 'bottom'; ctx.strokeText('뒤쪽 (멀리) — 좁게', tx, ty - unit * 0.01); ctx.fillText('뒤쪽 (멀리) — 좁게', tx, ty - unit * 0.01);
-        [tx, ty] = uvToC(0.5, 1); ctx.textBaseline = 'top'; ctx.strokeText('앞쪽 (카메라) — 넓게', tx, ty + unit * 0.01); ctx.fillText('앞쪽 (카메라) — 넓게', tx, ty + unit * 0.01);
-        // 퍽의 바닥 좌표 표시 (원근 보정 확인용)
-        if (puck.pos) { const [px, py] = uvToC(puck.pos.x, puck.pos.y); ctx.font = `${Math.round(fontPx * 0.8)}px system-ui`; ctx.textBaseline = 'bottom'; const t2 = `퍽 바닥 좌표 (${puck.pos.x.toFixed(2)}, ${puck.pos.y.toFixed(2)})`; ctx.strokeText(t2, px, py - unit * 0.03); ctx.fillText(t2, px, py - unit * 0.03); }
+        let [tx, ty] = uvToC(0.5, 0); pill(ctx, '뒤쪽 · 멀리 — 좁게', tx, ty - fs * 1.4, fs * 0.85);
+        [tx, ty] = uvToC(0.5, 1); pill(ctx, '앞쪽 · 카메라 — 넓게', tx, ty - fs * 1.4, fs * 0.85);
+        if (puck.pos) { const [px, py] = uvToC(puck.pos.x, puck.pos.y); pill(ctx, `바닥 좌표 ${puck.pos.x.toFixed(2)}, ${puck.pos.y.toFixed(2)}`, px, py - fs * 2.2, fs * 0.8, { bg: C.ink, fg: C.paper, border: null }); }
       }
     }
 
-    // 자동 물체 지정 (가운데 원에 3초)
-    if (calib?.active) {
-      const c = vision && calib.circle;
-      if (c) {
-        const [cx, cy] = toC(c.x, c.y); const r = c.r * sx;
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(2,6,23,0.25)'; ctx.fill();
-        const starting = calib.status === 'puck';
-        const mismatch = calib.status === 'mismatch';
-        ctx.setLineDash(starting ? [] : [unit * 0.015, unit * 0.01]); ctx.lineWidth = unit * 0.006;
-        ctx.strokeStyle = starting ? '#38bdf8' : mismatch ? '#ef4444' : (calib.status === 'ok' || calib.status === 'refresh') ? '#22c55e' : '#f59e0b'; ctx.stroke(); ctx.setLineDash([]);
-        if (mismatch && calib.registered) {
-          // 등록된 퍽 색 견본
-          const m = calib.registered;
-          ctx.beginPath(); ctx.arc(cx + r * 1.45, cy - r * 0.9, unit * 0.02, 0, Math.PI * 2); ctx.fillStyle = `rgb(${m.r},${m.g},${m.b})`; ctx.fill();
-          ctx.lineWidth = unit * 0.004; ctx.strokeStyle = '#fff'; ctx.stroke();
-          ctx.font = `${Math.round(fontPx * 0.7)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff';
-          ctx.fillText('등록된 퍽', cx + r * 1.45, cy - r * 0.9 + unit * 0.028);
-        }
-        const prog = starting ? idleHold / 3 : calib.hold / 3;
-        if (prog > 0) {
-          ctx.beginPath(); ctx.arc(cx, cy, r * 1.15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, prog));
-          ctx.lineWidth = unit * 0.012; ctx.strokeStyle = starting ? '#38bdf8' : '#22c55e'; ctx.stroke();
-          ctx.font = `800 ${fontPx * 3}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.lineWidth = unit * 0.01; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; const num = String(Math.max(1, Math.ceil(3 - prog * 3)));
-          ctx.strokeText(num, cx, cy); ctx.fillStyle = '#fff'; ctx.fillText(num, cx, cy);
-        }
-        if (calib.sample?.status === 'ok') {
-          const [ox, oy] = toC(calib.sample.cx, calib.sample.cy);
-          ctx.beginPath(); ctx.arc(ox, oy, unit * 0.012, 0, Math.PI * 2); ctx.fillStyle = `rgb(${calib.sample.r},${calib.sample.g},${calib.sample.b})`; ctx.fill();
-          ctx.lineWidth = unit * 0.003; ctx.strokeStyle = '#fff'; ctx.stroke();
-        }
-        const label = starting ? `퍽 인식됨 · ${Math.max(1, Math.ceil(3 - idleHold))}초 후 시작`
-          : mismatch ? '등록된 퍽과 다른 물체입니다'
-          : calib.status === 'refresh' ? `등록된 퍽 다시 인식 중… ${Math.max(0, 3 - calib.hold).toFixed(1)}초`
-          : calib.status === 'too_big' ? '물체가 너무 큽니다. 카메라에서 더 멀리'
-          : calib.status === 'ok' ? `퍽 등록 중… ${Math.max(0, 3 - calib.hold).toFixed(1)}초 가만히`
-          : calib.sample?.scattered ? '바닥 무늬만 보입니다. 물체를 원 안에 놓으세요'
-          : (calib.target === 'stick' ? '스틱 블레이드(테이프)를 원 안에 놓으세요' : '퍽으로 쓸 물체(공·뚜껑·퍽)를 원 안에 놓으세요');
-        ctx.font = `700 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.lineWidth = unit * 0.008; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(label, cx, cy - r * 1.3);
-        ctx.fillStyle = '#fff'; ctx.fillText(label, cx, cy - r * 1.3);
-        ctx.font = `${Math.round(fontPx * 0.8)}px system-ui, sans-serif`; ctx.textBaseline = 'top';
-        const sub = calib.manual ? '배경과 색이 다르면 무엇이든 됩니다 · 화면을 터치하면 취소'
-          : starting ? '움직이면 취소됩니다'
-          : mismatch ? '등록된 퍽을 놓으세요 · 바꾸려면 아래 "이 물체로 퍽 교체"'
-          : calib.registered ? '등록된 퍽을 원 안에 3초 두면 시작' : '배경과 색이 다른 물체면 무엇이든 됩니다 · 등록 후 3초 더 두면 시작';
-        ctx.strokeText(sub, cx, cy + r * 1.3); ctx.fillStyle = '#e5e7eb'; ctx.fillText(sub, cx, cy + r * 1.3);
-      }
+    // ---- 가운데 원: 물체 등록 / 핸즈프리 시작 ----
+    if (calib?.active && calib.circle) {
+      this._drawCalib(ctx, calib, toC, sx, unit, fs, hair, idleHold);
+      if (mapping && !calib.manual) { this._drawStick(ctx, vision.stick, toC, unit, hair); this._drawPuck(ctx, puck, uvToC, unit, hair, now, PUCK_R * this._floorPx(uvToC)); }
       return;
     }
 
     if (!mapping) return;
 
-    // 아케이드: 화면 공간 렌더 (바닥 사각형 위 오브젝트 대신)
+    // ---- 아케이드: 화면 공간 렌더 ----
     if (game.mode.id === 'arcade') {
-      // 실제 퍽 위치를 작은 점으로 표시해 매핑 관계를 보여줌
-      if (vision.puck) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.006, 0, Math.PI * 2); ctx.fillStyle = 'rgba(56,189,248,0.8)'; ctx.fill(); }
       game.arcade.draw(ctx, W, H, now, puck);
+      // 실제 퍽 위치를 작은 고리로 표시해 매핑 관계를 보여줌
+      if (vision.puck) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.012, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.7); ctx.stroke(); }
       return;
     }
 
-    const floorPxW = Math.hypot(...sub(uvToC(1, 0.5), uvToC(0, 0.5))); // 캔버스 상 바닥 폭
+    const floorPxW = this._floorPx(uvToC);
     const R = (r) => r * floorPxW; // 정규화 반지름 -> 캔버스 px (가로 기준)
-
-    // 핸즈프리 시작 원 (대기 중)
-    if (!game.running && autoStart) {
-      const [cx, cy] = uvToC(0.5, 0.5);
-      const r = R(0.1);
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(34,197,94,0.12)'; ctx.fill();
-      ctx.lineWidth = unit * 0.005; ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.stroke();
-      if (idleHold > 0) {
-        ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.2, r * 0.72, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, idleHold / 3));
-        ctx.lineWidth = unit * 0.01; ctx.strokeStyle = '#22c55e'; ctx.stroke();
-      }
-      ctx.font = `600 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.lineWidth = unit * 0.006; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-      const label = idleHold > 0 ? String(Math.ceil(3 - idleHold)) : '퍽을 원 안에 3초 두면 시작';
-      ctx.strokeText(label, cx, cy - r * 0.8); ctx.fillStyle = '#fff'; ctx.fillText(label, cx, cy - r * 0.8);
-    }
 
     // ---- 구역 ----
     for (const z of game.zones) {
@@ -160,154 +90,95 @@ export class Renderer {
       corners.forEach(([u, v], i) => { const [cx, cy] = uvToC(clamp01(u), clamp01(v)); i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy); });
       ctx.closePath();
       const pulse = 0.5 + 0.5 * Math.sin(now / 250);
-      if (z.warn) { ctx.fillStyle = 'rgba(239,68,68,0.18)'; ctx.strokeStyle = 'rgba(239,68,68,0.9)'; }
-      else if (z.active) { ctx.fillStyle = `rgba(34,197,94,${0.12 + 0.1 * pulse})`; ctx.strokeStyle = 'rgba(34,197,94,0.95)'; }
-      else { ctx.fillStyle = 'rgba(148,163,184,0.06)'; ctx.strokeStyle = 'rgba(148,163,184,0.5)'; }
-      ctx.fill(); ctx.lineWidth = unit * 0.005; ctx.stroke();
+      if (z.warn) { ctx.fillStyle = rgba(C.red, 0.16); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); inkStroke(ctx, hair * 1.6, C.red); ctx.setLineDash([]); }
+      else if (z.active) { ctx.fillStyle = rgba(C.red, 0.1 + 0.08 * pulse); ctx.fill(); inkStroke(ctx, hair * 1.8, C.red); }
+      else { ctx.fillStyle = rgba(C.paper, 0.22); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); inkStroke(ctx, hair, C.ink); ctx.setLineDash([]); }
     }
 
-    // ---- 8자 게이트 ----
+    // ---- 8자 게이트: 종이 원반 + 세리프 숫자, 다음 게이트는 레드 ----
     game.waypoints.forEach((wp, i) => {
       const [cx, cy] = uvToC(wp.x, wp.y);
       const isNext = i === game.wpIndex;
-      const r = R(0.09) * (isNext ? 1 + 0.08 * Math.sin(now / 180) : 0.8);
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = isNext ? 'rgba(34,197,94,0.25)' : 'rgba(148,163,184,0.08)';
-      ctx.fill();
-      ctx.lineWidth = unit * 0.004;
-      ctx.strokeStyle = isNext ? '#22c55e' : 'rgba(148,163,184,0.5)';
-      ctx.stroke();
-      ctx.fillStyle = isNext ? '#fff' : 'rgba(226,232,240,0.6)';
-      ctx.font = `700 ${fontPx}px system-ui, sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(i + 1), cx, cy);
+      const r = R(0.075) * (isNext ? 1 + 0.06 * Math.sin(now / 180) : 0.82);
+      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.62, 0, 0, Math.PI * 2);
+      ctx.fillStyle = isNext ? C.red : rgba(C.paper, 0.85); ctx.fill();
+      ctx.lineWidth = hair * 1.2; ctx.strokeStyle = C.ink; ctx.stroke();
+      text(ctx, String(i + 1), cx, cy + fs * 0.05, fs * (isNext ? 1.25 : 1), { family: F.display, weight: 900, color: isNext ? C.paper : C.ink, halo: false });
     });
 
-    // ---- 타겟 ----
+    // ---- 타겟: 잉크 동심원 + 레드 중심 ----
     for (const t of game.targets) {
       const [cx, cy] = uvToC(t.x, t.y);
       const age = (now - t.born) / 1000;
-      const r = R(t.r) * (1 + 0.06 * Math.sin(age * 6));
-      ctx.lineWidth = unit * 0.006;
-      for (let k = 0; k < 3; k++) {
-        const rr = r * (1 - k * 0.3);
-        ctx.beginPath(); ctx.ellipse(cx, cy, rr, rr * 0.6, 0, 0, Math.PI * 2);
-        ctx.strokeStyle = k === 1 ? 'rgba(255,255,255,0.9)' : 'rgba(34,197,94,0.95)';
-        ctx.stroke();
-      }
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(34,197,94,0.12)'; ctx.fill();
+      const r = R(t.r) * (1 + 0.05 * Math.sin(age * 6));
+      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.62, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(C.paper, 0.45); ctx.fill(); inkStroke(ctx, hair * 1.4);
+      ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.62, r * 0.62 * 0.62, 0, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.22, r * 0.22 * 0.62, 0, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
     }
 
-    // ---- 콘 ----
+    // ---- 콘: 잉크 삼각형 + 종이 띠 ----
     for (const c of game.cones) {
       const [cx, cy] = uvToC(c.x, c.y);
-      const r = R(c.r);
+      const r = R(c.r), h = r * 2.2;
       const hit = now < c.hitUntil;
-      const h = r * 2.2;
-      // 그림자/베이스
-      ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.15, r * 0.6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
-      // 본체
-      const grad = ctx.createLinearGradient(cx - r, cy, cx + r, cy);
-      grad.addColorStop(0, hit ? '#fca5a5' : '#fb923c');
-      grad.addColorStop(0.5, hit ? '#ef4444' : '#f97316');
-      grad.addColorStop(1, hit ? '#b91c1c' : '#c2410c');
-      ctx.beginPath();
-      ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.lineTo(cx + r * 0.12, cy - h); ctx.lineTo(cx - r * 0.12, cy - h);
-      ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.45, 0, 0, Math.PI); ctx.fillStyle = hit ? '#b91c1c' : '#c2410c'; ctx.fill();
-      // 띠
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillRect(cx - r * 0.55, cy - h * 0.55, r * 1.1, h * 0.12);
-      // 충돌 반경(은은하게)
-      ctx.beginPath(); ctx.ellipse(cx, cy, R(c.r + PUCK_R), R(c.r + PUCK_R) * 0.6, 0, 0, Math.PI * 2);
-      ctx.strokeStyle = hit ? 'rgba(239,68,68,0.8)' : 'rgba(251,146,60,0.25)'; ctx.lineWidth = unit * 0.003; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.25, r * 0.5, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(C.paper, 0.6); ctx.fill(); ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - r * 0.85, cy); ctx.lineTo(cx + r * 0.85, cy); ctx.lineTo(cx + r * 0.14, cy - h); ctx.lineTo(cx - r * 0.14, cy - h); ctx.closePath();
+      ctx.fillStyle = hit ? C.red : C.ink; ctx.fill();
+      ctx.fillStyle = C.paper; ctx.fillRect(cx - r * 0.5, cy - h * 0.55, r, h * 0.12);
     }
 
-    // ---- 날아오는 빨간 퍽 (퍽 피하기 서바이벌) ----
+    // ---- 날아오는 퍽 (퍽 피하기): 레드 원반 + 잉크 외곽선 + 속도선 ----
     for (const f of game.flyers || []) {
+      const ang = Math.atan2(f.vy, f.vx);
       if (now < f.launchAt) {
-        // 출발 지점 경고: 바닥 가장자리에 깜빡이는 삼각형
+        // 출발 지점 경고: 가장자리의 레드 삼각형
         const ex = Math.min(0.99, Math.max(0.01, f.x)), ey = Math.min(0.99, Math.max(0.01, f.y));
         const [cx, cy] = uvToC(ex, ey);
-        const ang = Math.atan2(f.vy, f.vx);
-        const blink = 0.5 + 0.5 * Math.sin(now / 60);
-        const sz = unit * 0.03;
+        const sz = unit * 0.026;
         ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
-        ctx.beginPath(); ctx.moveTo(sz, 0); ctx.lineTo(-sz * 0.7, -sz * 0.7); ctx.lineTo(-sz * 0.7, sz * 0.7); ctx.closePath();
-        ctx.fillStyle = `rgba(239,68,68,${0.35 + 0.6 * blink})`; ctx.fill();
-        ctx.lineWidth = unit * 0.003; ctx.strokeStyle = '#fff'; ctx.stroke();
+        ctx.globalAlpha = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(now / 60));
+        ctx.beginPath(); ctx.moveTo(sz, 0); ctx.lineTo(-sz * 0.7, -sz * 0.72); ctx.lineTo(-sz * 0.7, sz * 0.72); ctx.closePath();
+        ctx.fillStyle = C.red; ctx.fill(); ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
         ctx.restore();
         continue;
       }
       const [cx, cy] = uvToC(f.x, f.y);
       if (cx < -W * 0.2 || cx > W * 1.2 || cy < -H * 0.2 || cy > H * 1.2) continue;
       const r = R(FLYER_R);
-      // 속도 방향 잔상
-      const [tx, ty] = uvToC(f.x - f.vx * 0.12, f.y - f.vy * 0.12);
-      const g = ctx.createLinearGradient(tx, ty, cx, cy);
-      g.addColorStop(0, 'rgba(239,68,68,0)'); g.addColorStop(1, 'rgba(239,68,68,0.55)');
-      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(cx, cy);
-      ctx.strokeStyle = g; ctx.lineWidth = r * 1.2; ctx.stroke();
-      // 본체
-      ctx.beginPath(); ctx.ellipse(cx, cy + r * 0.18, r, r * 0.7, 0, 0, Math.PI * 2); ctx.fillStyle = '#7f1d1d'; ctx.fill();
-      const rg = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 0.1, cx, cy, r);
-      rg.addColorStop(0, '#fca5a5'); rg.addColorStop(0.5, '#ef4444'); rg.addColorStop(1, '#991b1b');
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.7, 0, 0, Math.PI * 2); ctx.fillStyle = rg; ctx.fill();
-      ctx.lineWidth = unit * 0.003; ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.stroke();
-      if (f.hit) { ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.5, r * 1.05, 0, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(239,68,68,0.6)'; ctx.stroke(); }
+      // 속도선: 진행 반대 방향의 짧은 잉크 선 세 개
+      const [tx, ty] = uvToC(f.x - f.vx * 0.1, f.y - f.vy * 0.1);
+      const dx = tx - cx, dy = ty - cy, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+      ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.75);
+      for (const k of [-0.55, 0, 0.55]) {
+        const ox = nx * r * k, oy = ny * r * k * 0.72, s0 = 1.25, s1 = k === 0 ? 2.3 : 1.8;
+        ctx.beginPath(); ctx.moveTo(cx + ox + (dx / len) * r * s0, cy + oy + (dy / len) * r * s0); ctx.lineTo(cx + ox + (dx / len) * r * s1, cy + oy + (dy / len) * r * s1); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.72, 0, 0, Math.PI * 2);
+      ctx.fillStyle = f.hit ? rgba(C.red, 0.35) : C.red; ctx.fill();
+      inkStroke(ctx, hair * 1.3, C.ink, 1.6);
     }
 
-    // ---- 스틱 ----
-    const stick = vision.stick;
-    if (stick) {
-      const [cx, cy] = toC(stick.x, stick.y);
-      const s = unit * 0.022;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath();
-      ctx.fillStyle = 'rgba(245,158,11,0.35)'; ctx.fill();
-      ctx.lineWidth = unit * 0.004; ctx.strokeStyle = '#f59e0b'; ctx.stroke();
-      const [bx0, by0] = toC(stick.bbox[0], stick.bbox[1]);
-      const [bx1, by1] = toC(stick.bbox[2] + 1, stick.bbox[3] + 1);
-      ctx.setLineDash([unit * 0.01, unit * 0.008]);
-      ctx.strokeStyle = 'rgba(245,158,11,0.5)'; ctx.lineWidth = unit * 0.002;
-      ctx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
-      ctx.setLineDash([]);
-    }
+    this._drawStick(ctx, vision.stick, toC, unit, hair);
 
-    // ---- 퍽 궤적 ----
+    // ---- 퍽 궤적 + 마커 ----
     if (puck.trail.length > 1) {
       for (let i = 1; i < puck.trail.length; i++) {
         const a = puck.trail[i - 1], b = puck.trail[i];
-        const alpha = Math.max(0, 1 - (now - b.t) / 900) * 0.7;
+        const alpha = Math.max(0, 1 - (now - b.t) / 900) * 0.6;
         if (alpha <= 0) continue;
         const [ax, ay] = uvToC(a.x, a.y), [bx, by] = uvToC(b.x, b.y);
         ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
-        ctx.strokeStyle = `rgba(56,189,248,${alpha})`; ctx.lineWidth = unit * 0.006 * (i / puck.trail.length) + 1;
-        ctx.stroke();
+        ctx.strokeStyle = rgba(C.red, alpha); ctx.lineWidth = hair * 1.4; ctx.stroke();
       }
     }
-
-    // ---- 퍽 ----
-    if (puck.pos) {
-      const [cx, cy] = uvToC(puck.pos.x, puck.pos.y);
-      const r = Math.max(unit * 0.012, R(PUCK_R));
-      const predicted = puck.state === 'predicted';
-      ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.9, r * 1.9 * 0.7, 0, 0, Math.PI * 2);
-      ctx.fillStyle = predicted ? 'rgba(245,158,11,0.18)' : 'rgba(56,189,248,0.22)'; ctx.fill();
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.7, 0, 0, Math.PI * 2);
-      ctx.lineWidth = unit * 0.005; ctx.strokeStyle = predicted ? '#f59e0b' : '#38bdf8'; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx, cy, unit * 0.004, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
-    }
+    this._drawPuck(ctx, puck, uvToC, unit, hair, now, R(PUCK_R));
 
     // ---- 디버그: 퍽 후보 ----
     if (showCandidates && vision.puckCandidates) {
-      ctx.font = `${Math.round(fontPx * 0.6)}px system-ui`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
       for (const c of vision.puckCandidates) {
         const [x0, y0] = toC(c.minx, c.miny), [x1, y1] = toC(c.maxx + 1, c.maxy + 1);
-        ctx.strokeStyle = 'rgba(239,68,68,0.8)'; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-        ctx.fillStyle = '#fca5a5'; ctx.fillText(`${c.area} ${c.score.toFixed(2)}`, x0, y0 - 2);
+        ctx.strokeStyle = C.red; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        text(ctx, `${c.area} · ${c.score.toFixed(2)}`, x0, y0 - 3, fs * 0.6, { weight: 500, color: C.ink, align: 'left', baseline: 'bottom' });
       }
     }
 
@@ -315,21 +186,91 @@ export class Renderer {
     for (const e of game.effects) {
       if (e.type === 'pop') {
         const [cx, cy] = uvToC(clamp01(e.x), clamp01(e.y));
-        const a = 1 - e.age;
-        ctx.globalAlpha = a;
-        ctx.font = `800 ${Math.round(fontPx * 1.3)}px system-ui, sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.lineWidth = unit * 0.008; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-        ctx.strokeText(e.text, cx, cy - e.age * unit * 0.08);
-        ctx.fillStyle = e.color; ctx.fillText(e.text, cx, cy - e.age * unit * 0.08);
+        ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
+        const script = e.style === 'script';
+        text(ctx, e.text, cx, cy - e.age * unit * 0.07, script ? fs * 2.6 : fs * 1.35, { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color });
         ctx.globalAlpha = 1;
       } else if (e.type === 'flash') {
-        ctx.fillStyle = `rgba(239,68,68,${0.35 * (1 - e.age)})`;
-        ctx.fillRect(0, 0, W, H);
+        const bw = unit * 0.016;
+        ctx.lineWidth = bw; ctx.strokeStyle = rgba(C.red, 1 - e.age); ctx.strokeRect(bw / 2, bw / 2, W - bw, H - bw);
       }
     }
   }
+
+  _floorPx(uvToC) { const a = uvToC(1, 0.5), b = uvToC(0, 0.5); return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+  /** 퍽 마커: 종이 헤일로 + 잉크 고리 + 레드 중심점 */
+  _drawPuck(ctx, puck, uvToC, unit, hair, now, rFloor) {
+    if (!puck.pos) return;
+    const [cx, cy] = uvToC(puck.pos.x, puck.pos.y);
+    const r = Math.max(unit * 0.02, rFloor * 1.5);
+    const predicted = puck.state === 'predicted';
+    ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.72, 0, 0, Math.PI * 2);
+    if (predicted) ctx.setLineDash([hair * 3, hair * 3]);
+    inkStroke(ctx, hair * 1.5, C.ink);
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(cx, cy, Math.max(2.5, unit * 0.006), 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+    if (puck.speed > 1.2) sparks(ctx, cx, cy, r * 1.25, r * 1.6, 8, rgba(C.ink, 0.7), hair, now / 300);
+  }
+
+  /** 스틱 블레이드: 잉크 마름모 */
+  _drawStick(ctx, stick, toC, unit, hair) {
+    if (!stick) return;
+    const [cx, cy] = toC(stick.x, stick.y);
+    const s = unit * 0.02;
+    ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath();
+    ctx.fillStyle = rgba(C.paper, 0.55); ctx.fill();
+    inkStroke(ctx, hair * 1.3, C.ink);
+    const [bx0, by0] = toC(stick.bbox[0], stick.bbox[1]);
+    const [bx1, by1] = toC(stick.bbox[2] + 1, stick.bbox[3] + 1);
+    ctx.setLineDash([unit * 0.008, unit * 0.008]); ctx.lineWidth = hair * 0.7; ctx.strokeStyle = rgba(C.ink, 0.5);
+    ctx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0); ctx.setLineDash([]);
+  }
+
+  /** 가운데 원 UI */
+  _drawCalib(ctx, calib, toC, sx, unit, fs, hair, idleHold) {
+    const c = calib.circle;
+    const [cx, cy] = toC(c.x, c.y); const r = c.r * sx;
+    const starting = calib.status === 'puck';
+    const mismatch = calib.status === 'mismatch';
+    const learning = calib.status === 'ok' || calib.status === 'refresh';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(C.paper, 0.28); ctx.fill();
+    ctx.setLineDash(starting || learning ? [] : [unit * 0.014, unit * 0.012]);
+    inkStroke(ctx, hair * 1.5, mismatch ? C.red : C.ink);
+    ctx.setLineDash([]);
+
+    const prog = starting ? idleHold / 3 : calib.hold / 3;
+    if (prog > 0) {
+      ctx.beginPath(); ctx.arc(cx, cy, r * 1.13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, prog));
+      ctx.lineWidth = unit * 0.009; ctx.strokeStyle = C.red; ctx.stroke();
+      text(ctx, String(Math.max(1, Math.ceil(3 - prog * 3))), cx, cy, r * 1.1, { family: F.display, weight: 900 });
+    }
+    if (calib.sample?.status === 'ok' && !starting) {
+      const [ox, oy] = toC(calib.sample.cx, calib.sample.cy);
+      ctx.beginPath(); ctx.arc(ox, oy, unit * 0.014, 0, Math.PI * 2); ctx.fillStyle = `rgb(${calib.sample.r},${calib.sample.g},${calib.sample.b})`; ctx.fill();
+      inkStroke(ctx, hair, C.ink);
+    }
+    if (mismatch && calib.registered) {
+      const m = calib.registered, px = cx + r * 1.5, py = cy - r * 0.85;
+      ctx.beginPath(); ctx.arc(px, py, unit * 0.022, 0, Math.PI * 2); ctx.fillStyle = `rgb(${m.r},${m.g},${m.b})`; ctx.fill(); inkStroke(ctx, hair, C.ink);
+      text(ctx, '등록된 퍽', px, py + unit * 0.045, fs * 0.72, { weight: 600 });
+    }
+
+    const label = starting ? `퍽 인식됨 — ${Math.max(1, Math.ceil(3 - idleHold))}초 후 시작`
+      : mismatch ? '등록된 퍽과 다른 물체입니다'
+      : calib.status === 'refresh' ? `등록된 퍽 다시 인식 중 ${Math.max(0, 3 - calib.hold).toFixed(1)}초`
+      : calib.status === 'too_big' ? '물체가 너무 큽니다 — 카메라에서 더 멀리'
+      : calib.status === 'ok' ? `퍽 등록 중 ${Math.max(0, 3 - calib.hold).toFixed(1)}초 — 가만히`
+      : calib.sample?.scattered ? '바닥 무늬만 보입니다 — 물체를 원 안에'
+      : (calib.target === 'stick' ? '스틱 블레이드(테이프)를 원 안에 놓으세요' : calib.registered ? '등록된 퍽을 원 안에 놓으세요' : '퍽으로 쓸 물체를 원 안에 놓으세요');
+    pill(ctx, label, cx, cy - r - fs * 1.6, fs, mismatch ? { bg: C.red, fg: C.paper, border: null } : starting ? { bg: C.ink, fg: C.paper, border: null } : {});
+    const sub = calib.manual ? '배경과 색이 다르면 무엇이든 됩니다 · 화면을 터치하면 취소'
+      : starting ? '움직이면 취소됩니다'
+      : mismatch ? '등록된 퍽을 놓거나, 아래 버튼으로 교체하세요'
+      : calib.registered ? '3초 두면 시작' : '공 · 뚜껑 · 퍽 — 배경과 색만 다르면 됩니다';
+    pill(ctx, sub, cx, cy + r + fs * 1.5, fs * 0.74, { weight: 500, border: null, alpha: 0.85 });
+  }
 }
 
-function sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
 function clamp01(x) { return Math.min(1, Math.max(0, x)); }

@@ -46,7 +46,7 @@ const app = {
   hudAt: 0,
   account: null,      // 계정 저장소 (local | firebase)
   authTab: 'login',
-  calib: { active: false, target: null, hold: 0, status: 'none', sample: null, circle: null }, // 자동 물체 지정
+  calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
 };
 const autoCal = new AutoCalibrator(3);
 
@@ -290,7 +290,7 @@ function bindUI() {
       case 'f': case 'F': toggleFullscreen(); break;
       case 'm': case 'M': renderModeList(); open(els.panelMode); break;
       case 'd': case 'D': settings.debug = !settings.debug; $('#set-debug').checked = settings.debug; els.debug.classList.toggle('hidden', !settings.debug); persist(); break;
-      case 'Escape': closeAllPanels(); if (app.calib.active) cancelAutoCalibration('자동 지정 취소'); break;
+      case 'Escape': closeAllPanels(); if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); break;
     }
   });
 }
@@ -317,8 +317,7 @@ async function startCamera() {
     app.startedAt = performance.now();
     requestWakeLock();
     requestAnimationFrame(loop);
-    if (settings.puckModel.area === 0) { beginAutoCalibration('puck'); toast('퍽으로 쓸 물체를 가운데 원 안에 놓고 3초 기다리세요', 5000); }
-    else toast('준비 완료. 퍽을 바꾸려면 보정 > 원 안에 3초');
+    toast('퍽으로 쓸 물체(공·뚜껑·퍽)를 가운데 원 안에 놓고 3초 기다리세요. 인식되면 3초 더 두면 시작!', 6000);
     if (document.documentElement.requestFullscreen && !navigator.standalone) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -440,7 +439,7 @@ function loop(now) {
   const dt = app.lastLoop ? Math.min(0.1, (now - app.lastLoop) / 1000) : 1 / 60;
   app.lastLoop = now;
   game.update(dt, tracker, now);
-  if (app.calib.active) updateAutoCalibration(dt); else updateHandsFree(dt);
+  if (app.calib.manual) updateAutoCalibration(dt); else updateIdleCircle(dt);
 
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
@@ -450,23 +449,60 @@ function loop(now) {
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
 }
 
-/** 핸즈프리 시작: 대기 중 퍽을 가운데 원 안에 3초 두면 시작/재시작 (거치대에 둔 채로 플레이) */
-function updateHandsFree(dt) {
-  if (!settings.autoStart || game.running || app.calibTarget) { app.idleHold = 0; return; }
-  // 설정/보정/모드 패널이 열려 있으면 대기 (결과 패널은 허용)
-  if (![els.panelSettings, els.panelCalib, els.panelMode, els.panelRank].every((p) => p.classList.contains('hidden'))) { app.idleHold = 0; return; }
-  const pos = tracker.pos;
-  const inside = pos && tracker.state === 'tracked' && Math.abs(pos.x - 0.5) < 0.1 && Math.abs(pos.y - 0.5) < 0.25;
-  if (!inside) { app.idleHold = 0; app.idleTick = -1; return; }
-  app.idleHold += dt;
-  const remain = Math.ceil(3 - app.idleHold);
-  if (remain !== app.idleTick && remain > 0) { app.idleTick = remain; sfx.tick(); }
-  if (app.idleHold >= 3) {
-    app.idleHold = 0;
-    close(els.panelResult);
-    if (app.versus && app.versus.current === 1 && app.versus.scores.length === 1) { /* 2P 차례: 그대로 진행 */ }
-    startRun({ handsFree: true });
+/**
+ * 대기 중 가운데 원 (핸즈프리):
+ *  - 인식 중인 퍽이 원 안에 있으면 3초 뒤 시작/재시작
+ *  - 모르는 물체가 원 안에 있으면 3초 뒤 그 물체를 새 퍽으로 학습 (아무 바닥·아무 물체)
+ */
+function updateIdleCircle(dt) {
+  const c = app.calib;
+  const panelsOpen = ![els.panelSettings, els.panelCalib, els.panelMode, els.panelRank].every((p) => p.classList.contains('hidden'));
+  const idle = app.started && !game.running && settings.autoStart && !panelsOpen && !app.calibTarget;
+  if (!idle) { c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset(); return; }
+  c.active = true; c.manual = false; c.target = 'puck';
+  c.circle = vision.calibCircle();
+  const circle = c.circle;
+  const mapping = app.lastVision?.floor?.mapping;
+  let puckInCircle = false;
+  if (tracker.state === 'tracked' && tracker.pos && mapping) {
+    const [px, py] = mapping.toPx(tracker.pos.x, tracker.pos.y);
+    puckInCircle = Math.hypot(px - circle.x, py - circle.y) < circle.r * 1.3;
   }
+  if (puckInCircle) {
+    // 알고 있는 퍽이 원 안에 있음 -> 시작 카운트다운
+    autoCal.reset(); c.status = 'puck'; c.sample = null; c.hold = 0;
+    app.idleHold += dt;
+    const remain = Math.ceil(3 - app.idleHold);
+    if (remain !== app.idleTick && remain > 0) { app.idleTick = remain; sfx.tick(); }
+    if (app.idleHold >= 3) {
+      app.idleHold = 0; app.idleTick = -1;
+      close(els.panelResult);
+      startRun({ handsFree: true });
+    }
+    return;
+  }
+  app.idleHold = 0; app.idleTick = -1;
+  // 원 안의 새 물체 학습
+  const sample = vision.autoCalibSample();
+  const done = autoCal.update(sample, dt);
+  c.hold = autoCal.hold; c.status = autoCal.status; c.sample = autoCal.sample;
+  if (done) commitLearnedModel('puck', done);
+}
+
+function commitLearnedModel(target, done) {
+  const model = { r: done.r, g: done.g, b: done.b, area: done.area };
+  if (target === 'puck') {
+    settings.puckModel = model; settings.puckTol = done.tol;
+    vision.seedPuck(done.cx, done.cy, done.area); tracker.reset();
+    $('#set-puckTol').value = done.tol; $('#out-puckTol').value = done.tol;
+  } else {
+    settings.stickModel = model; settings.stickTol = done.tol;
+    $('#set-stickTol').value = done.tol; $('#out-stickTol').value = done.tol;
+  }
+  autoCal.reset();
+  persist(); refreshCalibUI();
+  sfx.target();
+  toast(`${target === 'puck' ? '퍽' : '스틱'} 인식 완료 · rgb(${model.r},${model.g},${model.b}) · 크기 ${model.area}px${target === 'puck' ? ' · 원 안에 3초 더 두면 시작' : ''}`, 4000);
 }
 
 // =============== HUD ===============
@@ -518,7 +554,8 @@ function toggleRun() {
 }
 
 function startRun(opts = {}) {
-  if (app.calib.active) cancelAutoCalibration();
+  if (app.calib.manual) cancelAutoCalibration();
+  app.calib.active = false;
   if (!app.lastVision?.floor?.mapping) { toast('바닥이 인식되지 않았습니다. 흰 바닥이 보이게 카메라를 조정하거나 설정에서 수동 지정하세요.'); return; }
   if (settings.controller === 'stick' && !settings.stickModel) { toast('조작 대상이 스틱입니다. 보정에서 스틱 색을 먼저 지정하세요.'); return; }
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(주황 마름모)된 뒤 시작하세요.' : '퍽을 바닥 위에 놓아 인식(파란 원)된 뒤 시작하세요.'); }
@@ -646,18 +683,20 @@ function bindFloorHandles() {
 }
 
 // =============== 보정 (가운데 원에 3초: 자동 물체 지정) ===============
+/** 보정 패널의 '원 안에 3초(자동)' 버튼: 지정 대상을 정해 명시적으로 학습 (스틱 포함) */
 function beginAutoCalibration(target) {
   if (game.running) game.stop('manual');
   closeAllPanels();
   autoCal.reset();
-  app.calib = { active: true, target, hold: 0, status: 'none', sample: null, circle: vision.calibCircle() };
+  app.calib = { active: true, manual: true, target, hold: 0, status: 'none', sample: null, circle: vision.calibCircle() };
   app.calibTarget = null;
   els.tapHint.classList.add('hidden');
   app.idleHold = 0;
 }
 
 function cancelAutoCalibration(msg) {
-  app.calib = { active: false, target: null, hold: 0, status: 'none', sample: null, circle: null };
+  app.calib = { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null };
+  autoCal.reset();
   if (msg) toast(msg);
 }
 
@@ -668,27 +707,14 @@ function updateAutoCalibration(dt) {
   const done = autoCal.update(sample, dt);
   c.hold = autoCal.hold; c.status = autoCal.status; c.sample = autoCal.sample;
   if (!done) return;
-  const model = { r: done.r, g: done.g, b: done.b, area: done.area };
-  if (vision.isFloorLike(model, settings) && settings.floorMode === 'auto' && !app.lastVision?.floor?.fallback) {
-    cancelAutoCalibration('바닥(흰색)과 구분되지 않는 색입니다. 다른 색의 물체를 쓰세요.');
-    return;
-  }
-  if (c.target === 'puck') {
-    settings.puckModel = model; settings.puckTol = done.tol;
-    vision.seedPuck(done.cx, done.cy, done.area); tracker.reset();
-    $('#set-puckTol').value = done.tol; $('#out-puckTol').value = done.tol;
-  } else {
-    settings.stickModel = model; settings.stickTol = done.tol;
-    $('#set-stickTol').value = done.tol; $('#out-stickTol').value = done.tol;
-  }
-  persist(); refreshCalibUI();
-  sfx.target();
-  cancelAutoCalibration(`${c.target === 'puck' ? '퍽' : '스틱'} 인식 완료 · rgb(${model.r},${model.g},${model.b}) · 크기 ${model.area}px · 이제 움직여 보세요`);
+  const target = c.target;
+  app.calib = { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null };
+  commitLearnedModel(target, done);
 }
 
 // =============== 보정 (터치로 색 지정) ===============
 function beginCalibration(target) {
-  if (app.calib.active) cancelAutoCalibration();
+  if (app.calib.manual) cancelAutoCalibration();
   app.calibTarget = target;
   close(els.panelCalib);
   els.tapHint.textContent = target === 'puck' ? '화면에서 퍽을 터치하세요' : '화면에서 스틱 블레이드(테이프)를 터치하세요';
@@ -697,7 +723,7 @@ function beginCalibration(target) {
 }
 
 function onViewTap(e) {
-  if (app.calib.active) { if (!e.target.classList.contains('handle')) cancelAutoCalibration('자동 지정 취소'); return; }
+  if (app.calib.manual) { if (!e.target.classList.contains('handle')) cancelAutoCalibration('자동 지정 취소'); return; }
   if (!app.calibTarget || !app.lastVision) return;
   if (e.target.classList.contains('handle')) return;
   const r = els.view.getBoundingClientRect();

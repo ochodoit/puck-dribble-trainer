@@ -8,7 +8,7 @@ import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
 import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel } from './account.js';
-import { decideIdle } from './idle-logic.js';
+import { decideIdle, stepChoice, CHOICE_HOLD_S } from './idle-logic.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -48,6 +48,7 @@ const app = {
   account: null,      // 계정 저장소 (local | firebase)
   authTab: 'login',
   calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
+  choice: { side: null, hold: 0, tick: -1, armAt: 0 }, // 게임 종료 후 선택 (왼쪽 = 한 번 더, 오른쪽 = 모드 선택)
 };
 const autoCal = new AutoCalibrator(3);
 
@@ -291,6 +292,7 @@ function bindUI() {
   // 결과
   els.btnAgain.addEventListener('click', () => { close(els.panelResult); app.versus = null; startRun(); });
   els.btnNext.addEventListener('click', () => { close(els.panelResult); startRun(); });
+  $('#btn-result-mode').addEventListener('click', () => { close(els.panelResult); renderModeList(); open(els.panelMode); });
 
   // 바닥 수동 핸들
   bindFloorHandles();
@@ -496,7 +498,9 @@ function loop(now) {
   const dt = app.lastLoop ? Math.min(0.1, (now - app.lastLoop) / 1000) : 1 / 60;
   app.lastLoop = now;
   game.update(dt, tracker, now);
-  if (app.calib.manual) updateAutoCalibration(dt); else updateIdleCircle(dt);
+  if (app.calib.manual) updateAutoCalibration(dt);
+  else if (!els.panelResult.classList.contains('hidden')) updateResultChoice(dt);
+  else updateIdleCircle(dt);
 
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
@@ -504,6 +508,41 @@ function loop(now) {
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
+}
+
+/**
+ * 게임 종료 후 선택 (결과 화면이 떠 있는 동안): 퍽을 왼쪽 영역에 2초 두면 한 번 더, 오른쪽 영역에 두면 모드 선택.
+ * 결과 창이 카메라를 가리므로 창 안의 트랙에 퍽의 좌우 위치를 점으로 보여준다.
+ */
+function updateResultChoice(dt) {
+  const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
+  $('#btn-replace-puck').classList.add('hidden');
+  const ch = app.choice;
+  const enabled = settings.autoStart;
+  $('#choice-track').classList.toggle('hidden', !enabled);
+  const tracked = enabled && tracker.state === 'tracked' && !!tracker.pos;
+  const u = tracker.pos ? tracker.pos.x : null;
+  const fire = enabled ? stepChoice(ch, { u, tracked, dt, armed: performance.now() >= ch.armAt }) : null;
+  if (!enabled) { ch.side = null; ch.hold = 0; }
+  // 1초마다 틱
+  if (ch.side && ch.hold > 0) { const remain = Math.ceil(CHOICE_HOLD_S - ch.hold); if (remain !== ch.tick) { ch.tick = remain; sfx.tick(); } } else ch.tick = -1;
+  paintChoice(tracked ? u : null);
+  if (!fire) return;
+  ch.side = null; ch.hold = 0; paintChoice(null);
+  if (fire === 'L') (els.btnNext.classList.contains('hidden') ? els.btnAgain : els.btnNext).click();
+  else $('#btn-result-mode').click();
+}
+
+function paintChoice(u) {
+  const ch = app.choice, pct = Math.min(100, (ch.hold / CHOICE_HOLD_S) * 100);
+  const dot = $('#choice-dot');
+  dot.classList.toggle('hidden', u === null);
+  if (u !== null) dot.style.left = `${clamp(u, 0, 1) * 100}%`;
+  for (const [btn, side] of [[els.btnAgain, 'L'], [els.btnNext, 'L'], [$('#btn-result-mode'), 'R']]) {
+    const on = ch.side === side;
+    btn.querySelector('.choice-fill').style.width = on ? `${pct}%` : '0';
+    btn.classList.toggle('filling', on && pct > 45);
+  }
 }
 
 /**
@@ -666,17 +705,18 @@ function showResult(result, isBest) {
       body.unshift(`<div class="stat full winner"><small>${vs.names[0]} vs ${vs.names[1]}</small><b>${a} : ${b}</b></div>`);
       els.btnNext.classList.add('hidden');
       els.btnAgain.classList.remove('hidden');
-      els.btnAgain.textContent = '다시 대결';
+      els.btnAgain.querySelector('.choice-label').textContent = '다시 대결';
       app.versus = { names: vs.names, scores: [], current: 0 };
     }
   } else {
     els.btnNext.classList.add('hidden');
     els.btnAgain.classList.remove('hidden');
-    els.btnAgain.textContent = '다시 하기';
+    els.btnAgain.querySelector('.choice-label').textContent = '한 번 더';
   }
   els.resultTitle.textContent = title;
   els.resultBody.innerHTML = body.join('');
-  $('#result-hint').classList.toggle('hidden', !settings.autoStart);
+  app.choice = { side: null, hold: 0, tick: -1, armAt: performance.now() + 800 }; // 결과가 뜬 직후 0.8초는 세지 않음
+  paintChoice(null);
   open(els.panelResult);
 }
 

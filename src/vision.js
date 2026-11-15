@@ -2,6 +2,8 @@
 import { makeFloorMapping, quadBounds, quadScanlines } from './geometry.js';
 
 const FLOOR_EMA = 0.15;        // 자동 바닥 영역 스무딩 계수
+const FLOOR_ON_FRAMES = 10;    // 흰 바닥으로 전환하기 위한 연속 검출 프레임
+const FLOOR_OFF_FRAMES = 90;   // 전체 화면으로 되돌리기 위한 연속 미검출 프레임 (~3초)
 const ROW_RATIO = 0.10;        // 바닥으로 인정할 행/열의 흰색 비율
 const MIN_FLOOR_SPAN = 0.25;   // 바닥 최소 크기(프레임 대비)
 
@@ -16,6 +18,8 @@ export class Vision {
     this.floorAuto = null;      // EMA 적용된 자동 바닥 bbox {x0,y0,x1,y1}
     this.floorLocked = false;
     this.floorPolygon = [];     // 자동 감지 윤곽 (표시용)
+    this.floorOnCount = 0; this.floorOffCount = 0;
+    this.floorFallback = false; // 흰 바닥이 없어 카메라 화면 전체를 쓰는 중
     this.lastPuck = null;       // {x,y,area,vx,vy,missed} 추적 게이트 (proc px)
     this.lastStick = null;
     this.debugImage = null;
@@ -101,25 +105,37 @@ export class Vision {
       const bbox = this._autoFloorBBox();
       if (bbox) {
         floorDetected = true;
+        this.floorOffCount = 0; this.floorOnCount++;
         if (!this.floorLocked) {
-          if (!this.floorAuto) this.floorAuto = bbox;
+          if (!this.floorAuto) { if (this.floorOnCount >= FLOOR_ON_FRAMES) this.floorAuto = bbox; }
           else {
             const f = this.floorAuto, a = FLOOR_EMA;
             f.x0 += (bbox.x0 - f.x0) * a; f.y0 += (bbox.y0 - f.y0) * a;
             f.x1 += (bbox.x1 - f.x1) * a; f.y1 += (bbox.y1 - f.y1) * a;
           }
         }
+      } else {
+        this.floorOnCount = 0; this.floorOffCount++;
+        // 흰 바닥이 3초 넘게 안 보이면(매트·일반 바닥) 전체 화면으로 복귀
+        if (this.floorAuto && !this.floorLocked && this.floorOffCount >= FLOOR_OFF_FRAMES) { this.floorAuto = null; this.floorPolygon = []; }
       }
       if (this.floorAuto) {
         const f = this.floorAuto;
         quad = [[f.x0, f.y0], [f.x1, f.y0], [f.x1, f.y1], [f.x0, f.y1]];
         this.floorPolygon = this._floorOutline(f);
+        this.floorFallback = false;
+      } else {
+        // 폴백: 흰 바닥 없이도 바로 플레이 (카메라 화면 전체)
+        const mx = PW * 0.02, my = PH * 0.02;
+        quad = [[mx, my], [PW - mx, my], [PW - mx, PH - my], [mx, PH - my]];
+        this.floorPolygon = [];
+        this.floorFallback = true;
       }
     }
 
     const mapping = quad ? makeFloorMapping(quad) : null;
     const result = {
-      floor: { quad, mapping, detected: floorDetected, locked: this.floorLocked, polygon: this.floorPolygon, mode: settings.floorMode },
+      floor: { quad, mapping, detected: floorDetected, locked: this.floorLocked, polygon: this.floorPolygon, mode: settings.floorMode, fallback: settings.floorMode === 'auto' && this.floorFallback },
       puck: null,
       stick: null,
       puckCandidates: [],
@@ -357,6 +373,48 @@ export class Vision {
     return { r, g, b, area };
   }
 
+  /** 자동 지정용 원 (처리 좌표) */
+  calibCircle() { const r = Math.min(this.PW, this.PH) * 0.13; return { x: this.PW / 2, y: this.PH / 2, r }; }
+
+  /**
+   * 가운데 원 안에서 주변 배경(고리 영역)과 색이 다른 픽셀 덩어리를 찾는다.
+   * 반환: { status: 'none'|'too_big'|'ok', r,g,b, area, cx, cy, bg:{r,g,b}, dist }
+   */
+  autoCalibSample() {
+    if (!this.frame) return { status: 'none' };
+    const { PW, PH } = this; const d = this.frame.data;
+    const c = this.calibCircle();
+    const r2 = c.r * c.r, ring0 = (c.r * 1.15) ** 2, ring1 = (c.r * 1.7) ** 2;
+    // 배경색: 원 바깥 고리의 평균
+    let br = 0, bg = 0, bb = 0, bn = 0;
+    const x0 = Math.max(0, Math.floor(c.x - c.r * 1.7)), x1 = Math.min(PW - 1, Math.ceil(c.x + c.r * 1.7));
+    const y0 = Math.max(0, Math.floor(c.y - c.r * 1.7)), y1 = Math.min(PH - 1, Math.ceil(c.y + c.r * 1.7));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const dx = x - c.x, dy = y - c.y, q = dx * dx + dy * dy;
+      if (q < ring0 || q > ring1) continue;
+      const p = (y * PW + x) * 4; br += d[p]; bg += d[p + 1]; bb += d[p + 2]; bn++;
+    }
+    if (!bn) return { status: 'none' };
+    br /= bn; bg /= bn; bb /= bn;
+    // 원 안: 배경과 충분히 다른 픽셀
+    const TH2 = 55 * 55;
+    let sr = 0, sg = 0, sb = 0, sx = 0, sy = 0, n = 0, inside = 0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const dx = x - c.x, dy = y - c.y;
+      if (dx * dx + dy * dy > r2) continue;
+      inside++;
+      const p = (y * PW + x) * 4;
+      const er = d[p] - br, eg = d[p + 1] - bg, eb = d[p + 2] - bb;
+      if (er * er + eg * eg + eb * eb < TH2) continue;
+      sr += d[p]; sg += d[p + 1]; sb += d[p + 2]; sx += x; sy += y; n++;
+    }
+    if (n < 10) return { status: 'none', bg: { r: br, g: bg, b: bb } };
+    if (n > inside * 0.75) return { status: 'too_big', bg: { r: br, g: bg, b: bb } };
+    const model = { r: Math.round(sr / n), g: Math.round(sg / n), b: Math.round(sb / n) };
+    const dist = Math.hypot(model.r - br, model.g - bg, model.b - bb);
+    return { status: 'ok', ...model, area: n, cx: sx / n, cy: sy / n, bg: { r: Math.round(br), g: Math.round(bg), b: Math.round(bb) }, dist };
+  }
+
   /** 보정 터치 위치를 추적 시작점으로 사용 (같은 색의 다른 물체에 처음부터 붙는 것을 방지) */
   seedPuck(px, py, area) {
     this.lastPuck = { x: px, y: py, area: Math.max(3, area), vx: 0, vy: 0, missed: 0 };
@@ -441,4 +499,26 @@ export function mergeClose(comps, gap) {
     }
   }
   return comps;
+}
+
+/** 가운데 원 안의 물체가 3초간 같은 색·크기로 머물면 확정 */
+export class AutoCalibrator {
+  constructor(holdSec = 3) { this.holdSec = holdSec; this.reset(); }
+  reset() { this.hold = 0; this.avg = null; this.status = 'none'; this.sample = null; }
+  /** sample: vision.autoCalibSample() 결과. 반환: 확정된 모델 또는 null */
+  update(sample, dt) {
+    this.status = sample.status;
+    this.sample = sample;
+    if (sample.status !== 'ok') { this.hold = Math.max(0, this.hold - dt * 2); if (this.hold === 0) this.avg = null; return null; }
+    if (!this.avg) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area }; this.hold = 0; return null; }
+    const a = this.avg;
+    const colorDiff = Math.hypot(sample.r - a.r, sample.g - a.g, sample.b - a.b);
+    const areaRatio = sample.area / a.area;
+    if (colorDiff > 35 || areaRatio < 0.6 || areaRatio > 1.6) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area }; this.hold = 0; return null; }
+    a.r += (sample.r - a.r) * 0.2; a.g += (sample.g - a.g) * 0.2; a.b += (sample.b - a.b) * 0.2; a.area += (sample.area - a.area) * 0.2;
+    this.hold += dt;
+    if (this.hold < this.holdSec) return null;
+    const tol = Math.round(Math.min(120, Math.max(45, sample.dist * 0.5)));
+    return { r: Math.round(a.r), g: Math.round(a.g), b: Math.round(a.b), area: Math.round(a.area), tol, cx: sample.cx, cy: sample.cy, bg: sample.bg };
+  }
 }

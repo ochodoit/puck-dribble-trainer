@@ -74,6 +74,13 @@ let failed = false;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await page.waitForTimeout(2300);
+  // 첫 실행: 퍽이 지정된 적 없으면 자동 지정(가운데 원 3초)이 켜지고, 화면 터치로 취소됨
+  const autoOn = await page.evaluate(() => window.__puckTrainer.app.calib.active && window.__puckTrainer.app.calib.target === 'puck');
+  await page.mouse.click(300, 300);
+  await page.waitForTimeout(100);
+  const autoOff = await page.evaluate(() => !window.__puckTrainer.app.calib.active);
+  console.log(`${autoOn && autoOff ? 'PASS' : 'FAIL'} first run opens auto object calibration, tap cancels`);
+  if (!(autoOn && autoOff)) failed = true;
   const fps = await page.textContent('#chip-fps');
   const fpsNum = parseInt(fps, 10);
   console.log(`${fpsNum > 0 ? 'PASS' : 'FAIL'} app processing frames (${fps.trim()})`);

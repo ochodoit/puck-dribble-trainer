@@ -68,8 +68,8 @@ let failed = false;
   await page.click('.mode-card:nth-child(3)');
   await page.waitForFunction(() => document.querySelector('#panel-mode').classList.contains('hidden'));
   const modeText = await page.textContent('#hud-mode');
-  console.log(`${modeText.includes('장애물') ? 'PASS' : 'FAIL'} mode switch (${modeText.trim()})`);
-  if (!modeText.includes('장애물')) failed = true;
+  console.log(`${modeText.includes('퍽 피하기') ? 'PASS' : 'FAIL'} mode switch (${modeText.trim()})`);
+  if (!modeText.includes('퍽 피하기')) failed = true;
   // 수동 바닥 지정으로 바꾸면 가짜 카메라에서도 시작 가능해야 함
   await page.click('#btn-settings');
   await page.selectOption('#set-floorMode', 'manual');

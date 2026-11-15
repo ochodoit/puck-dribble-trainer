@@ -1,5 +1,5 @@
 // 오버레이 캔버스 렌더링
-import { PUCK_R } from './game.js';
+import { PUCK_R, FLYER_R } from './game.js';
 
 export class Renderer {
   constructor(canvas) {
@@ -149,6 +149,40 @@ export class Renderer {
       // 충돌 반경(은은하게)
       ctx.beginPath(); ctx.ellipse(cx, cy, R(c.r + PUCK_R), R(c.r + PUCK_R) * 0.6, 0, 0, Math.PI * 2);
       ctx.strokeStyle = hit ? 'rgba(239,68,68,0.8)' : 'rgba(251,146,60,0.25)'; ctx.lineWidth = unit * 0.003; ctx.stroke();
+    }
+
+    // ---- 날아오는 빨간 퍽 (퍽 피하기 서바이벌) ----
+    for (const f of game.flyers || []) {
+      if (now < f.launchAt) {
+        // 출발 지점 경고: 바닥 가장자리에 깜빡이는 삼각형
+        const ex = Math.min(0.99, Math.max(0.01, f.x)), ey = Math.min(0.99, Math.max(0.01, f.y));
+        const [cx, cy] = uvToC(ex, ey);
+        const ang = Math.atan2(f.vy, f.vx);
+        const blink = 0.5 + 0.5 * Math.sin(now / 60);
+        const sz = unit * 0.03;
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+        ctx.beginPath(); ctx.moveTo(sz, 0); ctx.lineTo(-sz * 0.7, -sz * 0.7); ctx.lineTo(-sz * 0.7, sz * 0.7); ctx.closePath();
+        ctx.fillStyle = `rgba(239,68,68,${0.35 + 0.6 * blink})`; ctx.fill();
+        ctx.lineWidth = unit * 0.003; ctx.strokeStyle = '#fff'; ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+      const [cx, cy] = uvToC(f.x, f.y);
+      if (cx < -W * 0.2 || cx > W * 1.2 || cy < -H * 0.2 || cy > H * 1.2) continue;
+      const r = R(FLYER_R);
+      // 속도 방향 잔상
+      const [tx, ty] = uvToC(f.x - f.vx * 0.12, f.y - f.vy * 0.12);
+      const g = ctx.createLinearGradient(tx, ty, cx, cy);
+      g.addColorStop(0, 'rgba(239,68,68,0)'); g.addColorStop(1, 'rgba(239,68,68,0.55)');
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(cx, cy);
+      ctx.strokeStyle = g; ctx.lineWidth = r * 1.2; ctx.stroke();
+      // 본체
+      ctx.beginPath(); ctx.ellipse(cx, cy + r * 0.18, r, r * 0.7, 0, 0, Math.PI * 2); ctx.fillStyle = '#7f1d1d'; ctx.fill();
+      const rg = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 0.1, cx, cy, r);
+      rg.addColorStop(0, '#fca5a5'); rg.addColorStop(0.5, '#ef4444'); rg.addColorStop(1, '#991b1b');
+      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.7, 0, 0, Math.PI * 2); ctx.fillStyle = rg; ctx.fill();
+      ctx.lineWidth = unit * 0.003; ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.stroke();
+      if (f.hit) { ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.5, r * 1.05, 0, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(239,68,68,0.6)'; ctx.stroke(); }
     }
 
     // ---- 스틱 ----

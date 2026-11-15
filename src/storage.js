@@ -12,7 +12,9 @@ export const DEFAULT_SETTINGS = {
   stickTol: 70,     // 스틱 색 허용 오차
   puckModel: { r: 0, g: 0, b: 0, area: 0 },   // area 0 = 바닥 크기 기준 자동
   stickModel: null,                           // null = 스틱 추적 안 함
-  floorMode: 'auto',                          // 'auto' | 'manual'
+  floorMode: 'auto',                          // 'auto'(흰 바닥) | 'manual'(모서리) | 'full'(카메라 화면 전체)
+  procWidth: 240,                             // 인식 해상도(처리 폭 px): 240 | 320 | 400
+  controller: 'puck',                         // 게임 조작 대상: 'puck' | 'stick'(퍽 없이 스틱 블레이드로)
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
   cameraId: '',
@@ -45,7 +47,9 @@ export function sanitizeSettings(s) {
   s.stickTol = num(s.stickTol, 20, 200, d.stickTol);
   s.puckModel = isColorModel(s.puckModel) ? { r: s.puckModel.r, g: s.puckModel.g, b: s.puckModel.b, area: s.puckModel.area } : structuredClone(d.puckModel);
   s.stickModel = isColorModel(s.stickModel) ? { r: s.stickModel.r, g: s.stickModel.g, b: s.stickModel.b, area: s.stickModel.area } : null;
-  s.floorMode = s.floorMode === 'manual' ? 'manual' : 'auto';
+  s.floorMode = ['auto', 'manual', 'full'].includes(s.floorMode) ? s.floorMode : 'auto';
+  s.procWidth = [240, 320, 400].includes(s.procWidth) ? s.procWidth : d.procWidth;
+  s.controller = s.controller === 'stick' ? 'stick' : 'puck';
   const quadOk = Array.isArray(s.manualQuad) && s.manualQuad.length === 4 &&
     s.manualQuad.every((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((c) => Number.isFinite(c) && c >= 0 && c <= 1));
   if (!quadOk) { s.manualQuad = null; if (s.floorMode === 'manual') s.floorMode = 'auto'; }

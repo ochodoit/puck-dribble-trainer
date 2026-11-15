@@ -36,12 +36,22 @@ export class Vision {
 
   setSourceSize(vw, vh) {
     if (!vw || !vh) return;
+    this.srcW = vw; this.srcH = vh;
     const ph = Math.max(60, Math.round(this.PW * vh / vw));
     if (ph !== this.PH) {
       this.PH = ph;
       this._alloc();
       this.floorAuto = null;
     }
+  }
+
+  /** 인식 해상도 변경 (노트북 웹캠처럼 퍽이 작게 보일 때 320/400으로 올림) */
+  setProcWidth(pw) {
+    if (pw === this.PW) return;
+    this.PW = pw;
+    this.PH = this.srcW ? Math.max(60, Math.round(pw * this.srcH / this.srcW)) : Math.round(pw * 3 / 4);
+    this._alloc();
+    this.floorAuto = null; this.lastPuck = null; this.lastStick = null;
   }
 
   /** 화면(정규화 0-1) 좌표 -> 처리 픽셀 좌표 */
@@ -77,7 +87,13 @@ export class Vision {
     // ---- 2) 바닥 영역 결정 ----
     let floorDetected = false;
     let quad = null;
-    if (settings.floorMode === 'manual' && settings.manualQuad) {
+    if (settings.floorMode === 'full') {
+      // 카메라 화면 전체를 게임 영역으로 (흰 바닥 없이 노트북 웹캠 앞에서 플레이)
+      const mx = PW * 0.02, my = PH * 0.02;
+      quad = [[mx, my], [PW - mx, my], [PW - mx, PH - my], [mx, PH - my]];
+      floorDetected = true;
+      this.floorPolygon = [];
+    } else if (settings.floorMode === 'manual' && settings.manualQuad) {
       quad = settings.manualQuad.map(([u, v]) => [u * PW, v * PH]);
       floorDetected = true;
       this.floorPolygon = [];

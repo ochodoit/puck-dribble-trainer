@@ -26,7 +26,7 @@ const els = {
 
 const settings = loadSettings();
 const camera = new Camera(els.video);
-const vision = new Vision(240);
+const vision = new Vision(settings.procWidth);
 const tracker = new Tracker();
 const sfx = new Sfx();
 const game = new Game(sfx);
@@ -85,6 +85,11 @@ function bindUI() {
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); });
   }
   $('#set-floorMode').addEventListener('change', (e) => { settings.floorMode = e.target.value; applyFloorMode(); persist(); });
+  $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
+  $('#set-controller').addEventListener('change', (e) => {
+    settings.controller = e.target.value; persist(); tracker.reset();
+    if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
+  });
   $('#set-difficulty').addEventListener('change', (e) => { settings.difficulty = e.target.value; game.difficulty = settings.difficulty; persist(); });
   els.selCamera.addEventListener('change', async () => {
     settings.cameraId = els.selCamera.value; persist();
@@ -153,6 +158,7 @@ async function startCamera() {
     await populateCameras();
     els.splash.classList.add('hidden');
     app.started = true;
+    app.startedAt = performance.now();
     requestAnimationFrame(loop);
     toast('바닥(흰색 영역)이 파란 점선으로 표시되면 준비 완료');
     if (document.documentElement.requestFullscreen && !navigator.standalone) {
@@ -222,14 +228,20 @@ function loop(now) {
     app.frames++;
     if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
 
-    // 퍽 측정값 -> 정규화 바닥 좌표
+    // 조작 대상(퍽 또는 스틱 블레이드) 측정값 -> 정규화 바닥 좌표
     let meas = null;
     const m = result.floor.mapping;
-    if (m && result.puck) {
-      const [u, v] = m.toUV(result.puck.x, result.puck.y);
+    const obj = settings.controller === 'stick' ? result.stick : result.puck;
+    if (m && obj) {
+      const [u, v] = m.toUV(obj.x, obj.y);
       if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) meas = { u: clamp(u, 0, 1), v: clamp(v, 0, 1) };
     }
     tracker.update(meas, now);
+    // 흰 바닥이 안 잡히면 안내 (노트북 웹캠처럼 정면을 보는 카메라)
+    if (!m && settings.floorMode === 'auto' && !app.floorHintShown && now - app.startedAt > 4000) {
+      app.floorHintShown = true;
+      toast('흰 바닥이 인식되지 않습니다. 설정 > 게임 영역을 "카메라 화면 전체" 또는 "수동 지정"으로 바꿔보세요.', 7000);
+    }
   }
   if (!result) return;
   // 영상이 2초 넘게 멈추면 경고 (카메라 점유·절전 등)
@@ -271,8 +283,9 @@ function updateHud(force) {
 function updateChips(result) {
   setChip(els.chipFloor, result.floor.mapping ? (result.floor.detected ? 'ok' : 'warn') : 'bad',
     result.floor.mode === 'manual' ? '바닥(수동)' : vision.floorLocked ? '바닥(고정)' : '바닥');
-  setChip(els.chipPuck, tracker.state === 'tracked' ? 'ok' : tracker.state === 'predicted' ? 'warn' : 'bad', '퍽');
-  if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', '스틱');
+  const stickCtl = settings.controller === 'stick';
+  setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && tracker.state === 'predicted') ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
+  if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', stickCtl ? '스틱(조작)' : '스틱');
   else setChip(els.chipStick, '', '스틱(미지정)');
   els.chipFps.textContent = app.frozenWarned || app.cameraLost ? '영상 없음' : `${app.fps} fps`;
 }
@@ -292,7 +305,8 @@ function toggleRun() {
 
 function startRun() {
   if (!app.lastVision?.floor?.mapping) { toast('바닥이 인식되지 않았습니다. 흰 바닥이 보이게 카메라를 조정하거나 설정에서 수동 지정하세요.'); return; }
-  if (game.mode.id !== 'free' && tracker.state === 'lost') { toast('퍽을 바닥 위에 놓아 인식(파란 원)된 뒤 시작하세요.'); }
+  if (settings.controller === 'stick' && !settings.stickModel) { toast('조작 대상이 스틱입니다. 보정에서 스틱 색을 먼저 지정하세요.'); return; }
+  if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(주황 마름모)된 뒤 시작하세요.' : '퍽을 바닥 위에 놓아 인식(파란 원)된 뒤 시작하세요.'); }
   tracker.resetStats();
   game.start(tracker);
   updateHud();
@@ -367,6 +381,7 @@ function renderModeList() {
 // =============== 바닥 ===============
 function toggleFloorLock() {
   if (settings.floorMode === 'manual') { toast('수동 바닥 모드에서는 모서리를 드래그해 조정하세요'); return; }
+  if (settings.floorMode === 'full') { toast('게임 영역이 카메라 화면 전체입니다 (설정에서 변경)'); return; }
   vision.floorLocked = !vision.floorLocked;
   els.btnFloorLock.classList.toggle('active', vision.floorLocked);
   toast(vision.floorLocked ? '바닥 영역 고정됨' : '바닥 영역 자동 갱신');
@@ -419,6 +434,7 @@ function beginCalibration(target) {
   close(els.panelCalib);
   els.tapHint.textContent = target === 'puck' ? '화면에서 퍽을 터치하세요' : '화면에서 스틱 블레이드(테이프)를 터치하세요';
   els.tapHint.classList.remove('hidden');
+  els.view.classList.add('calibrating');
 }
 
 function onViewTap(e) {
@@ -430,6 +446,7 @@ function onViewTap(e) {
   const tol = app.calibTarget === 'puck' ? settings.puckTol : settings.stickTol;
   const sample = vision.sampleObject(px, py, tol);
   els.tapHint.classList.add('hidden');
+  els.view.classList.remove('calibrating');
   const target = app.calibTarget; app.calibTarget = null;
   if (!sample) return;
   if (vision.isFloorLike(sample, settings)) {
@@ -470,6 +487,8 @@ function applySettingsToUI() {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
   }
   $('#set-floorMode').value = settings.floorMode;
+  $('#set-procWidth').value = String(settings.procWidth);
+  $('#set-controller').value = settings.controller;
   $('#set-difficulty').value = settings.difficulty;
   els.p1.value = settings.p1; els.p2.value = settings.p2;
   refreshCalibUI();

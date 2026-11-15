@@ -29,3 +29,22 @@ export function sameColor(sample, model, tol) {
   const m = makeMatcher(model, Math.max(tol, 60) * 1.25);
   return matchPixel(m, sample.r, sample.g, sample.b);
 }
+
+// ---------- 게임 종료 후 선택: 퍽을 왼쪽에 두면 한 번 더, 오른쪽에 두면 모드 선택 ----------
+export const CHOICE_HOLD_S = 2;      // 이만큼 머물면 실행
+export const CHOICE_LEFT = 0.33;     // u < 0.33 = 왼쪽 영역
+export const CHOICE_RIGHT = 0.67;    // u > 0.67 = 오른쪽 영역
+
+export function choiceSide(u) { return u < CHOICE_LEFT ? 'L' : u > CHOICE_RIGHT ? 'R' : null; }
+
+/**
+ * c: { side, hold } 상태를 한 프레임 진행. 반환: 실행할 쪽 'L' | 'R' | null
+ * armed=false 인 동안(결과가 막 뜬 직후)과 추적이 끊긴 동안은 세지 않는다. 영역을 벗어나거나 바꾸면 처음부터.
+ */
+export function stepChoice(c, { u, tracked, dt, armed }) {
+  const side = tracked && armed && u !== null && u !== undefined ? choiceSide(u) : null;
+  if (side !== c.side) { c.side = side; c.hold = 0; return null; }
+  if (!side) return null;
+  c.hold += dt;
+  return c.hold >= CHOICE_HOLD_S ? side : null;
+}

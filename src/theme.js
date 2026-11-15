@@ -55,6 +55,6 @@ export function sparks(ctx, x, y, r0, r1, n, color, width, phase = 0) {
   ctx.lineWidth = width; ctx.strokeStyle = color; ctx.lineCap = 'round';
   for (let i = 0; i < n; i++) {
     const a = phase + (i / n) * Math.PI * 2;
-    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0 * 0.75); ctx.lineTo(x + Math.cos(a) * r1, y + Math.sin(a) * r1 * 0.75); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0); ctx.lineTo(x + Math.cos(a) * r1, y + Math.sin(a) * r1); ctx.stroke();
   }
 }

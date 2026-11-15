@@ -3,7 +3,7 @@ import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
 import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
-import { Renderer } from './render.js';
+import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
@@ -239,6 +239,7 @@ function bindUI() {
     renderModeList(); updateHud();
   }));
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
+  $('#set-flipDepth').addEventListener('change', (e) => { settings.flipDepth = e.target.checked; game.arcade.flipY = settings.flipDepth; game.plane.flip = settings.flipDepth; persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
   $$('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) close(m); }));
 
@@ -432,7 +433,14 @@ async function populateCameras() {
 function layout() {
   const rect = els.view.getBoundingClientRect();
   renderer.resize(rect.width, rect.height);
-  if (rect.width > 0) game.arcade.aspect = rect.height / rect.width;
+  if (rect.width > 0) {
+    game.arcade.aspect = rect.height / rect.width;
+    // 퍽 피하기 평면: 상단 HUD가 가리는 만큼 경기장을 내리고, 그 비율을 게임 판정에 전달
+    const hud = $('#hud').getBoundingClientRect();
+    renderer.topInset = clamp((hud.bottom - rect.top) / rect.height, 0, 0.4);
+    const f = dodgeField(renderer.canvas.width, renderer.canvas.height, renderer.topInset);
+    game.plane = { A: f.h / f.w, flip: settings.flipDepth };
+  }
   els.debug.width = vision.PW; els.debug.height = vision.PH;
   positionHandles();
 }
@@ -858,6 +866,8 @@ function applySettingsToUI() {
   $('#set-debug').checked = settings.debug;
   $('#set-sound').checked = settings.sound;
   $('#set-autoStart').checked = settings.autoStart;
+  $('#set-flipDepth').checked = settings.flipDepth;
+  game.arcade.flipY = settings.flipDepth;
   els.debug.classList.toggle('hidden', !settings.debug);
   for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];

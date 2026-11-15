@@ -9,6 +9,9 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, cle
 import { isLocked, tryUnlock } from './access.js';
 import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel } from './account.js';
 import { decideIdle, stepChoice, stepDwell, CHOICE_HOLD_S } from './idle-logic.js';
+import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
+import { createCommunityStore, courseSig, betterRecord, boardOf, TITLE_MAX } from './community.js';
+import { initCommunity } from './community-ui.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -25,6 +28,7 @@ const els = {
   panelMode: $('#panel-mode'), modeList: $('#mode-list'), versusToggle: $('#versus-toggle'), versusNames: $('#versus-names'), p1: $('#p1-name'), p2: $('#p2-name'),
   panelSettings: $('#panel-settings'), selCamera: $('#sel-camera'),
   panelCalib: $('#panel-calib'), swatchPuck: $('#swatch-puck'), swatchStick: $('#swatch-stick'), calibPuckDesc: $('#calib-puck-desc'), calibStickDesc: $('#calib-stick-desc'),
+  panelCommunity: $('#panel-community'),
   panelResult: $('#panel-result'), resultTitle: $('#result-title'), resultBody: $('#result-body'), btnAgain: $('#btn-result-again'), btnNext: $('#btn-result-next'),
   toast: $('#toast'),
 };
@@ -49,20 +53,28 @@ const app = {
   authTab: 'login',
   calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
   choice: { side: null, hold: 0, tick: -1, armAt: 0 }, // 게임 종료 후 선택 (왼쪽 = 한 번 더, 오른쪽 = 모드 선택)
+  challenge: null,    // 커뮤니티 코스 도전 중: { id, title, sig, holder: {uid, nick, avg, best}|null }
+  communityStore: null, // Promise<커뮤니티 저장소>
 };
+let community = null;   // 커뮤니티 화면 (initCommunity 반환값)
 const autoCal = new AutoCalibrator(3);
 
 // 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등)
-window.__puckTrainer = { settings, vision, tracker, game, app };
+window.__puckTrainer = { settings, vision, tracker, game, app, i18n: { tr, setLang, getLang, missing: i18nMissing } };
 
 // =============== 초기화 ===============
 init();
 
 function init() {
+  initI18n();
+  bindLangButtons();
+  onLangChange(() => { renderModeList(); updateHud(true); refreshCalibUI(); if (!els.panelCommunity.classList.contains('hidden')) community?.refresh(); });
   applySettingsToUI();
   bindUI();
   setupAccessGate();
-  setupAuth();
+  const accountReady = setupAuth();
+  app.communityStore = accountReady.then(() => createCommunityStore(app.account));
+  setupCommunity();
   game.difficulty = settings.difficulty;
   game.playSeconds = settings.playMinutes * 60;
   game.resetState();
@@ -508,6 +520,7 @@ function loop(now) {
   const modeOpen = !els.panelMode.classList.contains('hidden');
   if (!modeOpen && app.modePick) { app.modePick = null; $('#mode-cursor').classList.add('hidden'); }
   if (app.calib.manual) updateAutoCalibration(dt);
+  else if (!els.panelCommunity.classList.contains('hidden')) pauseIdle(); // 글을 읽고 쓰는 동안은 핸즈프리 시작을 멈춘다
   else if (!els.panelResult.classList.contains('hidden')) updateResultChoice(dt);
   else if (modeOpen) updateModeChoice(dt);
   else if (game.mode.id === 'free' && !game.running && app.started && !app.areaEditing && !app.calibTarget) updateCourseIdle(dt);
@@ -525,6 +538,12 @@ function loop(now) {
  * 게임 종료 후 선택 (결과 화면이 떠 있는 동안): 퍽을 왼쪽 영역에 2초 두면 한 번 더, 오른쪽 영역에 두면 모드 선택.
  * 결과 창이 카메라를 가리므로 창 안의 트랙에 퍽의 좌우 위치를 점으로 보여준다.
  */
+function pauseIdle() {
+  const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
+  $('#btn-replace-puck').classList.add('hidden');
+  app.courseDwell = null;
+}
+
 function updateResultChoice(dt) {
   const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
   $('#btn-replace-puck').classList.add('hidden');
@@ -594,19 +613,29 @@ function initCourse() {
     bindCoursePoint(el);
   }
   $('#course-clear').addEventListener('click', () => { settings.course = []; syncCourse(); toast('코스를 비웠습니다'); });
-  // 목표 사이클 수: 10 단위로 10~100
-  const setCycles = (n) => {
-    settings.courseCycles = clamp(Math.round(n / 10) * 10, 10, 100);
-    game.course.cycles = settings.courseCycles;
-    $('#cycles-out').value = String(settings.courseCycles);
-    $('#cycles-dec').disabled = settings.courseCycles <= 10;
-    $('#cycles-inc').disabled = settings.courseCycles >= 100;
-    persist(); updateHud();
-  };
   $('#cycles-dec').addEventListener('click', () => setCycles(settings.courseCycles - 10));
   $('#cycles-inc').addEventListener('click', () => setCycles(settings.courseCycles + 10));
   setCycles(settings.courseCycles);
   syncCourse();
+}
+
+/** 목표 사이클 수: 10 단위로 10~100 */
+function setCycles(n) {
+  settings.courseCycles = clamp(Math.round(n / 10) * 10, 10, 100);
+  game.course.cycles = settings.courseCycles;
+  $('#cycles-out').value = String(settings.courseCycles);
+  $('#cycles-dec').disabled = settings.courseCycles <= 10;
+  $('#cycles-inc').disabled = settings.courseCycles >= 100;
+  checkChallenge();
+  persist(); updateHud();
+}
+
+/** 도전 중인 코스를 고치면(포인트 이동·사이클 수 변경) 기록을 비교할 수 없으므로 도전을 해제한다 */
+function checkChallenge() {
+  if (app.challenge && courseSig(settings.course, settings.courseCycles) !== app.challenge.sig) {
+    app.challenge = null;
+    toast('코스를 바꿔서 도전이 해제되었습니다');
+  }
 }
 
 /** settings.course -> DOM 배치 + 게임 로직에 전달 (번호 순서) */
@@ -620,6 +649,7 @@ function syncCourse() {
   }
   game.course.points = [...settings.course].sort((a, b) => a.n - b.n);
   if (game.mode.id === 'free' && !game.running) game.resetState();
+  checkChallenge();
   persist();
 }
 
@@ -771,7 +801,9 @@ function commitLearnedModel(target, done, refresh = false) {
 function updateHud(force) {
   const who = app.account?.current();
   els.hudMode.textContent = game.mode.name + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
-  els.hudInstruction.textContent = game.running ? game.instruction : (app.started ? '시작을 누르세요' : '');
+  const ch = game.mode.id === 'free' ? app.challenge : null;
+  els.hudInstruction.textContent = game.running ? game.instruction
+    : !app.started ? '' : ch ? `도전 · ${ch.title}${ch.holder ? ` · 1위 평균 ${ch.holder.avg.toFixed(1)}s` : ''}` : '시작을 누르세요';
   $('#app').classList.toggle('playing', game.running);
   if (game.limit > 0) {
     const t = Math.ceil(game.running ? game.timeLeft : game.limit);
@@ -838,10 +870,12 @@ function startRun(opts = {}) {
 }
 
 game.onEnd = (result) => {
+  result.versus = !!app.versus;
   app.lastResult = result;
   const isBest = result.mode.id !== 'free' && result.reason !== 'manual' ? saveBest(result.rankKey || result.mode.id, result.score) : false;
   showResult(result, isBest);
   submitResult(result);
+  renderShare(result);
   updateHud();
 };
 
@@ -883,16 +917,148 @@ function showResult(result, isBest) {
   open(els.panelResult);
 }
 
+// =============== 커뮤니티 ===============
+function setupCommunity() {
+  community = initCommunity({
+    getUser: () => app.account?.current() || null,
+    getStore: () => app.communityStore,
+    toast,
+    modeName: (id) => MODES.find((m) => m.id === id)?.name || id,
+    countryLabel,
+    shareDraft,
+    onPractice: practicePost,
+    onChallengeMode: challengeMode,
+    onOpen: () => { close(els.panelMode); close(els.panelResult); },
+  });
+}
+
+/** 지금 공유할 수 있는 것: 자유 연습의 현재 코스(+이 코스로 세운 내 기록), 방금 끝낸 게임의 점수 */
+function shareDraft() {
+  const sig = courseSig(settings.course, settings.courseCycles);
+  const cr = settings.courseRecord && settings.courseRecord.sig === sig ? { avg: settings.courseRecord.avg, best: settings.courseRecord.best } : null;
+  const r = app.lastResult;
+  const ranked = r && r.mode.id !== 'free' && (r.reason === 'time' || r.reason === 'done') && !r.versus;
+  return {
+    course: settings.course.length >= 2 ? { points: settings.course.map((p) => ({ n: p.n, x: p.x, y: p.y })), cycles: settings.courseCycles, record: cr } : null,
+    result: ranked ? { modeId: r.mode.id, seconds: r.mode.timed ? r.limit : 0, score: r.score } : null,
+  };
+}
+
+/** 공유된 코스를 불러와 자유 연습으로 도전 (완주하면 그 글의 기록 게시판에 오른다) */
+function practicePost(post) {
+  if (game.running) game.stop('manual');
+  app.challenge = null;
+  app.versus = null;
+  settings.course = post.course.map((p) => ({ n: p.n, x: p.x, y: p.y }));
+  game.setMode('free');
+  setCycles(post.cycles);
+  syncCourse();
+  const top = boardOf(post)[0] || null;
+  app.challenge = { id: post.id, title: post.title, sig: courseSig(settings.course, settings.courseCycles), holder: top ? { uid: top.uid, nick: top.nick, avg: top.avg, best: top.best } : null };
+  closeAllPanels();
+  updateHud();
+  toast(`'${post.title}' 도전 — ${game.course.points[0].n}번에 퍽을 2초 두면 시작`, 4000);
+}
+
+/** 기록 자랑 글의 '나도 도전': 같은 모드·같은 시간으로 맞춘다 */
+function challengeMode(post) {
+  const m = MODES.find((x) => x.id === post.modeId);
+  if (!m) return;
+  if (game.running) game.stop('manual');
+  if (m.timed && PLAY_MINUTES.includes(post.seconds / 60)) { settings.playMinutes = post.seconds / 60; game.playSeconds = post.seconds; persist(); }
+  app.versus = null;
+  game.setMode(m.id);
+  game.resetState();
+  closeAllPanels();
+  updateHud();
+  toast(`${m.name} — ${post.score}점에 도전!`, 4000);
+}
+
+/** 결과 화면 아래: 커뮤니티에 공유하기 / 코스 도전 결과(기록 게시판 등록) */
+async function renderShare(result) {
+  const box = $('#result-share');
+  box.classList.add('hidden'); box.innerHTML = '';
+  if (result.versus || (result.reason !== 'time' && result.reason !== 'done')) return;
+  const show = (html, btnLabel, onClick) => {
+    box.innerHTML = `<div class="share-msg">${html}</div>${btnLabel ? `<button type="button" class="btn" id="btn-share">${btnLabel}</button>` : ''}`;
+    if (btnLabel) $('#btn-share').addEventListener('click', onClick);
+    box.classList.remove('hidden');
+  };
+  if (result.mode.id !== 'free') {
+    show('<span>이 기록을 커뮤니티에 자랑해 보세요</span>', '기록 자랑하기', () => community.compose({ type: 'record' }));
+    return;
+  }
+  const c = result.cycles;
+  if (result.reason !== 'done' || !c || c.avg == null || game.course.points.length < 2) return;
+  const rec = { avg: c.avg, best: c.best };
+  const sig = courseSig(game.course.points, c.target);
+  const prev = settings.courseRecord && settings.courseRecord.sig === sig ? settings.courseRecord : null;
+  if (betterRecord(rec, prev)) { settings.courseRecord = { sig, avg: rec.avg, best: rec.best, at: Date.now() }; persist(); } // 이 코스의 내 최고 기록
+  const ch = app.challenge && app.challenge.sig === sig ? app.challenge : null;
+  if (!ch) {
+    show('<span>이 코스와 기록을 커뮤니티에 공유해 보세요</span>', '코스 공유하기', () => community.compose({ type: 'course' }));
+    return;
+  }
+  // ---- 코스 도전 결과 ----
+  const s1 = (v) => `${v.toFixed(1)}s`;
+  const u = app.account?.current();
+  const openBoard = () => community.open('course');
+  if (!u) {
+    const h = ch.holder ? ` <span>1위</span> <b data-ugc>${esc(ch.holder.nick)}</b> <strong>평균 ${s1(ch.holder.avg)}</strong>` : '';
+    show(`<span>이번 기록 평균 ${s1(rec.avg)}</span>${h} <span>로그인하면 기록 게시판에 올라갑니다</span>`, '기록 게시판 보기', openBoard);
+    return;
+  }
+  try {
+    const store = await app.communityStore;
+    const r = await store.submitRecord(u, ch.id, rec);
+    const ph = r.prevHolder;
+    if (r.isHolder && r.improved && ph && ph.uid !== u.id) {
+      sfx.target?.();
+      const beatTitle = tr(`${tr(ch.title)} 기록 갱신!`);
+      show(`<span class="script">New record!</span> <span>갈아치운 기록</span> <b data-ugc>${esc(ph.nick)}</b> <strong>평균 ${s1(ph.avg)} → ${s1(rec.avg)}</strong>`,
+        '기록 갱신 자랑하기', () => community.compose({
+          type: 'beat', title: beatTitle.length <= TITLE_MAX ? beatTitle : tr('기록 갱신!'),
+          ref: { id: ch.id, title: ch.title, nick: ph.nick, avg: ph.avg },
+          course: { points: game.course.points.map((p) => ({ n: p.n, x: p.x, y: p.y })), cycles: c.target, record: rec },
+        }));
+    } else if (r.isHolder && r.improved && !ph) {
+      show(`<span class="script">First record!</span> <span>이 코스의 첫 기록 보유자가 되었습니다</span> <strong>평균 ${s1(rec.avg)}</strong>`, '기록 게시판 보기', openBoard);
+    } else if (r.isHolder && r.improved) {
+      show(`<span class="script">New best!</span> <span>내 기록을 고쳐 썼습니다 — 여전히 1위</span> <strong>평균 ${s1(rec.avg)}</strong>`, '기록 게시판 보기', openBoard);
+    } else if (r.isHolder) {
+      show(`<span>기록 보유자 유지 — 이번 평균 ${s1(rec.avg)}</span>`, '기록 게시판 보기', openBoard);
+    } else {
+      const top = ph || ch.holder;
+      const gap = top ? ` <span>1위</span> <b data-ugc>${esc(top.nick)}</b> <strong>평균 ${s1(top.avg)}</strong> <span>까지 ${s1(Math.max(0, rec.avg - top.avg))}</span>` : '';
+      show(`<span>${r.rank}위 / ${r.total}명</span>${r.improved ? ' <span>내 최고 기록 갱신</span>' : ''}${gap}`, '기록 게시판 보기', openBoard);
+    }
+    // 다음 도전을 위해 1위 정보를 새로 고침
+    const fresh = await store.get(ch.id);
+    const top = fresh ? boardOf(fresh)[0] : null;
+    if (app.challenge === ch) ch.holder = top ? { uid: top.uid, nick: top.nick, avg: top.avg, best: top.best } : null;
+  } catch (err) {
+    show(`<span>기록 등록 실패: ${esc(err.message || err)}</span>`, null);
+  }
+}
+
 function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
-  // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(Coming soon)
-  const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'soon'];
+  // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(커뮤니티)
+  const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'community'];
   CELLS.forEach((cell, pos) => {
     const no = String(pos + 1).padStart(2, '0');
     if (cell === 'wait') { const w = document.createElement('div'); w.className = 'mode-wait'; w.innerHTML = '<i></i><span>puck</span>'; els.modeList.appendChild(w); return; }
-    if (cell === 'soon') { const w = document.createElement('div'); w.className = 'mode-soon'; w.innerHTML = `<span class="no">${no}</span><b>Coming soon</b>`; els.modeList.appendChild(w); return; }
+    if (cell === 'community') {
+      // 9번: 커뮤니티 (코스·기록 공유). 다른 카드처럼 퍽으로도 고를 수 있다
+      const card = document.createElement('button');
+      card.className = 'mode-card mode-community';
+      card.innerHTML = `<span class="no">${no}</span><span class="time">Share</span><b>커뮤니티</b><em>Community</em><small>내가 만든 코스와 기록을 공유하고, 다른 사람의 코스에 도전해 기록을 겨뤄 보세요.</small>`;
+      card.addEventListener('click', () => { close(els.panelMode); community.open(); });
+      els.modeList.appendChild(card);
+      return;
+    }
     const m = MODES[cell], i = pos;
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
@@ -913,7 +1079,7 @@ function renderModeList() {
     });
     els.modeList.appendChild(card);
   });
-  els.p1.value = settings.p1; els.p2.value = settings.p2;
+  els.p1.value = tr(settings.p1); els.p2.value = tr(settings.p2);
 }
 
 // =============== 영역 (원근 사다리꼴) ===============
@@ -1107,7 +1273,7 @@ function applyWash() {
 function persist() { saveSettings(settings); }
 
 // =============== 유틸 ===============
-function open(panel) { panel.classList.remove('hidden'); }
+function open(panel) { panel.classList.remove('hidden'); els.toast.classList.add('hidden'); } // 창을 열면 떠 있던 안내(토스트)는 치운다
 function close(panel) { panel.classList.add('hidden'); }
 function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
 function showSplashError(msg) { els.splashError.textContent = msg; els.splashError.classList.remove('hidden'); }

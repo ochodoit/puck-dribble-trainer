@@ -436,6 +436,39 @@
       check('G1 clock pauses while the puck is lost', left0 - g2b.timeLeft < 0.8, { left0, left1: g2b.timeLeft });
     }
 
+    // ===== 자유 연습: 직접 만든 코스를 번호 순서대로 =====
+    {
+      const g = new Game(null); g.setMode('free'); g.plane = { A: 0.5, flip: false };
+      g.course = { points: [{ n: 2, x: 0.2, y: 0.5 }, { n: 5, x: 0.8, y: 0.5 }, { n: 9, x: 0.5, y: 0.2 }], reach: 0.04 };
+      const tr = { pos: { x: 0.5, y: 0.9 }, state: 'tracked', touches: 0, distance: 0, speed: 0, frames: 1, trackedFrames: 1, trackRate: 1 };
+      let tc = 800000; const at = (x, y, frames = 3) => { tr.pos = { x, y }; for (let i = 0; i < frames; i++) { g.update(0.033, tr, tc); tc += 33; } };
+      g.start(tr);
+      check('K1 course starts at the lowest number', g.course.points[g.courseIdx].n === 2 && g.limit === 0);
+      at(0.8, 0.5); // 5번을 먼저 가도 인정 안 됨
+      check('K1 out-of-order point does not count', g.stats.reached === 0 && g.courseIdx === 0);
+      at(0.2, 0.5);
+      check('K1 reaching point in order advances', g.stats.reached === 1 && g.course.points[g.courseIdx].n === 5);
+      at(0.8, 0.5); at(0.5, 0.2);
+      check('K1 finishing the last point completes a lap and loops', g.stats.reached === 3 && g.stats.laps === 1 && g.courseIdx === 0 && g.stats.lapTimes.length === 1 && g.stats.lapTimes[0] > 0, g.stats);
+      at(0.2, 0.5); at(0.8, 0.5); at(0.5, 0.2);
+      check('K1 second lap counted with its own time', g.stats.laps === 2 && g.stats.reached === 6, g.stats);
+      tr.state = 'predicted'; at(0.2, 0.5); tr.state = 'tracked';
+      check('K1 predicted position does not count', g.stats.reached === 6);
+      const res = g.stop('manual');
+      check('K1 course result report', res.items.some(([k]) => k === '통과한 포인트') && res.items.some(([k]) => k === '최고 바퀴') && res.rankKey === 'free', res.items.map(([k]) => k));
+      // 포인트가 하나면 벗어났다가 다시 와야 또 인정
+      const g1 = new Game(null); g1.setMode('free'); g1.plane = { A: 0.5, flip: false }; g1.course = { points: [{ n: 1, x: 0.5, y: 0.5 }], reach: 0.04 };
+      g1.start(tr); tr.pos = { x: 0.5, y: 0.5 }; for (let i = 0; i < 20; i++) { g1.update(0.033, tr, tc); tc += 33; }
+      const once = g1.stats.reached;
+      tr.pos = { x: 0.8, y: 0.5 }; g1.update(0.033, tr, tc); tc += 33; tr.pos = { x: 0.5, y: 0.5 }; g1.update(0.033, tr, tc); tc += 33;
+      check('K1 single point needs leaving before re-counting', once === 1 && g1.stats.reached === 2, { once, now: g1.stats.reached });
+      // 방향 반전(flip)과 평면 비율 반영: y 비율 0.2 는 평면 y = 0.2*A
+      const gf = new Game(null); gf.setMode('free'); gf.plane = { A: 0.6, flip: true }; gf.course = { points: [{ n: 1, x: 0.3, y: 0.25 }], reach: 0.04 };
+      gf.start(tr); tr.pos = { x: 0.3, y: 0.75 }; gf.update(0.033, tr, tc); tc += 33; // flip: v 0.75 -> 0.25
+      check('K1 course uses plane coords with flip', gf.stats.reached === 1);
+      check('K1 saved course sanitized', sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), course: [{ n: 1, x: 0.2, y: 0.3 }, { n: 1, x: 0.5, y: 0.5 }, { n: 11, x: 0.1, y: 0.1 }, { n: 3, x: 2, y: 0.1 }, 'x'] }).course.length === 1);
+    }
+
     // ===== 휴대폰 거치대 플레이 =====
     // P1) 핸즈프리 시작: 카운트다운 생략하고 바로 플레이
     ar = mk(); ar.start(fakePuck(0.5, 0.5), 'normal', true);

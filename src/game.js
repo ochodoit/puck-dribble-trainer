@@ -16,8 +16,8 @@ export const MODES = [
     desc: '가운데 박스 안에서 최대한 빠르게 좌우로 퍽을 움직이세요.' },
   { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
     desc: '무작위로 나타나는 타겟으로 퍽을 최대한 빨리 이동. 평균 반응 시간 측정.' },
-  { id: 'free', name: '자유 연습', en: 'Free', duration: 0,
-    desc: '인식 상태를 보며 자유롭게 드리블. 터치 수·속도·이동 거리 표시. 기록 없음.' },
+  { id: 'free', name: '자유 연습', en: 'Free · course', duration: 0,
+    desc: '번호 1~10을 끌어다 놓아 나만의 코스를 만들고, 순서대로 퍽을 가져다 놓는 연습. 기록 없음.' },
 ];
 
 export const PLAY_MINUTES = [1, 3, 5];
@@ -60,6 +60,8 @@ export class Game {
     // 퍽 피하기의 평면: 가로 1 × 세로 A (같은 단위). flip = 카메라 쪽으로 밀면 위로. main이 화면에 맞춰 설정
     this.plane = { A: 1, flip: false };
     this.me = null;          // 평면 위의 내 퍽 위치
+    // 자유 연습 코스: points = [{n, x, y}] (x, y는 평면 경기장의 0~1 비율), 번호 순으로 정렬. reach = 도착 판정 반경(평면 폭 단위)
+    this.course = { points: [], reach: 0.04 };
     this.onEnd = null;
     this.running = false;
     this.resetState();
@@ -80,6 +82,7 @@ export class Game {
     this.waypoints = [];
     this.flyers = [];
     this.me = null;
+    this.courseIdx = 0; this.lapStart = 0; this.courseLeft = true;
     this.wpIndex = 0;
     this.effects = [];
     this.stats = {};
@@ -141,10 +144,11 @@ export class Game {
         this._spawnTarget(p, 0.3, 0.5); // spawnedAt은 첫 update에서 게임 시계 기준으로 기록
         this.instruction = '타겟이 나타나면 바로 출발!';
         break;
-      default: // free
+      default: // free: 직접 만든 코스를 번호 순서대로
         this.timeLeft = 0;
-        this.stats = {};
-        this.instruction = '자유롭게 드리블하세요';
+        this.stats = { reached: 0, laps: 0, lapTimes: [], touches: 0, distance: 0 };
+        this.courseIdx = 0; this.lapStart = 0; this.courseLeft = true;
+        this.instruction = this.course.points.length ? `${this.course.points[0].n}번으로` : '자유롭게 드리블하세요';
     }
     this.sfx?.start();
   }
@@ -309,9 +313,35 @@ export class Game {
         }
         break;
       }
-      default: { // free
-        this.score = puck.touches;
-        this.stats = { touches: puck.touches, distance: puck.distance, speed: puck.speed };
+      default: { // free: 평면에서 번호 순서대로 포인트에 퍽을 가져다 놓기
+        const A = this.plane.A;
+        const me = pp ? this.toPlane(pp.x, pp.y) : null;
+        this.me = me;
+        const pts = this.course.points;
+        if (pts.length && me && tracked) {
+          const tg = pts[this.courseIdx % pts.length];
+          const dd = Math.hypot(me.x - tg.x, me.y - tg.y * A);
+          if (dd > this.course.reach * 1.6) this.courseLeft = true; // 같은 포인트를 다시 찍으려면 한 번 벗어나야 함
+          if (dd < this.course.reach && this.courseLeft) {
+            this.stats.reached++;
+            this.sfx?.rep();
+            this.courseIdx++;
+            if (this.courseIdx >= pts.length) {
+              this.courseIdx = 0;
+              if (pts.length > 1) {
+                const lt = this.elapsed - this.lapStart;
+                this.stats.laps++; this.stats.lapTimes.push(lt);
+                this._pop(tg.x, tg.y * A - 0.07, `Lap ${lt.toFixed(1)}s`, C.red, 'script');
+                this.sfx?.target();
+              }
+              this.lapStart = this.elapsed;
+            }
+            if (pts.length === 1) this.courseLeft = false;
+            this.instruction = `${pts[this.courseIdx].n}번으로`;
+          }
+        }
+        this.score = pts.length ? this.stats.reached : puck.touches;
+        this.stats.touches = puck.touches; this.stats.distance = puck.distance;
       }
     }
   }
@@ -418,8 +448,14 @@ export class Game {
         r.items = [['점수', this.score], ['타겟 성공', s.hits], ['평균 반응', `${mean(s.times).toFixed(2)}s`], ['최고 반응', `${best.toFixed(2)}s`], ['평균 이동', `${mean(s.travel).toFixed(2)}s`]];
         break;
       }
-      default:
-        r.items = [['터치(방향 전환)', s.touches || 0], ['이동 거리', `${(s.distance || 0).toFixed(1)} 바닥폭`], ['연습 시간', `${Math.round(this.elapsed)}s`]];
+      default: {
+        const lt = s.lapTimes || [];
+        r.items = this.course.points.length
+          ? [['통과한 포인트', s.reached || 0], ['완주 바퀴', s.laps || 0],
+            ['최고 바퀴', lt.length ? `${Math.min(...lt).toFixed(1)}s` : '-'], ['평균 바퀴', lt.length ? `${(lt.reduce((a, b) => a + b, 0) / lt.length).toFixed(1)}s` : '-'],
+            ['이동 거리', `${(s.distance || 0).toFixed(1)} 폭`], ['연습 시간', `${Math.round(this.elapsed)}s`]]
+          : [['터치(방향 전환)', s.touches || 0], ['이동 거리', `${(s.distance || 0).toFixed(1)} 폭`], ['연습 시간', `${Math.round(this.elapsed)}s`]];
+      }
     }
     if (this.tracker?.frames) {
       r.trackRate = this.tracker.trackRate;

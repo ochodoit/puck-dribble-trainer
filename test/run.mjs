@@ -134,6 +134,49 @@ let failed = false;
   const hintHidden = !(await page.isVisible('#tap-hint'));
   console.log(`${hintVisible && hintHidden ? 'PASS' : 'FAIL'} calibration tap flow`);
   if (!(hintVisible && hintHidden)) failed = true;
+  // 모드 화면 3×3: 가운데(5번)는 비어 있고 9번은 Coming soon
+  await page.click('#btn-mode');
+  const grid = await page.evaluate(() => { const kids = [...document.querySelector('#mode-list').children]; return { n: kids.length, mid: kids[4].className, last: kids[8].className, lastText: kids[8].textContent, cards: document.querySelectorAll('#mode-list .mode-card').length, cols: getComputedStyle(document.querySelector('#mode-list')).gridTemplateColumns.split(' ').length }; });
+  const gridOk = grid.n === 9 && grid.mid === 'mode-wait' && grid.last === 'mode-soon' && /Coming soon/.test(grid.lastText) && grid.cards === 7 && grid.cols === 3;
+  console.log(`${gridOk ? 'PASS' : 'FAIL'} mode grid 3x3 with empty center and Coming soon (${JSON.stringify(grid)})`);
+  if (!gridOk) failed = true;
+  // 자유 연습(8번 칸) 선택 -> 코스 편집: 번호 3, 1을 끌어다 놓기 -> 저장, 번호 순서 정렬
+  await page.click('#mode-list > :nth-child(8)');
+  await page.waitForSelector('#course:not(.hidden)');
+  const fieldBox = await (await page.$('#course-field')).boundingBox();
+  const dragPt = async (n, fx, fy) => { const b = await (await page.$(`.course-pt[data-n="${n}"]`)).boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await page.mouse.move(fieldBox.x + fieldBox.width * fx, fieldBox.y + fieldBox.height * fy, { steps: 6 }); await page.mouse.up(); };
+  await dragPt(3, 0.75, 0.6); await dragPt(1, 0.25, 0.6);
+  const course = await page.evaluate(() => ({ saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).course, game: window.__puckTrainer.game.course.points.map((p) => p.n), inField: document.querySelectorAll('#course-field > .course-pt').length, inTray: document.querySelectorAll('#course-slots > .course-pt').length }));
+  const courseOk = course.saved.length === 2 && course.game.join(',') === '1,3' && course.inField === 2 && course.inTray === 8 && Math.abs(course.saved.find((p) => p.n === 3).x - 0.75) < 0.03;
+  console.log(`${courseOk ? 'PASS' : 'FAIL'} course builder: drag numbers onto the field (${JSON.stringify(course.game)}, field ${course.inField}, tray ${course.inTray})`);
+  if (!courseOk) failed = true;
+  // 트레이로 되돌리면 삭제
+  await dragPt(3, 0.5, 0.02);
+  const afterRemove = await page.evaluate(() => window.__puckTrainer.game.course.points.map((p) => p.n).join(','));
+  await dragPt(3, 0.75, 0.6);
+  console.log(`${afterRemove === '1' ? 'PASS' : 'FAIL'} course builder: dropping on the tray removes the point`);
+  if (afterRemove !== '1') failed = true;
+  // 플레이: 1번 -> 3번 순서로 퍽을 옮기면 포인트 통과 + 한 바퀴
+  const toUV = (p) => page.evaluate(([x, y]) => { const g = window.__puckTrainer.game; const t = window.__puckTrainer.tracker; const v = g.plane.flip ? 1 - y : y; const orig = Object.getPrototypeOf(t).update; t.update = function (m, now) { return orig.call(this, { u: x, v }, now); }; }, p);
+  await page.evaluate(() => { window.__puckTrainer.settings.autoStart = false; });
+  await toUV([0.5, 0.9]);
+  await page.click('#btn-start'); await page.waitForTimeout(300);
+  const saved2 = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).course);
+  const p1 = saved2.find((p) => p.n === 1), p3 = saved2.find((p) => p.n === 3);
+  await toUV([p1.x, p1.y]); await page.waitForTimeout(500);
+  const nextIs3 = await page.evaluate(() => document.querySelector('.course-pt.next')?.dataset.n);
+  await toUV([p3.x, p3.y]); await page.waitForTimeout(500);
+  const lap = await page.evaluate(() => ({ reached: window.__puckTrainer.game.stats.reached, laps: window.__puckTrainer.game.stats.laps }));
+  console.log(`${nextIs3 === '3' && lap.reached === 2 && lap.laps === 1 ? 'PASS' : 'FAIL'} course play: points in order and lap (next=${nextIs3}, ${JSON.stringify(lap)})`);
+  if (!(nextIs3 === '3' && lap.reached === 2 && lap.laps === 1)) failed = true;
+  await page.screenshot({ path: join(ROOT, 'test', 'screenshot-course.png') });
+  await page.click('#btn-start');
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  await page.evaluate(() => { delete window.__puckTrainer.tracker.update; window.__puckTrainer.settings.autoStart = true; });
+  await page.click('[data-close="panel-result"]');
+  // 다시 아케이드로
+  await page.click('#btn-mode'); await page.click('#mode-list > :nth-child(1)');
+
   // 영역 편집: 버튼 -> 사다리꼴 핸들 4개 + 편집 바, 완료 -> 저장
   await page.click('#btn-floor-lock');
   await page.waitForSelector('#area-bar:not(.hidden)');

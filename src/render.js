@@ -89,6 +89,13 @@ export class Renderer {
       return;
     }
 
+    // ---- 자유 연습: 직접 만든 코스를 평면에서 ----
+    if (game.mode.id === 'free') {
+      this._drawCourse(ctx, W, H, game, puck, now);
+      if (vision.puck) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.012, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.7); ctx.stroke(); }
+      return;
+    }
+
     // ---- 퍽 피하기: 바닥 원근이 아니라 평면에서 ----
     if (game.mode.id === 'obstacle') {
       this._drawDodge(ctx, W, H, game, puck, now);
@@ -183,6 +190,68 @@ export class Renderer {
   }
 
   _floorPx(uvToC) { const a = uvToC(1, 0.5), b = uvToC(0, 0.5); return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+  /** 자유 연습 코스 평면: 번호 포인트(DOM)가 놓인 경기장에 경로선·다음 목표·내 퍽을 그린다 */
+  _drawCourse(ctx, W, H, game, puck, now) {
+    const dpr = this.dpr, hair = Math.max(1, dpr), fs = Math.max(11 * dpr, W * 0.017);
+    const f = dodgeField(W, H, this.topInset), S = f.w, A = game.plane.A;
+    const P = (x, y) => [f.x + x * S, f.y + y * S];
+    ctx.save();
+    ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(f.x, f.y, f.w, f.h);
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(0, 0, W, f.y); ctx.fillRect(0, f.y + f.h, W, H - f.y - f.h); ctx.fillRect(0, f.y, f.x, f.h); ctx.fillRect(f.x + f.w, f.y, W - f.x - f.w, f.h);
+    ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.strokeRect(f.x, f.y, f.w, f.h);
+    const flip = game.plane.flip;
+    text(ctx, flip ? '↓ 몸쪽 · 당기기' : '↓ 카메라쪽 · 밀기', f.x + f.w / 2, f.y + f.h - fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
+
+    const pts = game.course.points;
+    // 경로: 번호 순서대로 잇는 헤어라인 (마지막에서 처음으로 돌아가는 선은 더 옅게)
+    if (pts.length > 1) {
+      ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.4);
+      ctx.beginPath(); pts.forEach((p, i) => { const [x, y] = P(p.x, p.y * A); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+      if (pts.length > 2) { ctx.strokeStyle = rgba(C.ink, 0.15); ctx.beginPath(); let [x, y] = P(pts[pts.length - 1].x, pts[pts.length - 1].y * A); ctx.moveTo(x, y); [x, y] = P(pts[0].x, pts[0].y * A); ctx.lineTo(x, y); ctx.stroke(); }
+    }
+    const me = puck.pos ? game.toPlane(puck.pos.x, puck.pos.y) : null;
+    // 다음 목표: 레드 고리 + 내 퍽에서 목표까지의 선
+    if (game.running && pts.length) {
+      const tg = pts[game.courseIdx % pts.length];
+      const [tx, ty] = P(tg.x, tg.y * A);
+      const rr = game.course.reach * S * (1.05 + 0.12 * Math.sin(now / 160));
+      ctx.beginPath(); ctx.arc(tx, ty, rr, 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = C.red; ctx.stroke();
+      if (me) { const [mx, my] = P(me.x, me.y); ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(tx, ty); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.45); ctx.stroke(); }
+    }
+    // 궤적 + 내 퍽 (잉크 정원 + 고리)
+    if (puck.trail.length > 1) {
+      ctx.lineWidth = hair;
+      for (let i = 1; i < puck.trail.length; i++) {
+        const a = game.toPlane(puck.trail[i - 1].x, puck.trail[i - 1].y), b = game.toPlane(puck.trail[i].x, puck.trail[i].y);
+        const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.45;
+        if (alpha <= 0) continue;
+        const [ax, ay] = P(a.x, a.y), [bx, by] = P(b.x, b.y);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.strokeStyle = rgba(C.ink, alpha); ctx.stroke();
+      }
+    }
+    if (me) {
+      const [cx, cy] = P(me.x, me.y), r = PUCK_R * S * 0.8;
+      const predicted = puck.state === 'predicted';
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = predicted ? rgba(C.ink, 0.4) : C.ink; ctx.stroke();
+    }
+    // 안내
+    if (!game.running) {
+      const msg = pts.length ? `${pts[0].n}번에 퍽을 2초 두거나 시작을 누르세요` : '위의 번호를 끌어다 놓아 코스를 만드세요';
+      text(ctx, msg, f.x + f.w / 2, f.y + f.h * 0.55, fs, { weight: 600, color: C.inkSoft, halo: true });
+    }
+    for (const e of game.effects) {
+      if (e.type !== 'pop') continue;
+      const [cx, cy] = P(Math.min(0.86, Math.max(0.14, e.x)), Math.min(A, Math.max(0.08, e.y)));
+      ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
+      const script = e.style === 'script';
+      text(ctx, e.text, cx, cy - e.age * W * 0.04, script ? W * 0.05 : W * 0.026, { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color });
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
 
   /** 퍽 피하기 평면: 종이색 경기장 + 네 변 헤어라인. 빨간 정원 = 피할 퍽, 잉크 정원 = 나 */
   _drawDodge(ctx, W, H, game, puck, now) {

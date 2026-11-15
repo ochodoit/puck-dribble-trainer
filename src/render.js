@@ -18,7 +18,7 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, autoStart = false }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, autoStart = false, calib = null }) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
@@ -43,12 +43,41 @@ export class Renderer {
       ctx.beginPath();
       floor.quad.forEach(([x, y], i) => { const [cx, cy] = toC(x, y); i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy); });
       ctx.closePath();
-      ctx.lineWidth = unit * (floor.mode === 'full' ? 0.003 : 0.005);
-      ctx.setLineDash(floor.locked || floor.mode !== 'auto' ? [] : [unit * 0.02, unit * 0.012]);
-      ctx.strokeStyle = floor.mode === 'full' ? 'rgba(56,189,248,0.35)' : floor.detected ? 'rgba(56,189,248,0.9)' : 'rgba(245,158,11,0.9)';
+      const full = floor.mode === 'full' || floor.fallback;
+      ctx.lineWidth = unit * (full ? 0.003 : 0.005);
+      ctx.setLineDash(floor.locked || floor.mode !== 'auto' || full ? [] : [unit * 0.02, unit * 0.012]);
+      ctx.strokeStyle = full ? 'rgba(56,189,248,0.35)' : floor.detected ? 'rgba(56,189,248,0.9)' : 'rgba(245,158,11,0.9)';
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    // 자동 물체 지정 (가운데 원에 3초)
+    if (calib?.active) {
+      const c = vision && calib.circle;
+      if (c) {
+        const [cx, cy] = toC(c.x, c.y); const r = c.r * sx;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(2,6,23,0.25)'; ctx.fill();
+        ctx.setLineDash([unit * 0.015, unit * 0.01]); ctx.lineWidth = unit * 0.006; ctx.strokeStyle = calib.status === 'ok' ? '#22c55e' : '#f59e0b'; ctx.stroke(); ctx.setLineDash([]);
+        if (calib.hold > 0) {
+          ctx.beginPath(); ctx.arc(cx, cy, r * 1.15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, calib.hold / 3));
+          ctx.lineWidth = unit * 0.012; ctx.strokeStyle = '#22c55e'; ctx.stroke();
+        }
+        if (calib.sample?.status === 'ok') {
+          const [ox, oy] = toC(calib.sample.cx, calib.sample.cy);
+          ctx.beginPath(); ctx.arc(ox, oy, unit * 0.012, 0, Math.PI * 2); ctx.fillStyle = `rgb(${calib.sample.r},${calib.sample.g},${calib.sample.b})`; ctx.fill();
+          ctx.lineWidth = unit * 0.003; ctx.strokeStyle = '#fff'; ctx.stroke();
+        }
+        const label = calib.status === 'too_big' ? '물체가 너무 큽니다. 카메라에서 더 멀리' : calib.status === 'ok' ? `인식 중… ${Math.max(0, 3 - calib.hold).toFixed(1)}초 가만히` : (calib.target === 'stick' ? '스틱 블레이드(테이프)를 원 안에 놓으세요' : '퍽으로 쓸 물체(공·뚜껑 등)를 원 안에 놓으세요');
+        ctx.font = `700 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.lineWidth = unit * 0.008; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(label, cx, cy - r * 1.3);
+        ctx.fillStyle = '#fff'; ctx.fillText(label, cx, cy - r * 1.3);
+        ctx.font = `${Math.round(fontPx * 0.8)}px system-ui, sans-serif`; ctx.textBaseline = 'top';
+        const sub = '배경과 색이 다르면 무엇이든 됩니다 · 화면을 터치하면 취소';
+        ctx.strokeText(sub, cx, cy + r * 1.3); ctx.fillStyle = '#e5e7eb'; ctx.fillText(sub, cx, cy + r * 1.3);
+      }
+      return;
+    }
+
     if (!mapping) return;
 
     // 아케이드: 화면 공간 렌더 (바닥 사각형 위 오브젝트 대신)

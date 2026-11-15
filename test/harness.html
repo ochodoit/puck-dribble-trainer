@@ -4,7 +4,7 @@
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
 <script type="module">
-  import { Vision } from '../src/vision.js';
+  import { Vision, AutoCalibrator } from '../src/vision.js';
   import { Tracker } from '../src/tracker.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
@@ -415,6 +415,61 @@
     const wide = await acc.leaderboard('wide');
     check('C4 per-mode separation', wide.length === 5 && !wide.some((r) => r.nick === '번개손'), wide.length);
     check('C4 no scores for guest', await (async () => { acc.logout(); try { await acc.submitScore('arcade', 1); return false; } catch { return true; } })());
+
+    // ===== 아무 바닥·아무 물체: 자동 지정 + 전체 화면 폴백 =====
+    const v2 = new Vision(240); v2.mirror = false; v2.setSourceSize(640, 480);
+    const matSettings = { ...settings, floorMode: 'auto', manualQuad: null, puckModel: { r: 0, g: 0, b: 0, area: 0 }, stickModel: null, puckTol: 95, debug: false };
+    const drawMat = ({ lid, lidR = 20, color = '#f97316', bigLid = false }) => {
+      sctx.fillStyle = '#6b7280'; sctx.fillRect(0, 0, 640, 480); // 회색 매트 (흰 바닥 없음)
+      sctx.fillStyle = '#596270'; for (let i = 0; i < 12; i++) sctx.fillRect(i * 60, 0, 30, 480); // 약한 줄무늬 질감
+      if (lid) { sctx.fillStyle = color; sctx.beginPath(); sctx.arc(lid.x, lid.y, bigLid ? 75 : lidR, 0, Math.PI * 2); sctx.fill(); }
+    };
+    // F1) 흰 바닥이 없으면 전체 화면 폴백으로 바로 게임 가능
+    drawMat({ lid: null });
+    r = v2.process(scene, matSettings);
+    check('F1 no white floor -> full-frame fallback mapping', r.floor.fallback === true && !!r.floor.mapping && r.floor.quad[2][0] > v2.PW - 6);
+    // F2) 가운데 원에 주황 뚜껑을 3초 두면 자동 지정
+    const cal = new AutoCalibrator(3);
+    let done = null, frames = 0;
+    drawMat({ lid: { x: 320, y: 240 } });
+    while (!done && frames < 150) { v2.process(scene, matSettings); done = cal.update(v2.autoCalibSample(), 0.033); frames++; }
+    check('F2 auto-calibration commits after ~3s of stillness', !!done && frames >= 88 && frames <= 100, { frames, done });
+    check('F2 learned color is orange with sensible size/tolerance', done && done.r > 200 && done.g > 80 && done.g < 160 && done.b < 80 && done.area > 100 && done.area < 260 && done.tol >= 45 && done.tol <= 120, done);
+    // 학습된 모델로 회색 매트 위 뚜껑 추적
+    matSettings.puckModel = { r: done.r, g: done.g, b: done.b, area: done.area }; matSettings.puckTol = done.tol; v2.seedPuck(done.cx, done.cy, done.area);
+    r = v2.process(scene, matSettings);
+    check('F2 lid tracked at center on gray mat', r.puck && Math.abs(r.puck.x - 120) < 2 && Math.abs(r.puck.y - 90) < 2, r.puck && [r.puck.x, r.puck.y]);
+    for (let i = 1; i <= 10; i++) { drawMat({ lid: { x: 320 + i * 12, y: 240 + i * 8 } }); r = v2.process(scene, matSettings); }
+    check('F2 lid followed while moving', r.puck && Math.abs(r.puck.x - 440 * 0.375) < 2 && Math.abs(r.puck.y - 320 * 0.375) < 2, r.puck && [r.puck.x, r.puck.y]);
+    // 다른 색 물체(파란 공)도 같은 방식으로
+    const cal2 = new AutoCalibrator(3); let done2 = null;
+    drawMat({ lid: { x: 320, y: 240 }, color: '#2563eb', lidR: 14 });
+    for (let i = 0; i < 120 && !done2; i++) { v2.process(scene, matSettings); done2 = cal2.update(v2.autoCalibSample(), 0.033); }
+    check('F2 any distinct-colored object works (blue ball)', done2 && done2.b > 180 && done2.r < 80, done2);
+    // F3) 원이 비어 있으면 확정 없음, 너무 큰 물체는 안내, 물체가 바뀌면 다시 셈
+    const cal3 = new AutoCalibrator(3); let none = null;
+    drawMat({ lid: null });
+    for (let i = 0; i < 120; i++) { v2.process(scene, matSettings); none = cal3.update(v2.autoCalibSample(), 0.033) || none; }
+    check('F3 empty circle never commits', none === null && cal3.status === 'none');
+    drawMat({ lid: { x: 320, y: 240 }, bigLid: true }); v2.process(scene, matSettings);
+    check('F3 oversized object flagged too_big', v2.autoCalibSample().status === 'too_big');
+    const cal4 = new AutoCalibrator(3); let d4 = null;
+    drawMat({ lid: { x: 320, y: 240 } });
+    for (let i = 0; i < 45; i++) { v2.process(scene, matSettings); d4 = cal4.update(v2.autoCalibSample(), 0.033); }
+    const holdBefore = cal4.hold;
+    drawMat({ lid: { x: 320, y: 240 }, color: '#2563eb' }); v2.process(scene, matSettings); cal4.update(v2.autoCalibSample(), 0.033);
+    check('F3 swapping the object resets the hold', holdBefore > 1.2 && cal4.hold < 0.1 && d4 === null, { holdBefore, after: cal4.hold });
+    // F4) 흰 바닥 히스테리시스: 10프레임 연속 검출 시 흰 바닥, 90프레임 미검출 시 전체 화면 복귀
+    const v3 = new Vision(240); v3.mirror = false; v3.setSourceSize(640, 480);
+    const floorSettings = { ...matSettings, puckModel: { r: 0, g: 0, b: 0, area: 0 } };
+    for (let i = 0; i < 9; i++) { drawScene({ puck: null }); r = v3.process(scene, floorSettings); }
+    const stillFallback = r.floor.fallback === true;
+    drawScene({ puck: null }); r = v3.process(scene, floorSettings);
+    check('F4 white floor adopted after 10 consecutive frames', stillFallback && r.floor.fallback === false && r.floor.quad[0][0] > 10, { stillFallback, q: r.floor.quad });
+    for (let i = 0; i < 89; i++) { drawMat({ lid: null }); r = v3.process(scene, floorSettings); }
+    const keptFloor = r.floor.fallback === false;
+    drawMat({ lid: null }); r = v3.process(scene, floorSettings);
+    check('F4 back to full frame after 3s without white floor', keptFloor && r.floor.fallback === true, { keptFloor, fb: r.floor.fallback });
 
     // 9) 성능: 240x180 프레임 처리 시간
     settings.debug = true;

@@ -38,6 +38,17 @@ export const CHOICE_RIGHT = 0.67;    // u > 0.67 = 오른쪽 영역
 export function choiceSide(u) { return u < CHOICE_LEFT ? 'L' : u > CHOICE_RIGHT ? 'R' : null; }
 
 /**
+ * 범용 머무름 판정: 같은 key(카드 번호 등) 위에 holdS초 머물면 그 key를 반환. key가 바뀌거나 null이면 처음부터.
+ * c: { key, hold }
+ */
+export function stepDwell(c, key, dt, holdS = CHOICE_HOLD_S) {
+  if (key !== c.key) { c.key = key; c.hold = 0; return null; }
+  if (key === null || key === undefined) return null;
+  c.hold += dt;
+  return c.hold >= holdS ? key : null;
+}
+
+/**
  * c: { side, hold } 상태를 한 프레임 진행. 반환: 실행할 쪽 'L' | 'R' | null
  * armed=false 인 동안(결과가 막 뜬 직후)과 추적이 끊긴 동안은 세지 않는다. 영역을 벗어나거나 바꾸면 처음부터.
  */

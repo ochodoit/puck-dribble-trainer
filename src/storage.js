@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   controller: 'puck',                         // 게임 조작 대상: 'puck' | 'stick'(퍽 없이 스틱 블레이드로)
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
+  playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
   cameraId: '',
   facing: 'user',                             // 'user' 전면(기본: 화면을 보며 플레이) | 'environment' 후면
@@ -58,6 +59,7 @@ export function sanitizeSettings(s) {
   if (!quadOk) { s.manualQuad = null; if (s.floorMode === 'manual') s.floorMode = 'auto'; }
   s.difficulty = ['easy', 'normal', 'hard'].includes(s.difficulty) ? s.difficulty : d.difficulty;
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
+  s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
   s.cameraId = typeof s.cameraId === 'string' ? s.cameraId : '';
   s.facing = s.facing === 'environment' ? 'environment' : 'user';
   s.autoStart = typeof s.autoStart === 'boolean' ? s.autoStart : d.autoStart;

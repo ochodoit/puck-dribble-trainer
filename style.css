@@ -246,6 +246,28 @@ input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
 .stat.winner b { color: var(--red); }
 .result-rank { margin: 14px 0 0; font-size: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
+/* 게임 종료 후 선택: 왼쪽 = 한 번 더, 오른쪽 = 모드 선택 (퍽을 2초 두면 채워지며 실행) */
+.choice { display: grid; grid-template-columns: 1fr minmax(110px, 1.1fr) 1fr; gap: 14px; align-items: stretch; margin-top: 20px; }
+.choice-opt { position: relative; overflow: hidden; border: var(--line) solid var(--ink); border-radius: var(--radius); background: var(--paper); color: var(--ink);
+  padding: 12px 18px; min-height: 72px; cursor: pointer; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: left; transition: transform 0.1s; }
+.choice-opt.right { align-items: flex-end; text-align: right; }
+.choice-opt:active { transform: scale(0.98); }
+.choice-opt > :not(.choice-fill) { position: relative; }
+.choice-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--red); transition: width 0.12s linear; }
+.choice-opt.right .choice-fill { left: auto; right: 0; }
+.choice-label { font-family: var(--display); font-weight: 900; font-variation-settings: "SOFT" 100; font-size: 24px; line-height: 1.15; }
+.choice-opt small { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-soft); }
+.choice-opt.filling, .choice-opt.filling small { color: var(--paper); }
+.choice-opt.left:not(.hidden) { background: var(--ink); color: var(--paper); }
+.choice-opt.left small { color: rgba(244, 241, 234, 0.75); }
+.choice-track { position: relative; align-self: center; height: 56px; }
+.choice-track::before { content: ""; position: absolute; left: 0; right: 0; top: 22px; border-top: 1px solid var(--ink); }
+.choice-track .zone { position: absolute; top: 20px; height: 5px; background: var(--ink); border-radius: 3px; }
+.choice-track .zone-l { left: 0; width: 33%; }
+.choice-track .zone-r { right: 0; width: 33%; }
+#choice-dot { position: absolute; top: 22px; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px var(--paper); transition: left 0.08s linear; }
+.choice-track small { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 11px; color: var(--mute); white-space: nowrap; }
+
 .toast { position: absolute; left: 50%; top: calc(var(--safe-top) + 96px); transform: translateX(-50%); background: var(--ink); color: var(--paper);
   border-radius: 22px; padding: 10px 22px; font-size: 14px; font-weight: 500; z-index: 20; pointer-events: none; width: max-content; max-width: min(92vw, 720px); text-align: center; text-wrap: balance; animation: toast-in 0.2s ease-out; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
@@ -273,5 +295,9 @@ input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
   .settings-grid { grid-template-columns: 1fr; }
   .calib-item { grid-template-columns: 32px 1fr; }
   .stat:first-child b, .stat.full b { font-size: 44px; }
+  .choice { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .choice-track { grid-column: 1 / -1; grid-row: 1; }
+  .choice-label { font-size: 19px; }
+  .choice-opt { min-height: 62px; padding: 10px 14px; }
   .masthead { font-size: 11.5px; }
 }

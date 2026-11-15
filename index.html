@@ -298,10 +298,15 @@
         <header><h2 id="result-title">결과</h2><button class="btn btn-ghost btn-close" data-close="panel-result">닫기</button></header>
         <div id="result-body" class="result-body"></div>
         <p id="result-rank" class="result-rank hidden"></p>
-        <p id="result-hint" class="muted" style="margin-top:10px">거치대에 둔 채로 다시 하려면 퍽을 가운데 원 안에 3초 두세요.</p>
-        <div class="row">
-          <button id="btn-result-again" class="btn btn-primary">다시 하기</button>
-          <button id="btn-result-next" class="btn btn-primary hidden">다음 플레이어</button>
+        <div id="result-choice" class="choice">
+          <button id="btn-result-again" class="choice-opt left"><span class="choice-fill"></span><span class="choice-label">한 번 더</span><small>← 퍽을 왼쪽에</small></button>
+          <button id="btn-result-next" class="choice-opt left hidden"><span class="choice-fill"></span><span class="choice-label">다음 플레이어</span><small>← 퍽을 왼쪽에</small></button>
+          <div id="choice-track" class="choice-track" aria-hidden="true">
+            <span class="zone zone-l"></span><span class="zone zone-r"></span>
+            <i id="choice-dot" class="hidden"></i>
+            <small id="choice-hint">퍽을 왼쪽·오른쪽에 2초</small>
+          </div>
+          <button id="btn-result-mode" class="choice-opt right"><span class="choice-fill"></span><span class="choice-label">모드 선택</span><small>퍽을 오른쪽에 →</small></button>
         </div>
       </div>
     </div>

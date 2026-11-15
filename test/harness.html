@@ -376,7 +376,7 @@
     const port = new Arcade(null); port.aspect = 1.78; port.start(fakePuck(0.5, 0.5), 'normal', true); port.pickupTimer = 1e9; port.spawnTimer = 0;
     land.update(0.033, fakePuck(0.05, 0.05), 1000); port.update(0.033, fakePuck(0.05, 0.05), 1000);
     const vl = land.obstacles.find((o) => o.type !== 'beam')?.vy, vp = port.obstacles.find((o) => o.type !== 'beam')?.vy;
-    check('P2 portrait fall speed scaled (x2 cap)', port.fallScale === 2 && land.fallScale === 1 && (!vl || !vp || Math.abs(vp / vl - 2) < 0.3), { vl, vp, fs: port.fallScale });
+    check('P2 portrait fall speed scaled (x2 cap)', port.fallScale === 2 && land.fallScale === 1 && (!vl || !vp || (vp / vl > 1.5 && vp / vl < 2.5)), { vl, vp, fs: port.fallScale }); // 장애물 종류별 속도 계수(0.85~1) 차이 허용
 
     // ===== 계정 / 랭킹 (기기 내 저장소, 메모리 스토리지로 격리) =====
     const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
@@ -422,7 +422,7 @@
     const drawMat = ({ lid, lidR = 20, color = '#f97316', bigLid = false }) => {
       sctx.fillStyle = '#6b7280'; sctx.fillRect(0, 0, 640, 480); // 회색 매트 (흰 바닥 없음)
       sctx.fillStyle = '#596270'; for (let i = 0; i < 12; i++) sctx.fillRect(i * 60, 0, 30, 480); // 약한 줄무늬 질감
-      if (lid) { sctx.fillStyle = color; sctx.beginPath(); sctx.arc(lid.x, lid.y, bigLid ? 75 : lidR, 0, Math.PI * 2); sctx.fill(); }
+      if (lid) { sctx.fillStyle = color; sctx.beginPath(); sctx.arc(lid.x, lid.y, bigLid ? 110 : lidR, 0, Math.PI * 2); sctx.fill(); }
     };
     // F1) 흰 바닥이 없으면 전체 화면 폴백으로 바로 게임 가능
     drawMat({ lid: null });
@@ -459,6 +459,21 @@
     const holdBefore = cal4.hold;
     drawMat({ lid: { x: 320, y: 240 }, color: '#2563eb' }); v2.process(scene, matSettings); cal4.update(v2.autoCalibSample(), 0.033);
     check('F3 swapping the object resets the hold', holdBefore > 1.2 && cal4.hold < 0.1 && d4 === null, { holdBefore, after: cal4.hold });
+    // F3b) 점무늬 매트(흩어진 노이즈)는 물체로 보지 않고, 그 위의 공은 인식
+    const drawDots = (withBall) => {
+      drawMat({ lid: null });
+      let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      sctx.fillStyle = '#f59e0b';
+      for (let i = 0; i < 400; i++) { sctx.fillRect(Math.floor(rnd() * 640), Math.floor(rnd() * 480), 3, 3); } // 주황 점무늬
+      if (withBall) { sctx.fillStyle = '#2563eb'; sctx.beginPath(); sctx.arc(320, 240, 18, 0, Math.PI * 2); sctx.fill(); }
+    };
+    drawDots(false); v2.process(scene, matSettings);
+    const dotsSample = v2.autoCalibSample();
+    check('F3b scattered pattern is not an object', dotsSample.status !== 'ok', dotsSample);
+    drawDots(true); v2.process(scene, matSettings);
+    const ballOnDots = v2.autoCalibSample();
+    check('F3b ball on patterned mat is detected', ballOnDots.status === 'ok' && ballOnDots.b > 150, ballOnDots);
+
     // F4) 흰 바닥 히스테리시스: 10프레임 연속 검출 시 흰 바닥, 90프레임 미검출 시 전체 화면 복귀
     const v3 = new Vision(240); v3.mirror = false; v3.setSourceSize(640, 480);
     const floorSettings = { ...matSettings, puckModel: { r: 0, g: 0, b: 0, area: 0 } };

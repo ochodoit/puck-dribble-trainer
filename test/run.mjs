@@ -74,13 +74,20 @@ let failed = false;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await page.waitForTimeout(2300);
-  // 첫 실행: 퍽이 지정된 적 없으면 자동 지정(가운데 원 3초)이 켜지고, 화면 터치로 취소됨
-  const autoOn = await page.evaluate(() => window.__puckTrainer.app.calib.active && window.__puckTrainer.app.calib.target === 'puck');
+  // 대기 중에는 항상 가운데 원이 켜져 있고(물체 학습 + 핸즈프리 시작), 탭해도 꺼지지 않음
+  const idleOn = await page.evaluate(() => { const c = window.__puckTrainer.app.calib; return c.active && !c.manual && c.target === 'puck'; });
   await page.mouse.click(300, 300);
   await page.waitForTimeout(100);
-  const autoOff = await page.evaluate(() => !window.__puckTrainer.app.calib.active);
-  console.log(`${autoOn && autoOff ? 'PASS' : 'FAIL'} first run opens auto object calibration, tap cancels`);
-  if (!(autoOn && autoOff)) failed = true;
+  const stillOn = await page.evaluate(() => window.__puckTrainer.app.calib.active);
+  console.log(`${idleOn && stillOn ? 'PASS' : 'FAIL'} idle circle active while waiting (learn object / hands-free start)`);
+  if (!(idleOn && stillOn)) failed = true;
+  // 보정 패널의 '원 안에 3초(자동)' 버튼은 수동 모드로 전환되고 탭으로 취소됨
+  await page.click('#btn-calib'); await page.click('[data-autocalib="stick"]');
+  const manualOn = await page.evaluate(() => { const c = window.__puckTrainer.app.calib; return c.active && c.manual && c.target === 'stick'; });
+  await page.mouse.click(300, 300); await page.waitForTimeout(100);
+  const manualOff = await page.evaluate(() => !window.__puckTrainer.app.calib.manual);
+  console.log(`${manualOn && manualOff ? 'PASS' : 'FAIL'} manual auto-calibration for stick, tap cancels`);
+  if (!(manualOn && manualOff)) failed = true;
   const fps = await page.textContent('#chip-fps');
   const fpsNum = parseInt(fps, 10);
   console.log(`${fpsNum > 0 ? 'PASS' : 'FAIL'} app processing frames (${fps.trim()})`);

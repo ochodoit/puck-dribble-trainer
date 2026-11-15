@@ -1,6 +1,6 @@
 // 아케이드: 웹캠으로 추적한 퍽의 (X, Y)를 화면 하단 플레이 존에 매핑하는 체감형 스틱핸들링 게임
 // 좌표계: 화면 폭 = 1 단위, 높이 = aspect (H/W). 좌우 테두리 안쪽이 경기장 레인, 플레이 존은 하단 30%.
-// 규칙: 색이 다른 퍽들이 무작위 위치에서 같은 속도로 내려온다. 노란 퍽만 먹고, 나머지 색은 피한다.
+// 규칙: 색이 다른 퍽들이 무작위 위치에서 같은 속도로, 서로 겹치지 않게 내려온다. coin(노란 원)만 먹고, 나머지 색은 피한다.
 //       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점 + 콤보 초기화.
 import { C, F, rgba, text, sparks, font } from './theme.js';
 
@@ -24,11 +24,15 @@ export const PUCK_COLORS = [
 ];
 
 // speed: 낙하 속도(화면 폭/초) — 한 판 내내 일정. 난이도는 '개수'로만 올라간다.
+// 난이도별로 '개수'(interval: 퍽이 나오는 간격, 짧을수록 많음)와 '속도'가 다르다.
 const DIFF = {
-  easy:   { speed: 0.20, interval: 1.25, minInterval: 0.55 },
-  normal: { speed: 0.26, interval: 1.00, minInterval: 0.42 },
-  hard:   { speed: 0.32, interval: 0.80, minInterval: 0.32 },
+  easy:   { speed: 0.18, interval: 1.30, minInterval: 0.60 },   // 느리고 드물게
+  normal: { speed: 0.26, interval: 0.85, minInterval: 0.36 },
+  hard:   { speed: 0.36, interval: 0.40, minInterval: 0.16 },   // 빠르고, 개수는 이전 어려움의 2배
 };
+export const FALL_R = [0.013, 0.021];   // 내려오는 퍽 반지름 범위 (이전의 절반)
+export const COIN_R = 0.013;            // coin 반지름 (이전의 절반)
+const SPAWN_GAP = 0.012;                // 퍽끼리 최소 간격 (겹치지 않게)
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -51,7 +55,7 @@ export class Arcade {
     this.elapsed = 0; this.survivalAcc = 0;
     this.level = 0;
     this.obstacles = []; this.pickups = []; this.effects = [];
-    this.spawnTimer = 0.8; this.pickupTimer = 2.5; this.pickupSide = 1; this.lastSpawnX = -1;
+    this.spawnTimer = 0.8; this.pickupTimer = 2.5; this.pickupSide = 1;
     this.invulnUntil = 0; this.hold = 0; this.countdownShown = -1;
     this.paused = false; this.lostSince = 0;
     this.instruction = ''; this.avatar = null;
@@ -115,13 +119,19 @@ export class Arcade {
     const vy = this.speed;
 
     this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0) { this._spawnPuck(vy); this.spawnTimer = this.interval() * rand(0.8, 1.2); }
+    // 자리가 없으면(겹칠 위치뿐이면) 잠깐 뒤에 다시 시도
+    if (this.spawnTimer <= 0) this.spawnTimer = this._spawnPuck(vy) ? this.interval() * rand(0.8, 1.2) : 0.04;
     this.pickupTimer -= dt;
     if (this.pickupTimer <= 0) {
       const lo = FIELD_MARGIN + 0.08, hi = 1 - FIELD_MARGIN - 0.08, mid = 0.5;
-      this.pickups.push({ x: this.pickupSide > 0 ? rand(mid + 0.1, hi) : rand(lo, mid - 0.1), y: -0.05, r: 0.026, vy, born: now });
-      this.pickupSide *= -1; // 좌우 번갈아 -> 8자 경로 유도
-      this.pickupTimer = rand(2.2, 3.6);
+      // 좌우 번갈아 -> 8자 경로 유도
+      const x = this._freeX(COIN_R, this.pickupSide > 0 ? mid + 0.1 : lo, this.pickupSide > 0 ? hi : mid - 0.1);
+      if (x === null) this.pickupTimer = 0.05;
+      else {
+        this.pickups.push({ x, y: -COIN_R, r: COIN_R, vy, born: now });
+        this.pickupSide *= -1;
+        this.pickupTimer = rand(2.2, 3.6);
+      }
     }
 
     const a = this.avatar;
@@ -163,7 +173,7 @@ export class Arcade {
     }
     this.pickups = this.pickups.filter((p) => !p.taken && p.y - p.r < this.aspect + 0.05);
 
-    this.instruction = this.combo >= 20 ? 'FEVER ×3' : this.combo >= 5 ? `콤보 ${this.combo} ×${this.multiplier}` : '노란 퍽은 먹고, 나머지는 피하세요';
+    this.instruction = this.combo >= 20 ? 'FEVER ×3' : this.combo >= 5 ? `콤보 ${this.combo} ×${this.multiplier}` : 'coin은 먹고, 나머지는 피하세요';
   }
 
   _updateCountdown(dt, tracked) {
@@ -183,14 +193,24 @@ export class Arcade {
 
   faceoff() { return { x: 0.5, y: this.zoneTop + this.zoneH * 0.5, r: 0.07 }; }
 
-  /** 색이 다른 퍽 하나를 테두리 안쪽 무작위 위치 위에서 떨어뜨린다 (속도는 모두 같음) */
+  /**
+   * 반지름 r인 원을 맨 위(y = -r)에 놓을 때, 이미 내려오고 있는 퍽·coin과 겹치지 않는 무작위 x.
+   * 모든 퍽의 속도가 같으므로 출발할 때 안 겹치면 끝까지 겹치지 않는다. 자리가 없으면 null.
+   */
+  _freeX(r, lo = FIELD_MARGIN + r, hi = 1 - FIELD_MARGIN - r) {
+    const others = [...this.obstacles, ...this.pickups];
+    for (let tries = 0; tries < 16; tries++) {
+      const x = rand(lo, hi);
+      if (others.every((o) => Math.hypot(x - o.x, -r - o.y) >= r + o.r + SPAWN_GAP)) return x;
+    }
+    return null;
+  }
+
+  /** 색이 다른 퍽 하나를 테두리 안쪽 무작위 위치 위에서 떨어뜨린다 (속도는 모두 같고, 서로 겹치지 않음) */
   _spawnPuck(vy) {
-    const r = rand(0.026, 0.042);
-    const lo = FIELD_MARGIN + r, hi = 1 - FIELD_MARGIN - r;
-    let x = rand(lo, hi);
-    // 바로 앞 퍽과 같은 자리에 겹쳐 나오지 않게 한 번 다시 뽑기
-    if (this.lastSpawnX >= 0 && Math.abs(x - this.lastSpawnX) < 0.1) x = rand(lo, hi);
-    this.lastSpawnX = x;
+    const r = rand(FALL_R[0], FALL_R[1]);
+    const x = this._freeX(r);
+    if (x === null) return null;
     const color = PUCK_COLORS[Math.floor(Math.random() * PUCK_COLORS.length)];
     const o = { x, y: -r, r, vy, color, minDist: Infinity, passed: false, hit: false, nearMiss: false };
     this.obstacles.push(o);
@@ -236,7 +256,7 @@ export class Arcade {
       elapsed: this.elapsed, distanceM: distM, level: this.level,
       items_: [
         ['점수', this.score], ['최고 콤보', this.maxCombo], ['아슬아슬 회피 (DEKE)', this.dekes],
-        ['피한 퍽', this.passed], ['노란 퍽', this.items], ['충돌', this.hits],
+        ['피한 퍽', this.passed], ['Coin', this.items], ['충돌', this.hits],
         ['퍽 이동 거리', `${distM.toFixed(1)} m`], ['레벨', this.level + 1],
       ],
     };
@@ -302,12 +322,12 @@ export class Arcade {
       ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.35); ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    // 노란 퍽: 옐로 정원 + 잉크 헤어라인
+    // coin: 옐로 정원 + 잉크 헤어라인, 아래에 'coin' 글자 (먹는 것임을 알 수 있게)
     for (const p of this.pickups) {
       const x = p.x * S, y = p.y * S, r = p.r * S;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = C.yellow; ctx.fill();
       ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
-      ctx.beginPath(); ctx.arc(x, y, r * 1.5 + r * 0.12 * Math.sin(now / 180), 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.35); ctx.stroke();
+      text(ctx, 'coin', x, y + r + fs * 0.62, fs * 0.82, { weight: 700, color: C.ink, halo: true });
     }
 
     this._drawAvatar(ctx, S, now, puck, false, hair);
@@ -336,12 +356,12 @@ export class Arcade {
     ctx.restore();
   }
 
-  /** 규칙 범례: 노란 퍽은 먹고, 나머지 색은 피한다 */
+  /** 규칙 범례: coin은 먹고, 나머지 색은 피한다 */
   _drawLegend(ctx, S, zt, fs) {
     const W = S, y = zt - W * 0.2, r = fs * 0.55;
     let x = W / 2 - fs * 9.5;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = C.yellow; ctx.fill(); ctx.lineWidth = Math.max(1, W / (ctx.canvas.clientWidth || W)); ctx.strokeStyle = C.ink; ctx.stroke();
-    text(ctx, '먹기 +200', x + r * 1.8, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
+    text(ctx, 'coin  먹기 +200', x + r * 1.8, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
     x = W / 2 + fs * 1.2;
     PUCK_COLORS.forEach((c, i) => { ctx.beginPath(); ctx.arc(x + i * r * 1.5, y, r, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill(); });
     text(ctx, '피하기', x + PUCK_COLORS.length * r * 1.5 + r * 0.6, y, fs * 0.9, { weight: 600, align: 'left', halo: false });

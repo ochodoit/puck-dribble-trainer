@@ -254,6 +254,17 @@ let failed = false;
   const toMode = (await page.isVisible('#panel-mode')) && (await page.isHidden('#panel-result')) && (await page.textContent('#btn-start')).trim() === '시작';
   console.log(`${toMode ? 'PASS' : 'FAIL'} result choice: puck right 2s -> mode selection`);
   if (!toMode) failed = true;
+  // 모드 선택 화면도 퍽으로: 열릴 때 커서가 올라가 있던 카드는 선택되지 않고(위에서 3.2초 대기 후에도 창이 열려 있음),
+  // 다른 카드로 옮겨 2초 머물면 그 모드가 선택됨. (기본 방향: 카메라 쪽으로 밀면 위 -> v 0.9 = 맨 윗줄)
+  const forceUV = (u, v) => page.evaluate(([uu, vv]) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: vv }, now); }; }, [u, v]);
+  const cursorShown = await page.isVisible('#mode-cursor');
+  await forceUV(0.85, 0.9); // 맨 윗줄 세 번째 카드 = 와이드 드리블
+  await page.waitForTimeout(900);
+  const dwell = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelectorAll('#mode-list .mode-card')[2]).getPropertyValue('--dwell')) || 0);
+  await page.waitForTimeout(1800);
+  const picked = (await page.isHidden('#panel-mode')) && (await page.textContent('#hud-mode')).includes('와이드');
+  console.log(`${cursorShown && dwell > 5 && picked ? 'PASS' : 'FAIL'} mode panel pick by puck (cursor=${cursorShown}, dwell ${dwell.toFixed(0)}%, mode=${(await page.textContent('#hud-mode')).trim()})`);
+  if (!(cursorShown && picked)) failed = true;
   await page.evaluate(() => { const t = window.__puckTrainer.tracker; delete t.update; });
   if (await page.isVisible('#panel-mode')) await page.click('[data-close="panel-mode"]');
   // 전면/후면 전환 버튼: 스트림 재시작, 오류 없음, 설정 저장

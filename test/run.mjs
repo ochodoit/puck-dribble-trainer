@@ -241,6 +241,34 @@ let failed = false;
   await context.close();
 }
 
+// ---- 4) 카메라 실패 진단: getUserMedia 가 NotReadableError 를 내면 진단 블록·카메라 목록·재시도가 보여야 함 ----
+{
+  const context = await browser.newContext({ viewport: { width: 1180, height: 820 }, permissions: ['camera'] });
+  await context.addInitScript(() => {
+    const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    let calls = 0;
+    navigator.mediaDevices.getUserMedia = (c) => { calls++; if (calls <= 3) { const e = new Error('Could not start video source'); e.name = 'NotReadableError'; return Promise.reject(e); } return orig(c); };
+  });
+  const page = await context.newPage();
+  await page.goto(`${base}/index.html`);
+  if (await page.isVisible('#pin-form')) { await page.fill('#pin-input', '1234'); await page.click('#pin-form button'); await page.waitForSelector('#btn-camera:visible'); }
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.click('#auth-guest');
+  await page.click('#btn-camera');
+  await page.waitForSelector('#splash-diag:not(.hidden)', { timeout: 10000 });
+  const errText = await page.textContent('#splash-error');
+  const diag = await page.textContent('#diag-info');
+  const options = await page.$$eval('#diag-camera option', (o) => o.length);
+  const ok = errText.includes('다른 프로그램') && diag.includes('NotReadableError') && diag.includes('시도 기록') && options >= 2;
+  console.log(`${ok ? 'PASS' : 'FAIL'} camera failure shows diagnostics (${options - 1} device(s), ${errText.trim().slice(0, 40)}…)`);
+  if (!ok) failed = true;
+  // 재시도(4번째 호출부터 성공) -> 앱 시작
+  await page.click('#btn-retry-camera');
+  await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
+  console.log('PASS retry after failure starts the camera');
+  await context.close();
+}
+
 await browser.close();
 server.close();
 console.log(failed ? '\nSOME TESTS FAILED' : '\nALL TESTS PASSED');

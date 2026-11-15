@@ -8,6 +8,7 @@ import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
 import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel } from './account.js';
+import { decideIdle } from './idle-logic.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -260,6 +261,7 @@ function bindUI() {
   // 보정
   $$('[data-calib]').forEach((b) => b.addEventListener('click', () => beginCalibration(b.dataset.calib)));
   $$('[data-autocalib]').forEach((b) => b.addEventListener('click', () => beginAutoCalibration(b.dataset.autocalib)));
+  $('#btn-replace-puck').addEventListener('click', () => { beginAutoCalibration('puck'); toast('새 물체를 원 안에 3초 두면 퍽이 교체됩니다'); });
   $$('[data-calib-reset]').forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.calibReset;
     if (t === 'puck') settings.puckModel = structuredClone(DEFAULT_SETTINGS.puckModel);
@@ -458,9 +460,10 @@ function updateIdleCircle(dt) {
   const c = app.calib;
   const panelsOpen = ![els.panelSettings, els.panelCalib, els.panelMode, els.panelRank].every((p) => p.classList.contains('hidden'));
   const idle = app.started && !game.running && settings.autoStart && !panelsOpen && !app.calibTarget;
-  if (!idle) { c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset(); return; }
+  if (!idle) { c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset(); $('#btn-replace-puck').classList.add('hidden'); return; }
   c.active = true; c.manual = false; c.target = 'puck';
   c.circle = vision.calibCircle();
+  c.registered = settings.puckModel.area > 0 ? settings.puckModel : null;
   const circle = c.circle;
   const mapping = app.lastVision?.floor?.mapping;
   let puckInCircle = false;
@@ -482,15 +485,27 @@ function updateIdleCircle(dt) {
     return;
   }
   app.idleHold = 0; app.idleTick = -1;
-  // 원 안의 새 물체 학습
   const sample = vision.autoCalibSample();
-  const done = autoCal.update(sample, dt);
-  c.hold = autoCal.hold; c.status = autoCal.status; c.sample = autoCal.sample;
-  if (done) commitLearnedModel('puck', done);
+  const registered = settings.puckModel.area > 0;
+  const decision = decideIdle({ registered, puckInCircle: false, sample, model: settings.puckModel, tol: settings.puckTol });
+  c.sample = sample;
+  if (decision === 'learn' || decision === 'refresh') {
+    // 등록된 퍽이 없으면 첫 물체 학습, 같은 색의 퍽이 추적만 안 되면 크기·색 갱신
+    const done = autoCal.update(sample, dt);
+    c.hold = autoCal.hold; c.status = decision === 'learn' ? autoCal.status : 'refresh';
+    if (done) commitLearnedModel('puck', done, decision === 'refresh');
+  } else {
+    // mismatch / too_big / wait: 학습하지 않음
+    autoCal.reset(); c.hold = 0; c.status = decision;
+    if (decision === 'mismatch') c.mismatchFor = (c.mismatchFor || 0) + dt; else c.mismatchFor = 0;
+  }
+  // 다른 물체가 0.7초 이상 안정적으로 보이면 '이 물체로 교체' 버튼 표시
+  $('#btn-replace-puck').classList.toggle('hidden', !(decision === 'mismatch' && c.mismatchFor > 0.7));
 }
 
-function commitLearnedModel(target, done) {
+function commitLearnedModel(target, done, refresh = false) {
   const model = { r: done.r, g: done.g, b: done.b, area: done.area };
+  $('#btn-replace-puck').classList.add('hidden');
   if (target === 'puck') {
     settings.puckModel = model; settings.puckTol = done.tol;
     vision.seedPuck(done.cx, done.cy, done.area); tracker.reset();
@@ -502,7 +517,8 @@ function commitLearnedModel(target, done) {
   autoCal.reset();
   persist(); refreshCalibUI();
   sfx.target();
-  toast(`${target === 'puck' ? '퍽' : '스틱'} 인식 완료 · rgb(${model.r},${model.g},${model.b}) · 크기 ${model.area}px${target === 'puck' ? ' · 원 안에 3초 더 두면 시작' : ''}`, 4000);
+  if (refresh) toast(`등록된 퍽을 다시 인식했습니다 (크기 ${model.area}px) · 원 안에 3초 더 두면 시작`, 3500);
+  else toast(`${target === 'puck' ? '퍽' : '스틱'} 등록 완료 · rgb(${model.r},${model.g},${model.b}) · 크기 ${model.area}px${target === 'puck' ? ' · 원 안에 3초 더 두면 시작' : ''}`, 4000);
 }
 
 // =============== HUD ===============
@@ -690,6 +706,7 @@ function beginAutoCalibration(target) {
   autoCal.reset();
   app.calib = { active: true, manual: true, target, hold: 0, status: 'none', sample: null, circle: vision.calibCircle() };
   app.calibTarget = null;
+  $('#btn-replace-puck').classList.add('hidden');
   els.tapHint.classList.add('hidden');
   app.idleHold = 0;
 }

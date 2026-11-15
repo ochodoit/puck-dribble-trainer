@@ -58,8 +58,17 @@ export class Renderer {
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(2,6,23,0.25)'; ctx.fill();
         const starting = calib.status === 'puck';
+        const mismatch = calib.status === 'mismatch';
         ctx.setLineDash(starting ? [] : [unit * 0.015, unit * 0.01]); ctx.lineWidth = unit * 0.006;
-        ctx.strokeStyle = starting ? '#38bdf8' : calib.status === 'ok' ? '#22c55e' : '#f59e0b'; ctx.stroke(); ctx.setLineDash([]);
+        ctx.strokeStyle = starting ? '#38bdf8' : mismatch ? '#ef4444' : (calib.status === 'ok' || calib.status === 'refresh') ? '#22c55e' : '#f59e0b'; ctx.stroke(); ctx.setLineDash([]);
+        if (mismatch && calib.registered) {
+          // 등록된 퍽 색 견본
+          const m = calib.registered;
+          ctx.beginPath(); ctx.arc(cx + r * 1.45, cy - r * 0.9, unit * 0.02, 0, Math.PI * 2); ctx.fillStyle = `rgb(${m.r},${m.g},${m.b})`; ctx.fill();
+          ctx.lineWidth = unit * 0.004; ctx.strokeStyle = '#fff'; ctx.stroke();
+          ctx.font = `${Math.round(fontPx * 0.7)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff';
+          ctx.fillText('등록된 퍽', cx + r * 1.45, cy - r * 0.9 + unit * 0.028);
+        }
         const prog = starting ? idleHold / 3 : calib.hold / 3;
         if (prog > 0) {
           ctx.beginPath(); ctx.arc(cx, cy, r * 1.15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, prog));
@@ -74,15 +83,20 @@ export class Renderer {
           ctx.lineWidth = unit * 0.003; ctx.strokeStyle = '#fff'; ctx.stroke();
         }
         const label = starting ? `퍽 인식됨 · ${Math.max(1, Math.ceil(3 - idleHold))}초 후 시작`
+          : mismatch ? '등록된 퍽과 다른 물체입니다'
+          : calib.status === 'refresh' ? `등록된 퍽 다시 인식 중… ${Math.max(0, 3 - calib.hold).toFixed(1)}초`
           : calib.status === 'too_big' ? '물체가 너무 큽니다. 카메라에서 더 멀리'
-          : calib.status === 'ok' ? `새 물체 인식 중… ${Math.max(0, 3 - calib.hold).toFixed(1)}초 가만히`
+          : calib.status === 'ok' ? `퍽 등록 중… ${Math.max(0, 3 - calib.hold).toFixed(1)}초 가만히`
           : calib.sample?.scattered ? '바닥 무늬만 보입니다. 물체를 원 안에 놓으세요'
           : (calib.target === 'stick' ? '스틱 블레이드(테이프)를 원 안에 놓으세요' : '퍽으로 쓸 물체(공·뚜껑·퍽)를 원 안에 놓으세요');
         ctx.font = `700 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.lineWidth = unit * 0.008; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(label, cx, cy - r * 1.3);
         ctx.fillStyle = '#fff'; ctx.fillText(label, cx, cy - r * 1.3);
         ctx.font = `${Math.round(fontPx * 0.8)}px system-ui, sans-serif`; ctx.textBaseline = 'top';
-        const sub = calib.manual ? '배경과 색이 다르면 무엇이든 됩니다 · 화면을 터치하면 취소' : starting ? '움직이면 취소됩니다' : '배경과 색이 다른 물체면 무엇이든 됩니다 · 인식 후 3초 더 두면 시작';
+        const sub = calib.manual ? '배경과 색이 다르면 무엇이든 됩니다 · 화면을 터치하면 취소'
+          : starting ? '움직이면 취소됩니다'
+          : mismatch ? '등록된 퍽을 놓으세요 · 바꾸려면 아래 "이 물체로 퍽 교체"'
+          : calib.registered ? '등록된 퍽을 원 안에 3초 두면 시작' : '배경과 색이 다른 물체면 무엇이든 됩니다 · 등록 후 3초 더 두면 시작';
         ctx.strokeText(sub, cx, cy + r * 1.3); ctx.fillStyle = '#e5e7eb'; ctx.fillText(sub, cx, cy + r * 1.3);
       }
       return;

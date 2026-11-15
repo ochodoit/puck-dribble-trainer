@@ -10,6 +10,7 @@
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
   import { Arcade, PUCK_R } from '../src/arcade.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
+  import { decideIdle } from '../src/idle-logic.js';
 
   const scene = document.getElementById('scene');
   const sctx = scene.getContext('2d');
@@ -473,6 +474,15 @@
     drawDots(true); v2.process(scene, matSettings);
     const ballOnDots = v2.autoCalibSample();
     check('F3b ball on patterned mat is detected', ballOnDots.status === 'ok' && ballOnDots.b > 150, ballOnDots);
+
+    // F3c) 대기 원 판단: 등록된 퍽만 시작, 다른 물체는 안내, 미등록이면 학습, 같은 색은 재인식
+    const orange = { r: 240, g: 114, b: 28, area: 180 }, blueS = { status: 'ok', r: 39, g: 99, b: 231, area: 90 }, orangeDim = { status: 'ok', r: 150, g: 70, b: 18, area: 120 };
+    check('F3c registered puck in circle -> start', decideIdle({ registered: true, puckInCircle: true, sample: { status: 'none' }, model: orange, tol: 85 }) === 'start');
+    check('F3c different object -> mismatch (no relearn)', decideIdle({ registered: true, puckInCircle: false, sample: blueS, model: orange, tol: 85 }) === 'mismatch');
+    check('F3c same color, dimmer light -> refresh', decideIdle({ registered: true, puckInCircle: false, sample: orangeDim, model: orange, tol: 85 }) === 'refresh');
+    check('F3c nothing registered -> learn first object', decideIdle({ registered: false, puckInCircle: false, sample: blueS, model: { r: 0, g: 0, b: 0, area: 0 }, tol: 95 }) === 'learn');
+    check('F3c empty / too big', decideIdle({ registered: true, puckInCircle: false, sample: { status: 'none' }, model: orange, tol: 85 }) === 'wait' && decideIdle({ registered: true, puckInCircle: false, sample: { status: 'too_big' }, model: orange, tol: 85 }) === 'too_big');
+    check('F3c black puck registered, black puck sample -> refresh not mismatch', decideIdle({ registered: true, puckInCircle: false, sample: { status: 'ok', r: 30, g: 32, b: 35, area: 50 }, model: { r: 10, g: 10, b: 12, area: 48 }, tol: 95 }) === 'refresh');
 
     // F4) 흰 바닥 히스테리시스: 10프레임 연속 검출 시 흰 바닥, 90프레임 미검출 시 전체 화면 복귀
     const v3 = new Vision(240); v3.mirror = false; v3.setSourceSize(640, 480);

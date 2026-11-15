@@ -374,7 +374,7 @@ export class Vision {
   }
 
   /** 자동 지정용 원 (처리 좌표) */
-  calibCircle() { const r = Math.min(this.PW, this.PH) * 0.13; return { x: this.PW / 2, y: this.PH / 2, r }; }
+  calibCircle() { const r = Math.min(this.PW, this.PH) * 0.19; return { x: this.PW / 2, y: this.PH / 2, r }; }
 
   /**
    * 가운데 원 안에서 주변 배경(고리 영역)과 색이 다른 픽셀 덩어리를 찾는다.
@@ -384,21 +384,26 @@ export class Vision {
     if (!this.frame) return { status: 'none' };
     const { PW, PH } = this; const d = this.frame.data;
     const c = this.calibCircle();
-    const r2 = c.r * c.r, ring0 = (c.r * 1.15) ** 2, ring1 = (c.r * 1.7) ** 2;
-    // 배경색: 원 바깥 고리의 평균
-    let br = 0, bg = 0, bb = 0, bn = 0;
-    const x0 = Math.max(0, Math.floor(c.x - c.r * 1.7)), x1 = Math.min(PW - 1, Math.ceil(c.x + c.r * 1.7));
-    const y0 = Math.max(0, Math.floor(c.y - c.r * 1.7)), y1 = Math.min(PH - 1, Math.ceil(c.y + c.r * 1.7));
+    const r2 = c.r * c.r, ring0 = (c.r * 1.1) ** 2, ring1 = (c.r * 1.5) ** 2;
+    // 배경색: 원 바깥 고리의 평균과 분산 (질감 있는 매트일수록 임계값을 올림)
+    let br = 0, bg = 0, bb = 0, bn = 0, bsq = 0;
+    const x0 = Math.max(0, Math.floor(c.x - c.r * 1.5)), x1 = Math.min(PW - 1, Math.ceil(c.x + c.r * 1.5));
+    const y0 = Math.max(0, Math.floor(c.y - c.r * 1.5)), y1 = Math.min(PH - 1, Math.ceil(c.y + c.r * 1.5));
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const dx = x - c.x, dy = y - c.y, q = dx * dx + dy * dy;
       if (q < ring0 || q > ring1) continue;
       const p = (y * PW + x) * 4; br += d[p]; bg += d[p + 1]; bb += d[p + 2]; bn++;
+      bsq += d[p] * d[p] + d[p + 1] * d[p + 1] + d[p + 2] * d[p + 2];
     }
     if (!bn) return { status: 'none' };
     br /= bn; bg /= bn; bb /= bn;
-    // 원 안: 배경과 충분히 다른 픽셀
-    const TH2 = 55 * 55;
-    let sr = 0, sg = 0, sb = 0, sx = 0, sy = 0, n = 0, inside = 0;
+    const ringVar = Math.max(0, bsq / bn - (br * br + bg * bg + bb * bb));
+    const th = Math.max(42, Math.min(90, 2.5 * Math.sqrt(ringVar)));
+    const TH2 = th * th;
+    // 원 안: 배경과 충분히 다른 픽셀을 후보 마스크로
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    const mask = new Uint8Array(w * h);
+    let inside = 0, cand = 0;
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const dx = x - c.x, dy = y - c.y;
       if (dx * dx + dy * dy > r2) continue;
@@ -406,13 +411,54 @@ export class Vision {
       const p = (y * PW + x) * 4;
       const er = d[p] - br, eg = d[p + 1] - bg, eb = d[p + 2] - bb;
       if (er * er + eg * eg + eb * eb < TH2) continue;
-      sr += d[p]; sg += d[p + 1]; sb += d[p + 2]; sx += x; sy += y; n++;
+      mask[(y - y0) * w + (x - x0)] = 1; cand++;
     }
-    if (n < 10) return { status: 'none', bg: { r: br, g: bg, b: bb } };
-    if (n > inside * 0.75) return { status: 'too_big', bg: { r: br, g: bg, b: bb } };
-    const model = { r: Math.round(sr / n), g: Math.round(sg / n), b: Math.round(sb / n) };
+    const bgOut = { r: Math.round(br), g: Math.round(bg), b: Math.round(bb) };
+    if (cand < 10) return { status: 'none', bg: bgOut, th };
+    if (cand > inside * 0.85) return { status: 'too_big', bg: bgOut, th };
+    // 후보 픽셀을 연결 성분으로 묶고(바닥 무늬·점은 작은 조각으로 흩어짐) 가장 큰 덩어리를 물체로 본다
+    const stack = new Int32Array(w * h);
+    const comps = [];
+    for (let i = 0; i < w * h; i++) {
+      if (mask[i] !== 1) continue;
+      const cm = { area: 0, sx: 0, sy: 0, sxx: 0, syy: 0, sr: 0, sg: 0, sb: 0, minx: 1e9, maxx: -1, miny: 1e9, maxy: -1 };
+      let sp = 0; stack[sp++] = i; mask[i] = 2;
+      while (sp > 0) {
+        const j = stack[--sp]; const lx = j % w, ly = (j - lx) / w; const gx = lx + x0, gy = ly + y0;
+        const p = (gy * PW + gx) * 4;
+        cm.area++; cm.sx += gx; cm.sy += gy; cm.sxx += gx * gx; cm.syy += gy * gy; cm.sr += d[p]; cm.sg += d[p + 1]; cm.sb += d[p + 2];
+        if (gx < cm.minx) cm.minx = gx; if (gx > cm.maxx) cm.maxx = gx; if (gy < cm.miny) cm.miny = gy; if (gy > cm.maxy) cm.maxy = gy;
+        if (lx > 0 && mask[j - 1] === 1) { mask[j - 1] = 2; stack[sp++] = j - 1; }
+        if (lx < w - 1 && mask[j + 1] === 1) { mask[j + 1] = 2; stack[sp++] = j + 1; }
+        if (ly > 0 && mask[j - w] === 1) { mask[j - w] = 2; stack[sp++] = j - w; }
+        if (ly < h - 1 && mask[j + w] === 1) { mask[j + w] = 2; stack[sp++] = j + w; }
+      }
+      comps.push(cm);
+    }
+    // 반사광 등으로 갈라진 조각 병합 (bbox 간격 2px 이하)
+    let merged = true;
+    while (merged && comps.length > 1) {
+      merged = false;
+      outer: for (let a = 0; a < comps.length; a++) for (let b = a + 1; b < comps.length; b++) {
+        const A = comps[a], B = comps[b];
+        if (A.minx > B.maxx + 2 || B.minx > A.maxx + 2 || A.miny > B.maxy + 2 || B.miny > A.maxy + 2) continue;
+        for (const k of ['area', 'sx', 'sy', 'sxx', 'syy', 'sr', 'sg', 'sb']) A[k] += B[k];
+        A.minx = Math.min(A.minx, B.minx); A.maxx = Math.max(A.maxx, B.maxx); A.miny = Math.min(A.miny, B.miny); A.maxy = Math.max(A.maxy, B.maxy);
+        comps.splice(b, 1); merged = true; break outer;
+      }
+    }
+    comps.sort((a, b) => b.area - a.area);
+    const best = comps[0];
+    if (!best || best.area < 10) return { status: 'none', bg: bgOut, th, scattered: true };
+    const n = best.area;
+    // 밀집도: 균일한 원판이면 위치 표준편차 ≈ 0.5*sqrt(area/π)·√2 (2차원)
+    const mx = best.sx / n, my = best.sy / n;
+    const spread = Math.sqrt(Math.max(0, best.sxx / n - mx * mx) + Math.max(0, best.syy / n - my * my));
+    const expected = Math.SQRT2 * 0.5 * Math.sqrt(n / Math.PI);
+    if (spread > expected * 2.2) return { status: 'none', bg: bgOut, th, scattered: true };
+    const model = { r: Math.round(best.sr / n), g: Math.round(best.sg / n), b: Math.round(best.sb / n) };
     const dist = Math.hypot(model.r - br, model.g - bg, model.b - bb);
-    return { status: 'ok', ...model, area: n, cx: sx / n, cy: sy / n, bg: { r: Math.round(br), g: Math.round(bg), b: Math.round(bb) }, dist };
+    return { status: 'ok', ...model, area: n, cx: mx, cy: my, bg: bgOut, dist, th, pieces: comps.length };
   }
 
   /** 보정 터치 위치를 추적 시작점으로 사용 (같은 색의 다른 물체에 처음부터 붙는 것을 방지) */

@@ -5,9 +5,9 @@ import { C } from './theme.js';
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
   { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true,
-    desc: '수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하고 황금 퍽을 모아 콤보. 제한 시간 동안의 점수로 겨룹니다.' },
+    desc: '색색의 퍽이 같은 속도로 내려옵니다. 노란 퍽은 먹고 나머지는 피하세요. 제한 시간 동안의 점수로 겨룹니다.' },
   { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
-    desc: '사방에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
+    desc: '평면 경기장의 네 변에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
   { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 30,
     desc: '좌우 끝 구역을 번갈아 터치. 넓은 가동 범위 훈련.' },
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
@@ -56,6 +56,9 @@ export class Game {
     this.mode = MODES[0];
     this.difficulty = 'normal';
     this.playSeconds = 60;   // 시간제 모드의 제한 시간 (60 | 180 | 300)
+    // 퍽 피하기의 평면: 가로 1 × 세로 A (같은 단위). flip = 카메라 쪽으로 밀면 위로. main이 화면에 맞춰 설정
+    this.plane = { A: 1, flip: false };
+    this.me = null;          // 평면 위의 내 퍽 위치
     this.onEnd = null;
     this.running = false;
     this.resetState();
@@ -75,6 +78,7 @@ export class Game {
     this.zones = [];
     this.waypoints = [];
     this.flyers = [];
+    this.me = null;
     this.wpIndex = 0;
     this.effects = [];
     this.stats = {};
@@ -191,24 +195,28 @@ export class Game {
         break;
       }
       case 'obstacle': {
+        // 바닥 원근이 아니라 평면에서 판정: 퍽의 (u,v)를 가로 1 × 세로 A 평면 좌표로 옮긴다
+        const A = this.plane.A;
+        const me = pp ? this.toPlane(pp.x, pp.y) : null;
+        this.me = me;
         // 시간이 지날수록 동시에 날아오는 퍽 수 증가
         const want = Math.min(d.flyMax_n, d.flyers + Math.floor(this.elapsed / d.flyEvery));
         this.flySpawnTimer -= dt;
         if (this.flyers.length < want && this.flySpawnTimer <= 0) {
-          this._spawnFlyer(pp, d, now);
+          this._spawnFlyer(me, d, now, A);
           this.flySpawnTimer = this.flyers.length < want ? rand(0.25, 0.6) : 0;
         }
         this.stats.maxFlyers = Math.max(this.stats.maxFlyers, this.flyers.length);
         this.hits = this.stats.hits;
         this.score = Math.max(0, Math.floor(this.elapsed) * 10 + this.stats.dodged * 5 + this.stats.close * 15 - this.stats.hits * DODGE_HIT_PENALTY);
-        const canHit = pp && tracked && now >= this.invulnUntil;
+        const canHit = me && tracked && now >= this.invulnUntil;
         for (const f of this.flyers) {
           if (now < f.launchAt) continue;              // 가장자리 경고 중
           f.x += f.vx * dt; f.y += f.vy * dt;           // 직선 이동 (속도 일정)
-          const inside = f.x > -0.02 && f.x < 1.02 && f.y > -0.02 && f.y < 1.02;
+          const inside = f.x > -0.02 && f.x < 1.02 && f.y > -0.02 && f.y < A + 0.02;
           if (inside) f.entered = true;
-          if (pp) {
-            const dd = dist(pp, f);
+          if (me) {
+            const dd = dist(me, f);
             f.minDist = Math.min(f.minDist, dd);
             if (canHit && !f.hit && dd < FLYER_R + PUCK_R) {
               f.hit = true; this.stats.hits++; // 목숨 없음: 감점 + 1.2초 무적
@@ -218,12 +226,12 @@ export class Game {
               this.sfx?.hit();
             }
           }
-          const gone = f.x < -FLYER_MARGIN - 0.05 || f.x > 1 + FLYER_MARGIN + 0.05 || f.y < -FLYER_MARGIN - 0.05 || f.y > 1 + FLYER_MARGIN + 0.05;
+          const gone = f.x < -FLYER_MARGIN - 0.05 || f.x > 1 + FLYER_MARGIN + 0.05 || f.y < -FLYER_MARGIN - 0.05 || f.y > A + FLYER_MARGIN + 0.05;
           if (gone && f.entered && !f.counted) {
             f.counted = true;
             if (!f.hit) {
               this.stats.dodged++;
-              if (f.minDist < FLYER_R + PUCK_R + 0.035) { this.stats.close++; this._pop(pp?.x ?? 0.5, (pp?.y ?? 0.5) - 0.1, '아슬! +15', C.red, 'script'); this.sfx?.rep(); }
+              if (f.minDist < FLYER_R + PUCK_R + 0.035) { this.stats.close++; this._pop(me?.x ?? 0.5, (me?.y ?? A / 2) - 0.1, '아슬! +15', C.red, 'script'); this.sfx?.rep(); }
             }
           }
         }
@@ -308,18 +316,21 @@ export class Game {
   }
 
   // ---------- 내부 ----------
-  /** 바닥 바깥 가장자리에서 출발해 안쪽 목표점을 향해 직선으로 날아오는 빨간 퍽 */
-  _spawnFlyer(playerPos, d, now) {
-    const p = playerPos || { x: 0.5, y: 0.5 };
+  /** 추적 좌표(u,v) -> 평면 좌표 (가로 1 × 세로 A, 같은 단위) */
+  toPlane(u, v) { return { x: u, y: (this.plane.flip ? 1 - v : v) * this.plane.A }; }
+
+  /** 평면(가로 1 × 세로 A) 바깥 네 변에서 출발해 안쪽 목표점을 향해 직선으로 날아오는 빨간 퍽 */
+  _spawnFlyer(playerPos, d, now, A = 1) {
+    const p = playerPos || { x: 0.5, y: A / 2 };
     for (let tries = 0; tries < 20; tries++) {
       const side = Math.floor(Math.random() * 4); // 0 위, 1 오른쪽, 2 아래, 3 왼쪽
       const m = FLYER_MARGIN;
-      const start = side === 0 ? { x: rand(0.05, 0.95), y: -m } : side === 1 ? { x: 1 + m, y: rand(0.05, 0.95) }
-        : side === 2 ? { x: rand(0.05, 0.95), y: 1 + m } : { x: -m, y: rand(0.05, 0.95) };
+      const start = side === 0 ? { x: rand(0.05, 0.95), y: -m } : side === 1 ? { x: 1 + m, y: rand(0.05, 0.95) * A }
+        : side === 2 ? { x: rand(0.05, 0.95), y: A + m } : { x: -m, y: rand(0.05, 0.95) * A };
       // 절반은 플레이어 근처를 겨냥, 절반은 무작위 지점
       const aim = Math.random() < 0.5
-        ? { x: clamp01(p.x + rand(-0.12, 0.12)), y: clamp01(p.y + rand(-0.12, 0.12)) }
-        : { x: rand(0.15, 0.85), y: rand(0.15, 0.85) };
+        ? { x: clamp01(p.x + rand(-0.12, 0.12)), y: Math.min(A, Math.max(0, p.y + rand(-0.12, 0.12))) }
+        : { x: rand(0.15, 0.85), y: rand(0.15, 0.85) * A };
       const dx = aim.x - start.x, dy = aim.y - start.y;
       const len = Math.hypot(dx, dy) || 1;
       const speed = rand(d.flyMin, d.flyMax); // 속도는 퍽마다 랜덤, 이후 일정

@@ -10,7 +10,7 @@
   import { Tracker } from '../src/tracker.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
-  import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS } from '../src/arcade.js';
+  import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS } from '../src/arcade.js';
   import { rankKey } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
   import { decideIdle } from '../src/idle-logic.js';
@@ -50,12 +50,10 @@
     ctx.fillStyle = '#6b7280'; ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.fillStyle = '#e5e7eb'; ctx.fillRect(120, 300, 1040, 420);
     const ar = new Arcade(null); ar.aspect = cv.height / cv.width; ar.start({ distance: 0 }, 'normal'); ar.phase = 'play';
-    ar.score = 1830; ar.combo = 12; ar.maxCombo = 12; ar.level = 1; ar.speedMul = 1.1; ar.lives = 2;
+    ar.score = 1830; ar.combo = 12; ar.maxCombo = 12; ar.level = 1;
     ar.avatar = ar.toZone(0.42, 0.55);
-    ar.obstacles.push({ type: 'blocker', x: 0.25, y: 0.18, w: 0.15, h: 0.08, vy: 0.3, round: true });
-    ar.obstacles.push({ type: 'gate', x: 1 - 0.325, y: 0.05, w: 0.65, h: 0.055, vy: 0.3, side: 'R' });
-    ar.obstacles.push({ type: 'gap', x: 0.5, y: 0.3, w: 1, h: 0.05, vy: 0.3, holeX: 0.62, hole: 0.088 });
-    ar.obstacles.push({ type: 'beam', band: 'near', state: 'fire', t: 0.5, warn: 0.9, sweep: 1.3, x: 0.7, dir: 1, w: 0.016, h: ar.zoneH / 2, y: 0 });
+    const P = (x, y, r, c) => ar.obstacles.push({ x, y, r, vy: 0.26, color: PUCK_COLORS[c], minDist: 1, passed: false, hit: false, nearMiss: false });
+    P(0.22, 0.10, 0.040, 0); P(0.58, 0.05, 0.030, 1); P(0.82, 0.19, 0.036, 2); P(0.36, 0.27, 0.028, 3); P(0.68, 0.33, 0.042, 0); P(0.14, 0.36, 0.031, 1); P(0.50, 0.44, 0.034, 2);
     ar.pickups.push({ x: 0.75, y: 0.42, r: 0.028, vy: 0.3, born: 0 });
     ar.effects.push({ type: 'pop', x: 0.42, y: ar.avatar.y - 0.09, text: 'Deke! +100 ×2', color: '#E03C31', style: 'script', t0: performance.now(), dur: 900, age: 0.2 });
     ar.draw(ctx, cv.width, cv.height, 1234, { trail: [], state: 'tracked' });
@@ -165,6 +163,25 @@
     check('invulnerable 1.2s after flyer hit', game.stats.hits === 1);
     const res7 = game.stop('manual');
     check('dodge result report + rank key by time', res7.items.some(([k]) => k === '충돌') && res7.items.some(([k]) => k === '게임 시간') && res7.rankKey === 'obstacle@60', { key: res7.rankKey });
+    // 평면 판정: 가로 1 × 세로 A, 카메라 쪽으로 밀면(v 큼) 위로
+    {
+      const gp = new Game(null); gp.setMode('obstacle'); gp.plane = { A: 0.6, flip: true };
+      const m0 = gp.toPlane(0.25, 1), m1 = gp.toPlane(0.25, 0);
+      check('D1 puck mapped onto the flat plane (flip: push = up)', m0.x === 0.25 && Math.abs(m0.y) < 1e-9 && Math.abs(m1.y - 0.6) < 1e-9, { m0, m1 });
+      let bad = 0, sides = new Set();
+      for (let i = 0; i < 400; i++) { gp.flyers = []; const fl = gp._spawnFlyer({ x: 0.5, y: 0.3 }, { flyMin: 0.35, flyMax: 0.75 }, 0, 0.6); if (!fl) continue; sides.add(fl.side); const outside = fl.x < 0 || fl.x > 1 || fl.y < 0 || fl.y > 0.6; const sp = Math.hypot(fl.vx, fl.vy); if (!outside || sp < 0.35 - 1e-9 || sp > 0.75 + 1e-9) bad++; }
+      check('D1 flyers start outside the plane on all four sides', bad === 0 && sides.size === 4, { bad, sides: [...sides] });
+      // 평면에서 충돌: 내 퍽을 평면상의 날아오는 퍽 위치에 두면 감점
+      const trp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', touches: 0, distance: 0, speed: 0, frames: 1, trackedFrames: 1, trackRate: 1 };
+      gp.start(trp); let tp2 = 700000;
+      for (let i = 0; i < 40; i++) { gp.update(0.033, { ...trp, state: 'predicted' }, tp2); tp2 += 33; }
+      const fl = gp.flyers.find((x) => tp2 >= x.launchAt) || gp.flyers[0]; fl.launchAt = 0; fl.hit = false;
+      fl.x = 0.4; fl.y = 0.3; fl.vx = 0; fl.vy = 0; // 평면 (0.4, 0.3) = u 0.4, v 0.5 (flip, A=0.6)
+      gp.invulnUntil = 0; gp.stats.hits = 0;
+      gp.update(0.033, { ...trp, pos: { x: 0.4, y: 0.5 } }, tp2); tp2 += 33;
+      check('D1 collision judged on the plane, not the floor', gp.stats.hits === 1 && Math.abs(gp.me.y - 0.3) < 1e-9, { hits: gp.stats.hits, me: gp.me });
+      gp.stop('manual');
+    }
     // 출발 지점은 항상 바닥 바깥, 플레이어와 0.25 이상 떨어짐
     let badSpawn = 0;
     for (let i = 0; i < 300; i++) { const g5 = new Game(null); g5.setMode('obstacle'); g5.difficulty = 'hard'; g5.start(tr7); const f = g5._spawnFlyer({ x: 0.5, y: 0.5 }, { flyMin: 0.5, flyMax: 1 }, 0); if (!f) continue; const outside = f.x < 0 || f.x > 1 || f.y < 0 || f.y > 1; if (!outside || Math.hypot(f.x - 0.5, f.y - 0.5) < 0.25) badSpawn++; }
@@ -292,25 +309,29 @@
     t = toPlay(ar, t);
     check('A1 play starts after 3s hold', ar.phase === 'play');
 
-    // A2) 수비수 충돌 -> 하트 -1, 1.5초 무적 동안 추가 피격 없음, 콤보 초기화
+    const fall = (x, y, r = 0.035, vy = 0.5, color = PUCK_COLORS[0]) => ({ x, y, r, vy, color, minDist: Infinity, passed: false, hit: false, nearMiss: false });
+    // A2) 내려오는 퍽과 충돌 -> 감점, 1.5초 무적 동안 추가 피격 없음, 콤보 초기화
     ar = mk(); t = toPlay(ar, 20000); ar.combo = 7;
-    ar.obstacles.push({ type: 'blocker', x: 0.5, y: 0.1, w: 0.15, h: 0.08, vy: 0.5 });
-    t = stepTo(ar, 0.5, 0.5, t, 40); // 1.3초: 블록이 아바타(y≈0.478)를 통과
-    check('A2 blocker hit = penalty and combo reset (no lives)', ar.hits === 1 && ar.combo === 0 && ar.lives === undefined, { hits: ar.hits });
-    ar.obstacles.push({ type: 'blocker', x: 0.5, y: zoneY(ar, 0.5) - 0.05, w: 0.15, h: 0.08, vy: 0.5 });
+    ar.obstacles.push(fall(0.5, 0.1));
+    t = stepTo(ar, 0.5, 0.5, t, 40); // 1.3초: 퍽이 내 퍽(y≈0.478)을 통과
+    check('A2 falling puck hit = penalty and combo reset (no lives)', ar.hits === 1 && ar.combo === 0 && ar.lives === undefined, { hits: ar.hits });
+    ar.obstacles.push(fall(0.5, zoneY(ar, 0.5) - 0.05));
     t = stepTo(ar, 0.5, 0.5, t, 6); // 무적 중
     check('A2 invulnerable right after hit', ar.hits === 1);
 
-    // A3) 통과 +50, 콤보 +1 / A4) 아슬아슬 회피 DEKE +100
+    // A3) 가까이 스쳐 피한 퍽만 +50·콤보 / 멀리 지나간 퍽은 점수 없음 / A4) 아슬아슬 회피 DEKE +100
     ar = mk(); t = toPlay(ar, 30000); const s0 = ar.score;
-    ar.obstacles.push({ type: 'blocker', x: 0.15, y: 0.1, w: 0.15, h: 0.08, vy: 0.5 });
+    ar.obstacles.push(fall(0.15, 0.1));
     t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A3 passing obstacle gives +50 and combo', ar.passed === 1 && ar.combo === 1 && ar.score - s0 >= 50 && ar.dekes === 0, { score: ar.score - s0, combo: ar.combo });
+    check('A3 far puck passing gives no dodge credit', ar.passed === 0 && ar.combo === 0 && ar.score - s0 < 50, { passed: ar.passed, d: ar.score - s0 });
+    const s0b = ar.score;
+    ar.obstacles.push(fall(0.5 + 0.035 + PUCK_R + 0.05, 0.1)); // 레인 안(0.08)이지만 DEKE 범위 밖
+    t = stepTo(ar, 0.5, 0.5, t, 45);
+    check('A3 dodging a nearby puck gives +50 and combo', ar.passed === 1 && ar.combo === 1 && ar.score - s0b >= 50 && ar.dekes === 0, { score: ar.score - s0b, combo: ar.combo });
     const s1 = ar.score;
-    // 블록 오른쪽 모서리가 아바타에서 반지름+마진 안쪽을 스치게 배치 (margin = 0.15*0.08 = 0.012)
-    ar.obstacles.push({ type: 'blocker', x: 0.5 - 0.075 - PUCK_R - 0.008, y: 0.1, w: 0.15, h: 0.08, vy: 0.5 });
+    ar.obstacles.push(fall(0.5 - (0.035 + PUCK_R + 0.006), 0.1)); // 히트박스 바깥 15% 안쪽으로 스침
     t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A4 near miss awards DEKE +100', ar.dekes === 1 && ar.passed === 2 && ar.score - s1 >= 150, { dekes: ar.dekes, score: ar.score - s1 });
+    check('A4 near miss awards DEKE +100', ar.dekes === 1 && ar.passed === 2 && ar.hits === 0 && ar.score - s1 >= 150, { dekes: ar.dekes, score: ar.score - s1 });
 
     // A5) 황금 퍽 +200
     ar = mk(); t = toPlay(ar, 40000); const s2 = ar.score;
@@ -329,27 +350,22 @@
     ar.combo = 20;
     const s3 = ar.score; ar._addScore(50); check('A6 multiplier applies to points', ar.score - s3 === 150);
 
-    // A7) 스윕 빔: 가까운 띠(near)에 있으면 피격, 몸쪽(far)으로 당기면 통과
-    ar = mk(); t = toPlay(ar, 60000);
-    ar.obstacles.push({ type: 'beam', band: 'near', state: 'warn', t: 0, warn: 0.9, sweep: 1.3, x: 0, dir: 1, w: 0.016, h: ar.zoneH / 2, y: 0, done: false });
-    t = stepTo(ar, 0.5, 0.8, t, 20);
-    check('A7 beam warns before firing (no hit yet)', ar.hits === 0 && ar.obstacles[0].state === 'warn');
-    t = stepTo(ar, 0.5, 0.8, t, 60);
-    check('A7 beam hits puck left in near band', ar.hits === 1 && ar.obstacles.length === 0, { hits: ar.hits });
-    ar.invulnUntil = 0;
-    ar.obstacles.push({ type: 'beam', band: 'near', state: 'warn', t: 0, warn: 0.9, sweep: 1.3, x: 0, dir: 1, w: 0.016, h: ar.zoneH / 2, y: 0, done: false });
-    const p0 = ar.passed;
-    t = stepTo(ar, 0.5, 0.2, t, 80); // 토 드래그: 몸쪽(위쪽 띠)으로 당김
-    check('A7 toe drag dodges beam (+pass)', ar.hits === 1 && ar.passed === p0 + 1, { passed: ar.passed });
-
-    // A8) 좁은 틈새: 구멍 위치에 있으면 통과, 아니면 피격
-    ar = mk(); t = toPlay(ar, 70000);
-    ar.obstacles.push({ type: 'gap', x: 0.5, y: 0.05, w: 1, h: 0.05, vy: 0.5, holeX: 0.5, hole: 2 * PUCK_R * 2 });
-    t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A8 gap passed through the hole', ar.hits === 0 && ar.passed === 1, { hits: ar.hits, passed: ar.passed });
-    ar.obstacles.push({ type: 'gap', x: 0.5, y: 0.05, w: 1, h: 0.05, vy: 0.5, holeX: 0.2, hole: 2 * PUCK_R * 2 });
-    t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A8 gap wall hits when off the hole', ar.hits === 1, { hits: ar.hits });
+    // A7) 스폰: 막대 없이 정원 퍽만, 색은 여러 가지, 속도는 모두 같고 테두리 안쪽 무작위 위치
+    ar = mk(); t = toPlay(ar, 60000); ar.spawnTimer = 0;
+    const seen = [];
+    for (let i = 0; i < 600; i++) { ar.update(0.033, fakePuck(0.02, 0.98, 'predicted'), t); t += 33; ar.obstacles.forEach((o) => { if (!seen.includes(o)) seen.push(o); }); if (ar.spawnTimer > 0.15) ar.spawnTimer = 0.15; }
+    const vys = new Set(seen.map((o) => o.vy.toFixed(6))), cols = new Set(seen.map((o) => o.color));
+    check('A7 only round pucks spawn (no bars)', seen.length > 40 && seen.every((o) => o.type === undefined && o.r > 0.02 && o.w === undefined), seen.length);
+    check('A7 all pucks fall at the same constant speed', vys.size === 1 && Math.abs(seen[0].vy - 0.26) < 1e-9, [...vys]);
+    check('A7 several colors, never red or yellow', cols.size >= 3 && [...cols].every((c) => PUCK_COLORS.includes(c)) && !PUCK_COLORS.includes('#E03C31') && !PUCK_COLORS.includes('#FFC72C'), [...cols]);
+    check('A7 random x inside the side borders', seen.every((o) => o.x - o.r >= FIELD_MARGIN - 1e-9 && o.x + o.r <= 1 - FIELD_MARGIN + 1e-9) && Math.max(...seen.map((o) => o.x)) - Math.min(...seen.map((o) => o.x)) > 0.6, { min: Math.min(...seen.map((o) => o.x)), max: Math.max(...seen.map((o) => o.x)) });
+    // 앞뒤 방향: 기본은 카메라 쪽(v 큼)으로 밀면 화면 위로, 몸쪽(v 작음)으로 당기면 아래로. 설정으로 반전 가능
+    check('A8 push toward camera moves the puck up (default)', ar.flipY === true && Math.abs(ar.toZone(0.5, 1).y - ar.zoneTop) < 1e-9 && Math.abs(ar.toZone(0.5, 0).y - ar.aspect) < 1e-9);
+    ar.flipY = false;
+    check('A8 depth direction can be flipped', Math.abs(ar.toZone(0.5, 0).y - ar.zoneTop) < 1e-9 && Math.abs(ar.toZone(0.5, 1).y - ar.aspect) < 1e-9);
+    ar.flipY = true;
+    // A8) 내 퍽은 테두리 안쪽에 매핑됨
+    check('A8 player mapped inside the borders', Math.abs(ar.toZone(0, 0.5).x - FIELD_MARGIN) < 1e-9 && Math.abs(ar.toZone(1, 0.5).x - (1 - FIELD_MARGIN)) < 1e-9 && ar.toZone(0.5, 0.5).x === 0.5);
 
     // A9) 추적 끊김: 0.6초 넘으면 일시정지, 복귀 시 재개. 짧은 끊김(예측)은 피격 판정 없음
     ar = mk(); t = toPlay(ar, 80000);
@@ -358,7 +374,7 @@
     check('A9 paused after losing puck', ar.paused && ar.elapsed - e0 < 0.7, { paused: ar.paused, d: ar.elapsed - e0 });
     t = stepTo(ar, 0.5, 0.5, t, 3);
     check('A9 resumes when puck returns', !ar.paused);
-    ar.obstacles.push({ type: 'blocker', x: 0.5, y: zoneY(ar, 0.5) - 0.03, w: 0.15, h: 0.08, vy: 0.5 });
+    ar.obstacles.push(fall(0.5, zoneY(ar, 0.5) - 0.03));
     ar.update(0.033, { pos: { x: 0.5, y: 0.5 }, state: 'predicted', trail: [], distance: 0, speed: 0 }, t); t += 33;
     check('A9 no hit while position is predicted (occlusion buffer)', ar.hits === 0);
 
@@ -366,14 +382,11 @@
     ar = mk(); t = toPlay(ar, 90000);
     t = stepTo(ar, 0.5, 0.5, t, 92); // ≈3초
     check('A10 survival +10/s', ar.score >= 30 && ar.score < 50, ar.score);
+    const iv0 = ar.interval(), sp0a = ar.speed;
     ar.score = 2050; ar.update(0.033, fakePuck(0.5, 0.5), t); t += 33;
-    check('A10 level/speed progression', ar.level === 2 && Math.abs(ar.speedMul - 1.21) < 0.01, { level: ar.level, speedMul: ar.speedMul });
+    check('A10 level raises density, not speed', ar.level === 2 && ar.interval() < iv0 * 0.8 && ar.speed === sp0a, { level: ar.level, iv0, iv: ar.interval() });
     ar.floorWidthM = 2; const res = ar.result({ distance: 3.5 });
     check('A10 result report fields', res.items_.length === 8 && res.distanceM === 7 && res.items_.some(([k]) => k === '최고 콤보'), res.items_);
-    // 자동 스폰이 4종을 모두 만들어내는지
-    ar = mk(); t = toPlay(ar, 100000); ar.spawnTimer = 0; const types = new Set();
-    for (let i = 0; i < 400; i++) { ar.update(0.033, fakePuck(0.05, 0.05), t); t += 33; ar.obstacles.forEach((o) => types.add(o.type)); ar.invulnUntil = t + 1e6; ar.lives = 3; if (ar.spawnTimer > 0.2) ar.spawnTimer = 0.2; }
-    check('A10 spawner produces all 4 obstacle types', ['blocker', 'gate', 'beam', 'gap'].every((k) => types.has(k)), [...types]);
 
     // ===== 시간제 규칙: 1·3·5분, 시간이 끝나면 종료, 시간별 랭킹 키 =====
     {

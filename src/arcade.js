@@ -322,13 +322,8 @@ export class Arcade {
       ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.35); ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    // coin: 옐로 정원 + 잉크 헤어라인, 아래에 'coin' 글자 (먹는 것임을 알 수 있게)
-    for (const p of this.pickups) {
-      const x = p.x * S, y = p.y * S, r = p.r * S;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = C.yellow; ctx.fill();
-      ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
-      text(ctx, 'coin', x, y + r + fs * 0.62, fs * 0.82, { weight: 700, color: C.ink, halo: true });
-    }
+    // coin: 동전 모양 (톱니 테두리 + 안쪽 고리 + 가운데 'coin' 글자)
+    for (const p of this.pickups) drawCoin(ctx, p.x * S, p.y * S, p.r * S, hair);
 
     this._drawAvatar(ctx, S, now, puck, false, hair);
 
@@ -360,8 +355,8 @@ export class Arcade {
   _drawLegend(ctx, S, zt, fs) {
     const W = S, y = zt - W * 0.2, r = fs * 0.55;
     let x = W / 2 - fs * 9.5;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = C.yellow; ctx.fill(); ctx.lineWidth = Math.max(1, W / (ctx.canvas.clientWidth || W)); ctx.strokeStyle = C.ink; ctx.stroke();
-    text(ctx, 'coin  먹기 +200', x + r * 1.8, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
+    drawCoin(ctx, x, y, r * 1.5, Math.max(1, W / (ctx.canvas.clientWidth || W)));
+    text(ctx, '먹기 +200', x + r * 2.4, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
     x = W / 2 + fs * 1.2;
     PUCK_COLORS.forEach((c, i) => { ctx.beginPath(); ctx.arc(x + i * r * 1.5, y, r, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill(); });
     text(ctx, '피하기', x + PUCK_COLORS.length * r * 1.5 + r * 0.6, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
@@ -413,6 +408,28 @@ export class Arcade {
     ctx.lineWidth = hair; ctx.strokeStyle = predicted || ghost ? rgba(C.ink, 0.4) : C.ink; ctx.stroke();
     ctx.globalAlpha = 1;
   }
+}
+
+/**
+ * 동전: 옐로 원판 + 잉크 외곽선, 테두리의 톱니(짧은 방사선), 안쪽 고리, 가운데 'coin' 글자.
+ * 퍽(색만 다른 민무늬 원)과 한눈에 구분되도록 한다.
+ */
+export function drawCoin(ctx, x, y, r, hair) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = C.yellow; ctx.fill();
+  ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
+  // 톱니 테두리
+  ctx.lineWidth = Math.max(0.75, hair * 0.75); ctx.strokeStyle = rgba(C.ink, 0.7); ctx.lineCap = 'butt';
+  const n = 20;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; ctx.moveTo(x + Math.cos(a) * r * 0.84, y + Math.sin(a) * r * 0.84); ctx.lineTo(x + Math.cos(a) * r * 0.97, y + Math.sin(a) * r * 0.97); }
+  ctx.stroke();
+  // 안쪽 고리
+  ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); ctx.lineWidth = Math.max(0.75, hair * 0.75); ctx.strokeStyle = C.ink; ctx.stroke();
+  // 글자: 작아도 원 안에
+  ctx.font = font(F.sans, r * 0.66, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = C.ink;
+  ctx.fillText('coin', x, y + r * 0.03);
+  ctx.restore();
 }
 
 export { font };

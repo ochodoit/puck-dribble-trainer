@@ -7,6 +7,7 @@ import { Renderer } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel } from './account.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -16,7 +17,9 @@ const els = {
   handles: $('#floor-handles'), tapHint: $('#tap-hint'),
   hudMode: $('#hud-mode'), hudInstruction: $('#hud-instruction'), hudTimer: $('#hud-timer'), hudScore: $('#hud-score'), hudLives: $('#hud-lives'), hudCombo: $('#hud-combo'),
   chipFloor: $('#chip-floor'), chipPuck: $('#chip-puck'), chipStick: $('#chip-stick'), chipFps: $('#chip-fps'),
-  btnMode: $('#btn-mode'), btnFloorLock: $('#btn-floor-lock'), btnFlip: $('#btn-flip'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
+  btnMode: $('#btn-mode'), btnFloorLock: $('#btn-floor-lock'), btnFlip: $('#btn-flip'), btnRank: $('#btn-rank'),
+  authCard: $('#auth-card'), authForm: $('#auth-form'), authLogged: $('#auth-logged'), authWho: $('#auth-who'), authError: $('#auth-error'), authSubmit: $('#auth-submit'), authNote: $('#auth-store-note'),
+  panelRank: $('#panel-rank'), rankMode: $('#rank-mode'), rankAge: $('#rank-age'), rankScope: $('#rank-scope'), rankBody: $('#rank-body'), rankMe: $('#rank-me'), resultRank: $('#result-rank'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
   splash: $('#splash'), btnCamera: $('#btn-camera'), splashError: $('#splash-error'),
   panelMode: $('#panel-mode'), modeList: $('#mode-list'), versusToggle: $('#versus-toggle'), versusNames: $('#versus-names'), p1: $('#p1-name'), p2: $('#p2-name'),
   panelSettings: $('#panel-settings'), selCamera: $('#sel-camera'),
@@ -41,6 +44,8 @@ const app = {
   fps: 0, frames: 0, fpsAt: 0,
   lastVideoTime: -1,
   hudAt: 0,
+  account: null,      // 계정 저장소 (local | firebase)
+  authTab: 'login',
 };
 
 // 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등)
@@ -53,6 +58,7 @@ function init() {
   applySettingsToUI();
   bindUI();
   setupAccessGate();
+  setupAuth();
   game.difficulty = settings.difficulty;
   renderModeList();
   updateHud(true);
@@ -63,6 +69,132 @@ function init() {
     showSplashError('카메라는 HTTPS 주소에서만 동작합니다. https:// 로 열어주세요.');
   }
 }
+
+// =============== 계정 / 랭킹 ===============
+async function setupAuth() {
+  const sel = $('#auth-country');
+  COUNTRIES.forEach(([code, label]) => { const o = document.createElement('option'); o.value = code; o.textContent = label; sel.appendChild(o); });
+  sel.value = 'KR';
+  els.authCard.classList.remove('hidden');
+  els.authNote.textContent = '계정 불러오는 중…';
+  $$('.auth-tabs .tab').forEach((t) => t.addEventListener('click', () => setAuthTab(t.dataset.tab)));
+  els.authForm.addEventListener('submit', onAuthSubmit);
+  $('#auth-guest').addEventListener('click', () => { els.authForm.classList.add('hidden'); els.authNote.textContent = '게스트: 기록이 랭킹에 올라가지 않습니다.'; });
+  $('#btn-logout').addEventListener('click', doLogout);
+  $('#btn-settings-logout').addEventListener('click', doLogout);
+  els.btnRank.addEventListener('click', () => openRank());
+  [els.rankMode, els.rankAge, els.rankScope].forEach((e) => e.addEventListener('change', () => renderRank()));
+  MODES.filter((m) => m.id !== 'free').forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.icon} ${m.name}`; els.rankMode.appendChild(o); });
+  AGE_GROUPS.forEach((g) => { const o = document.createElement('option'); o.value = g; o.textContent = g; els.rankAge.appendChild(o); });
+
+  app.account = await createAccountStore();
+  window.__puckTrainer.account = app.account;
+  els.authNote.textContent = app.account.kind === 'firebase'
+    ? '온라인 랭킹: 모든 기기의 기록이 함께 집계됩니다.'
+    : '이 기기 안에서 등록·랭킹이 저장됩니다 (여러 선수가 같은 기기로 경쟁 가능). 온라인 공유 랭킹은 README의 Firebase 설정 참고.';
+  refreshAuthUI();
+}
+
+function setAuthTab(tab) {
+  app.authTab = tab;
+  $$('.auth-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  $$('.reg-only').forEach((e) => e.classList.toggle('hidden', tab !== 'register'));
+  els.authSubmit.textContent = tab === 'register' ? '가입하고 시작' : '로그인';
+  els.authError.classList.add('hidden');
+}
+
+async function onAuthSubmit(e) {
+  e.preventDefault();
+  if (!app.account) return;
+  const nick = $('#auth-nick').value, pin = $('#auth-pin').value;
+  els.authSubmit.disabled = true;
+  try {
+    if (app.authTab === 'register') {
+      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value });
+      toast(`환영합니다, ${app.account.current().nick}!`);
+    } else {
+      await app.account.login(nick, pin);
+    }
+    $('#auth-pin').value = '';
+    els.authError.classList.add('hidden');
+    refreshAuthUI();
+  } catch (err) {
+    els.authError.textContent = err.message || String(err);
+    els.authError.classList.remove('hidden');
+  } finally { els.authSubmit.disabled = false; }
+}
+
+function doLogout() {
+  app.account?.logout();
+  refreshAuthUI();
+  toast('로그아웃했습니다');
+}
+
+function refreshAuthUI() {
+  const u = app.account?.current();
+  els.authLogged.classList.toggle('hidden', !u);
+  els.authForm.classList.toggle('hidden', !!u);
+  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b> · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)`;
+  $('#settings-account').textContent = u ? `로그인: ${u.nick} (${u.team}, ${u.ageGroup})` : '로그인하지 않음 (랭킹 미등록)';
+  $('#btn-settings-logout').classList.toggle('hidden', !u);
+  if (!u) { setAuthTab(app.authTab); els.authForm.classList.remove('hidden'); }
+}
+
+function rankFilters() {
+  const u = app.account?.current();
+  const f = {};
+  if (els.rankAge.value) f.ageGroup = els.rankAge.value;
+  if (els.rankScope.value === 'country' && u) f.country = u.country;
+  if (els.rankScope.value === 'team' && u) f.team = u.team;
+  return f;
+}
+
+async function openRank(modeId) {
+  if (modeId) els.rankMode.value = modeId;
+  else if (game.mode.id !== 'free') els.rankMode.value = game.mode.id;
+  open(els.panelRank);
+  await renderRank();
+}
+
+async function renderRank() {
+  if (!app.account) return;
+  const mode = els.rankMode.value;
+  const u = app.account.current();
+  els.rankBody.innerHTML = '<tr><td colspan="6" class="muted">불러오는 중…</td></tr>';
+  try {
+    const rows = await app.account.leaderboard(mode, rankFilters(), 100);
+    els.rankBody.innerHTML = rows.length ? rows.map((r) => `<tr class="${u && r.uid === u.id ? 'me' : ''} ${r.rank <= 3 ? 'top' + r.rank : ''}">
+      <td>${r.rank}</td><td>${esc(r.nick)}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${r.score}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">아직 기록이 없습니다. 게임을 끝까지 플레이하면 등록됩니다.</td></tr>';
+    const me = u ? await app.account.myRank(mode, rankFilters()) : null;
+    els.rankMe.textContent = u ? (me ? `내 순위: ${me.rank}위 / ${me.total}명 (최고 ${me.score}점)` : '이 조건에 내 기록이 없습니다') : '로그인하면 내 순위가 표시됩니다';
+  } catch (err) {
+    els.rankBody.innerHTML = `<tr><td colspan="6" class="error">랭킹을 불러오지 못했습니다: ${esc(err.message || err)}</td></tr>`;
+  }
+}
+
+/** 게임 종료 시 기록 등록 + 결과 패널에 순위 표시 */
+async function submitResult(result) {
+  els.resultRank.classList.add('hidden');
+  const u = app.account?.current();
+  if (!u || result.mode.id === 'free' || result.reason === 'manual' || app.versus) return;
+  try {
+    const { best, improved } = await app.account.submitScore(result.mode.id, result.score);
+    const all = await app.account.myRank(result.mode.id, {});
+    const age = await app.account.myRank(result.mode.id, { ageGroup: u.ageGroup });
+    const parts = [];
+    if (all) parts.push(`전체 ${all.rank}위/${all.total}명`);
+    if (age) parts.push(`${u.ageGroup} ${age.rank}위/${age.total}명`);
+    els.resultRank.innerHTML = `${improved ? '🏆 개인 최고 기록 갱신!' : `개인 최고 ${best}점`} · ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
+    els.resultRank.classList.remove('hidden');
+    $('#btn-result-rank').addEventListener('click', () => { close(els.panelResult); openRank(result.mode.id); });
+  } catch (err) {
+    els.resultRank.textContent = `기록 등록 실패: ${err.message || err}`;
+    els.resultRank.classList.remove('hidden');
+  }
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 /** 접속 코드 게이트 (공개 호스팅에서 본인만 사용) */
 function setupAccessGate() {
@@ -322,7 +454,7 @@ function loop(now) {
 function updateHandsFree(dt) {
   if (!settings.autoStart || game.running || app.calibTarget) { app.idleHold = 0; return; }
   // 설정/보정/모드 패널이 열려 있으면 대기 (결과 패널은 허용)
-  if (![els.panelSettings, els.panelCalib, els.panelMode].every((p) => p.classList.contains('hidden'))) { app.idleHold = 0; return; }
+  if (![els.panelSettings, els.panelCalib, els.panelMode, els.panelRank].every((p) => p.classList.contains('hidden'))) { app.idleHold = 0; return; }
   const pos = tracker.pos;
   const inside = pos && tracker.state === 'tracked' && Math.abs(pos.x - 0.5) < 0.1 && Math.abs(pos.y - 0.5) < 0.25;
   if (!inside) { app.idleHold = 0; app.idleTick = -1; return; }
@@ -339,7 +471,8 @@ function updateHandsFree(dt) {
 
 // =============== HUD ===============
 function updateHud(force) {
-  els.hudMode.textContent = game.mode.name + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : '');
+  const who = app.account?.current();
+  els.hudMode.textContent = game.mode.name + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
   els.hudInstruction.textContent = game.running ? game.instruction : (app.started ? '시작을 누르세요' : '');
   if (game.mode.duration > 0) {
     const t = game.running ? game.timeLeft : game.mode.duration;
@@ -397,6 +530,7 @@ game.onEnd = (result) => {
   app.lastResult = result;
   const isBest = result.mode.id !== 'free' && result.reason !== 'manual' ? saveBest(result.mode.id, result.score) : false;
   showResult(result, isBest);
+  submitResult(result);
   updateHud();
 };
 

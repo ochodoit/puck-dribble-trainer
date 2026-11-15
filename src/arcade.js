@@ -39,6 +39,7 @@ export class Arcade {
     this.aspect = 0.75;
     this.floorWidthM = 1.5;
     this.flipY = true;     // true: 카메라 쪽으로 밀면 화면 위로(퍽들이 내려오는 쪽), 몸쪽으로 당기면 아래로
+    this.wash = 0.88;      // 경기장 종이 배경의 불투명도 (1 = 카메라 영상 완전히 가림, 0 = 영상 그대로)
     this.phase = 'idle';   // idle | countdown | play
     this.reset();
   }
@@ -254,10 +255,10 @@ export class Arcade {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
     // 종이 워시: 레인 안쪽은 영상이 은은하게 비치고, 테두리 바깥은 종이로 덮는다
-    ctx.fillStyle = rgba(C.paper, 0.88); ctx.fillRect(L, 0, Rr - L, H);
+    ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(L, 0, Rr - L, H);
     ctx.fillStyle = C.paper; ctx.fillRect(0, 0, L, H); ctx.fillRect(Rr, 0, W - Rr, H);
     // 플레이 존 바탕
-    ctx.fillStyle = rgba(C.paper2, 0.5); ctx.fillRect(L, zt, Rr - L, zh);
+    ctx.fillStyle = rgba(C.paper2, 0.5 * this.wash); ctx.fillRect(L, zt, Rr - L, zh);
     // 좌우 테두리 + 플레이 존 경계 (모두 헤어라인)
     ctx.lineWidth = hair; ctx.strokeStyle = C.ink;
     ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(L, H); ctx.moveTo(Rr, 0); ctx.lineTo(Rr, H); ctx.stroke();

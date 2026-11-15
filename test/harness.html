@@ -11,7 +11,7 @@
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
   import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS } from '../src/arcade.js';
-  import { rankKey } from '../src/game.js';
+  import { rankKey, FLYER_R } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
   import { decideIdle } from '../src/idle-logic.js';
 
@@ -140,7 +140,14 @@
     check('flyers spawned from the four sides', game.flyers.length >= 1 && game.flyers.every((f) => f.side >= 0 && f.side <= 3), game.flyers.length);
     const f0 = game.flyers[0];
     const dir0 = Math.atan2(f0.vy, f0.vx), sp0 = Math.hypot(f0.vx, f0.vy);
-    check('flyer speed within difficulty range', sp0 >= 0.35 - 1e-9 && sp0 <= 0.75 + 1e-9, sp0);
+    check('flyer speed within difficulty range', sp0 >= 0.25 - 1e-9 && sp0 <= 0.85 + 1e-9, sp0);
+    check('flyer radius halved (0.0175)', FLYER_R === 0.0175);
+    {
+      const gs = new Game(null); gs.setMode('obstacle'); const sps = [];
+      for (let i = 0; i < 300; i++) { gs.flyers = []; const fl = gs._spawnFlyer({ x: 0.5, y: 0.5 }, { flyMin: 0.25, flyMax: 0.85 }, 0); if (fl) sps.push(fl.speed); }
+      const mn = Math.min(...sps), mx = Math.max(...sps);
+      check('flyer speeds are random per puck across the range', mn < 0.35 && mx > 0.75 && new Set(sps.map((v) => v.toFixed(3))).size > 100, { mn, mx });
+    }
     const x1 = f0.x, y1 = f0.y;
     for (let i = 0; i < 10; i++) { game.update(0.033, tr7, t7); t7 += 33; }
     const moved = Math.atan2(f0.y - y1, f0.x - x1);
@@ -169,7 +176,7 @@
       const m0 = gp.toPlane(0.25, 1), m1 = gp.toPlane(0.25, 0);
       check('D1 puck mapped onto the flat plane (flip: push = up)', m0.x === 0.25 && Math.abs(m0.y) < 1e-9 && Math.abs(m1.y - 0.6) < 1e-9, { m0, m1 });
       let bad = 0, sides = new Set();
-      for (let i = 0; i < 400; i++) { gp.flyers = []; const fl = gp._spawnFlyer({ x: 0.5, y: 0.3 }, { flyMin: 0.35, flyMax: 0.75 }, 0, 0.6); if (!fl) continue; sides.add(fl.side); const outside = fl.x < 0 || fl.x > 1 || fl.y < 0 || fl.y > 0.6; const sp = Math.hypot(fl.vx, fl.vy); if (!outside || sp < 0.35 - 1e-9 || sp > 0.75 + 1e-9) bad++; }
+      for (let i = 0; i < 400; i++) { gp.flyers = []; const fl = gp._spawnFlyer({ x: 0.5, y: 0.3 }, { flyMin: 0.25, flyMax: 0.85 }, 0, 0.6); if (!fl) continue; sides.add(fl.side); const outside = fl.x < 0 || fl.x > 1 || fl.y < 0 || fl.y > 0.6; const sp = Math.hypot(fl.vx, fl.vy); if (!outside || sp < 0.25 - 1e-9 || sp > 0.85 + 1e-9) bad++; }
       check('D1 flyers start outside the plane on all four sides', bad === 0 && sides.size === 4, { bad, sides: [...sides] });
       // 평면에서 충돌: 내 퍽을 평면상의 날아오는 퍽 위치에 두면 감점
       const trp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', touches: 0, distance: 0, speed: 0, frames: 1, trackedFrames: 1, trackRate: 1 };
@@ -267,6 +274,7 @@
 
     // R9) 손상된 저장값 검증
     const bad = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), whiteV: 'x', puckTol: 9999, puckModel: { r: -1 }, stickModel: 'orange', floorMode: 'manual', manualQuad: [[0, 0], [2, 0]], difficulty: 'nightmare', p1: '' });
+    check('R9 background transparency sanitized', sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), bgTransparency: 250 }).bgTransparency === 12 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), bgTransparency: 60 }).bgTransparency === 60);
     check('R9 sanitize restores defaults', bad.whiteV === 150 && bad.puckTol === 95 && bad.puckModel.r === 0 && bad.stickModel === null && bad.floorMode === 'auto' && bad.manualQuad === null && bad.difficulty === 'normal' && bad.p1 === '플레이어 1', bad);
     settings.stickModel = null;
 

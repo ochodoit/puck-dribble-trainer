@@ -15,6 +15,7 @@ export class Renderer {
     this.ctx = canvas.getContext('2d');
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.topInset = 0;
+    this.wash = 0.88;   // 평면 경기장 종이 배경의 불투명도
   }
 
   resize(cssW, cssH) {
@@ -190,7 +191,7 @@ export class Renderer {
     const P = (x, y) => [f.x + x * S, f.y + y * S];
     ctx.save();
     // 종이 워시: 경기장 안쪽은 영상이 은은하게, 바깥은 종이로 덮는다
-    ctx.fillStyle = rgba(C.paper, 0.88); ctx.fillRect(f.x, f.y, f.w, f.h);
+    ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(f.x, f.y, f.w, f.h);
     ctx.fillStyle = C.paper;
     ctx.fillRect(0, 0, W, f.y); ctx.fillRect(0, f.y + f.h, W, H - f.y - f.h); ctx.fillRect(0, f.y, f.x, f.h); ctx.fillRect(f.x + f.w, f.y, W - f.x - f.w, f.h);
     ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.strokeRect(f.x, f.y, f.w, f.h);

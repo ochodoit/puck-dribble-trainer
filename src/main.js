@@ -254,9 +254,9 @@ function bindUI() {
   $('#set-mirror').addEventListener('change', (e) => { settings.mirror = e.target.checked; applyMirror(); persist(); });
   $('#set-debug').addEventListener('change', (e) => { settings.debug = e.target.checked; els.debug.classList.toggle('hidden', !settings.debug); persist(); });
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency']) {
     const input = $('#set-' + key), out = $('#out-' + key);
-    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; });
+    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); });
   }
   $('#set-floorMode').addEventListener('change', (e) => { settings.floorMode = e.target.value; if (app.areaEditing && settings.floorMode !== 'manual') endAreaEdit(false); applyFloorMode(); persist(); });
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
@@ -869,9 +869,10 @@ function applySettingsToUI() {
   $('#set-flipDepth').checked = settings.flipDepth;
   game.arcade.flipY = settings.flipDepth;
   els.debug.classList.toggle('hidden', !settings.debug);
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
   }
+  applyWash();
   game.arcade.floorWidthM = settings.floorWidthM;
   $('#set-floorMode').value = settings.floorMode;
   $('#set-procWidth').value = String(settings.procWidth);
@@ -881,6 +882,13 @@ function applySettingsToUI() {
   refreshCalibUI();
   applyMirror();
   applyFloorMode();
+}
+
+/** 배경 투명도 설정 -> 아케이드·퍽 피하기의 종이 배경 불투명도 */
+function applyWash() {
+  const alpha = clamp(1 - settings.bgTransparency / 100, 0, 1);
+  game.arcade.wash = alpha;
+  renderer.wash = alpha;
 }
 
 function persist() { saveSettings(settings); }

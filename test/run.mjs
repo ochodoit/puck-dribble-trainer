@@ -150,6 +150,16 @@ let failed = false;
   console.log(`${handlesHidden ? 'PASS' : 'FAIL'} handles hidden after done`);
   if (!handlesHidden) failed = true;
 
+  // 배경 투명도 슬라이더 -> 아케이드·퍽 피하기 배경 불투명도에 반영되고 저장됨
+  await page.click('#btn-settings');
+  await page.evaluate(() => { const el = document.querySelector('#set-bgTransparency'); el.value = '60'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const wash = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.wash, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).bgTransparency, out: document.querySelector('#out-bgTransparency').value }));
+  await page.evaluate(() => { const el = document.querySelector('#set-bgTransparency'); el.value = '10'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.click('[data-close="panel-settings"]');
+  const washOk = Math.abs(wash.a - 0.4) < 1e-9 && wash.saved === 60 && wash.out === '60';
+  console.log(`${washOk ? 'PASS' : 'FAIL'} background transparency slider (60% -> wash ${wash.a})`);
+  if (!washOk) failed = true;
+
   // 노트북 웹캠 흐름: 게임 영역 전체 화면 + 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경
   await page.click('#btn-settings');
   await page.selectOption('#set-floorMode', 'full');

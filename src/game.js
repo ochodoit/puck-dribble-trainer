@@ -31,11 +31,12 @@ const TARGET_R = 0.085;
 const WAYPOINT_R = 0.09;
 
 const DIFF = {
-  easy:   { cones: 2, moving: 0,   speed: 0.10, addEvery: 20, maxCones: 4, flyers: 1, flyEvery: 12, flyMin: 0.25, flyMax: 0.50, flyMax_n: 10 },
-  normal: { cones: 3, moving: 0.5, speed: 0.16, addEvery: 15, maxCones: 6, flyers: 2, flyEvery: 9,  flyMin: 0.35, flyMax: 0.75, flyMax_n: 12 },
-  hard:   { cones: 5, moving: 1,   speed: 0.24, addEvery: 12, maxCones: 8, flyers: 3, flyEvery: 7,  flyMin: 0.50, flyMax: 1.00, flyMax_n: 14 },
+  // flyMin~flyMax: 날아오는 퍽의 속도 범위(평면 폭/초). 퍽마다 이 안에서 무작위로 정해지고 이후 일정
+  easy:   { cones: 2, moving: 0,   speed: 0.10, addEvery: 20, maxCones: 4, flyers: 1, flyEvery: 12, flyMin: 0.18, flyMax: 0.55, flyMax_n: 10 },
+  normal: { cones: 3, moving: 0.5, speed: 0.16, addEvery: 15, maxCones: 6, flyers: 2, flyEvery: 9,  flyMin: 0.25, flyMax: 0.85, flyMax_n: 12 },
+  hard:   { cones: 5, moving: 1,   speed: 0.24, addEvery: 12, maxCones: 8, flyers: 3, flyEvery: 7,  flyMin: 0.35, flyMax: 1.10, flyMax_n: 14 },
 };
-export const FLYER_R = 0.035;      // 날아오는 빨간 퍽 반지름 (바닥 폭 단위)
+export const FLYER_R = 0.0175;     // 날아오는 빨간 퍽 반지름 (평면 폭 단위)
 const FLYER_WARN_MS = 650;         // 출발 전 가장자리 경고 시간
 const FLYER_MARGIN = 0.12;         // 바닥 바깥 출발/소멸 여유
 

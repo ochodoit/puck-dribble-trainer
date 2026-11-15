@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS = {
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
   flipDepth: true,                            // 아케이드 앞뒤 방향: true = 카메라 쪽으로 밀면 화면 위로
+  bgTransparency: 12,                         // 게임 배경 투명도(%): 0 = 종이색으로 완전히 덮음, 100 = 카메라 영상 그대로
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
   cameraId: '',
   facing: 'user',                             // 'user' 전면(기본: 화면을 보며 플레이) | 'environment' 후면
@@ -62,6 +63,7 @@ export function sanitizeSettings(s) {
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
   s.flipDepth = typeof s.flipDepth === 'boolean' ? s.flipDepth : d.flipDepth;
+  s.bgTransparency = num(s.bgTransparency, 0, 100, d.bgTransparency);
   s.cameraId = typeof s.cameraId === 'string' ? s.cameraId : '';
   s.facing = s.facing === 'environment' ? 'environment' : 'user';
   s.autoStart = typeof s.autoStart === 'boolean' ? s.autoStart : d.autoStart;

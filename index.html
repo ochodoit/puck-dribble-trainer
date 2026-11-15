@@ -38,6 +38,12 @@
             <div id="course-tray" class="course-tray">
               <div id="course-slots" class="course-slots"></div>
               <span class="course-hint">번호를 끌어다 놓으세요</span>
+              <div class="course-cycles" role="group" aria-label="목표 사이클 수">
+                <span>사이클</span>
+                <button type="button" id="cycles-dec" aria-label="사이클 줄이기">−</button>
+                <output id="cycles-out">10</output>
+                <button type="button" id="cycles-inc" aria-label="사이클 늘리기">+</button>
+              </div>
               <button type="button" id="course-clear" class="btn btn-ghost">모두 지우기</button>
             </div>
           </div>
@@ -234,6 +240,9 @@
               <option value="puck">퍽</option>
               <option value="stick">스틱 블레이드 (퍽 없이 연습)</option>
             </select>
+          </label>
+          <label>내 퍽 표시 % (100 또렷이 · 0 안 보임 — 헤드업 훈련) <output id="out-puckOpacity"></output>
+            <input type="range" id="set-puckOpacity" min="0" max="100" step="10" />
           </label>
           <label>배경 투명도 % (아케이드·퍽 피하기에서 카메라가 비치는 정도) <output id="out-bgTransparency"></output>
             <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />

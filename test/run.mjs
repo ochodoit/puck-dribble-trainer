@@ -156,6 +156,19 @@ let failed = false;
   await dragPt(3, 0.75, 0.6);
   console.log(`${afterRemove === '1' ? 'PASS' : 'FAIL'} course builder: dropping on the tray removes the point`);
   if (afterRemove !== '1') failed = true;
+  // 목표 사이클 수: − / + 로 10~100 (10 단위), 범위를 넘지 않고 저장됨
+  const cyc = async () => page.evaluate(() => ({ out: document.querySelector('#cycles-out').value, game: window.__puckTrainer.game.course.cycles, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).courseCycles, decOff: document.querySelector('#cycles-dec').disabled, incOff: document.querySelector('#cycles-inc').disabled }));
+  const c0 = await cyc();
+  await page.click('#cycles-inc'); await page.click('#cycles-inc');
+  const c1 = await cyc();
+  for (let i = 0; i < 12; i++) await page.evaluate(() => document.querySelector('#cycles-inc').click());
+  const c2 = await cyc();
+  for (let i = 0; i < 12; i++) await page.evaluate(() => document.querySelector('#cycles-dec').click());
+  const c3 = await cyc();
+  const hudIdle = (await page.textContent('#hud-score')).trim();
+  const cycOk = c0.out === '10' && c0.decOff && c1.out === '30' && c1.game === 30 && c1.saved === 30 && c2.out === '100' && c2.incOff && c3.out === '10' && c3.game === 10 && hudIdle === '0/10';
+  console.log(`${cycOk ? 'PASS' : 'FAIL'} course cycles stepper 10..100 (${c0.out} -> ${c1.out} -> ${c2.out} -> ${c3.out}, hud ${hudIdle})`);
+  if (!cycOk) failed = true;
   // 플레이: 1번 -> 3번 순서로 퍽을 옮기면 포인트 통과 + 한 바퀴
   const toUV = (p) => page.evaluate(([x, y]) => { const g = window.__puckTrainer.game; const t = window.__puckTrainer.tracker; const v = g.plane.flip ? 1 - y : y; const orig = Object.getPrototypeOf(t).update; t.update = function (m, now) { return orig.call(this, { u: x, v }, now); }; }, p);
   await page.evaluate(() => { window.__puckTrainer.settings.autoStart = false; });
@@ -169,9 +182,18 @@ let failed = false;
   const lap = await page.evaluate(() => ({ reached: window.__puckTrainer.game.stats.reached, laps: window.__puckTrainer.game.stats.laps }));
   console.log(`${nextIs3 === '3' && lap.reached === 2 && lap.laps === 1 ? 'PASS' : 'FAIL'} course play: points in order and lap (next=${nextIs3}, ${JSON.stringify(lap)})`);
   if (!(nextIs3 === '3' && lap.reached === 2 && lap.laps === 1)) failed = true;
+  await page.waitForTimeout(250);
+  const hudPlay = { score: (await page.textContent('#hud-score')).trim(), info: (await page.textContent('#hud-lives')).trim(), label: (await page.textContent('.hud-right .hud-label')).trim() };
+  const hudOk = hudPlay.score === '1/10' && /평균 \d+\.\ds · 최고 \d+\.\ds/.test(hudPlay.info) && hudPlay.label === 'Cycle';
+  console.log(`${hudOk ? 'PASS' : 'FAIL'} course HUD shows cycle progress, average and fastest (${JSON.stringify(hudPlay)})`);
+  if (!hudOk) failed = true;
   await page.screenshot({ path: join(ROOT, 'test', 'screenshot-course.png') });
   await page.click('#btn-start');
   await page.waitForSelector('#panel-result:not(.hidden)');
+  const resCourse = await page.textContent('#result-body');
+  const resOk = resCourse.includes('완료 사이클') && resCourse.includes('1 / 10') && resCourse.includes('평균 사이클') && resCourse.includes('가장 빠른 사이클');
+  console.log(`${resOk ? 'PASS' : 'FAIL'} course result shows cycles done, average and fastest cycle`);
+  if (!resOk) failed = true;
   await page.evaluate(() => { delete window.__puckTrainer.tracker.update; window.__puckTrainer.settings.autoStart = true; });
   await page.click('[data-close="panel-result"]');
   // 다시 아케이드로
@@ -202,6 +224,17 @@ let failed = false;
   const washOk = Math.abs(wash.a - 0.4) < 1e-9 && wash.saved === 60 && wash.out === '60';
   console.log(`${washOk ? 'PASS' : 'FAIL'} background transparency slider (60% -> wash ${wash.a})`);
   if (!washOk) failed = true;
+
+  // 내 퍽 표시 슬라이더 (10 단위, 0~100) -> 아케이드·평면 렌더러에 반영되고 저장됨
+  await page.click('#btn-settings');
+  const sliderAttr = await page.evaluate(() => { const el = document.querySelector('#set-puckOpacity'); return { min: el.min, max: el.max, step: el.step, value: el.value }; });
+  await page.evaluate(() => { const el = document.querySelector('#set-puckOpacity'); el.value = '30'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const po = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.puckAlpha, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).puckOpacity, out: document.querySelector('#out-puckOpacity').value }));
+  await page.evaluate(() => { const el = document.querySelector('#set-puckOpacity'); el.value = '100'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.click('[data-close="panel-settings"]');
+  const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '10' && sliderAttr.value === '100' && Math.abs(po.a - 0.3) < 1e-9 && po.saved === 30 && po.out === '30';
+  console.log(`${poOk ? 'PASS' : 'FAIL'} puck opacity slider 0..100 step 10 (30% -> alpha ${po.a})`);
+  if (!poOk) failed = true;
 
   // 노트북 웹캠 흐름: 게임 영역 전체 화면 + 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경
   await page.click('#btn-settings');

@@ -11,6 +11,7 @@
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
   import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
+  import { alphaLayer } from '../src/theme.js';
   import { rankKey, FLYER_R } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
   import { decideIdle, stepChoice, stepDwell, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
@@ -439,7 +440,7 @@
     // ===== 자유 연습: 직접 만든 코스를 번호 순서대로 =====
     {
       const g = new Game(null); g.setMode('free'); g.plane = { A: 0.5, flip: false };
-      g.course = { points: [{ n: 2, x: 0.2, y: 0.5 }, { n: 5, x: 0.8, y: 0.5 }, { n: 9, x: 0.5, y: 0.2 }], reach: 0.04 };
+      g.course = { points: [{ n: 2, x: 0.2, y: 0.5 }, { n: 5, x: 0.8, y: 0.5 }, { n: 9, x: 0.5, y: 0.2 }], reach: 0.04, cycles: 10 };
       const tr = { pos: { x: 0.5, y: 0.9 }, state: 'tracked', touches: 0, distance: 0, speed: 0, frames: 1, trackedFrames: 1, trackRate: 1 };
       let tc = 800000; const at = (x, y, frames = 3) => { tr.pos = { x, y }; for (let i = 0; i < frames; i++) { g.update(0.033, tr, tc); tc += 33; } };
       g.start(tr);
@@ -455,7 +456,23 @@
       tr.state = 'predicted'; at(0.2, 0.5); tr.state = 'tracked';
       check('K1 predicted position does not count', g.stats.reached === 6);
       const res = g.stop('manual');
-      check('K1 course result report', res.items.some(([k]) => k === '통과한 포인트') && res.items.some(([k]) => k === '최고 바퀴') && res.rankKey === 'free', res.items.map(([k]) => k));
+      check('K1 course result report', res.items.some(([k]) => k === '통과한 포인트') && res.items.some(([k]) => k === '평균 사이클') && res.items.some(([k]) => k === '가장 빠른 사이클') && res.rankKey === 'free', res.items.map(([k]) => k));
+      check('K1 result carries cycle stats (2 of 10)', res.cycles.done === 2 && res.cycles.target === 10 && Math.abs(res.cycles.avg - (g.stats.lapTimes[0] + g.stats.lapTimes[1]) / 2) < 1e-9 && res.cycles.best === Math.min(...g.stats.lapTimes), res.cycles);
+      // 목표 사이클을 채우면 자동 종료, 평균·가장 빠른 사이클 계산
+      {
+        const gc = new Game(null); gc.setMode('free'); gc.plane = { A: 0.5, flip: false };
+        gc.course = { points: [{ n: 1, x: 0.2, y: 0.5 }, { n: 2, x: 0.8, y: 0.5 }], reach: 0.04, cycles: 20 };
+        let ended = null; gc.onEnd = (rr) => { ended = rr; };
+        const trc = { pos: { x: 0.5, y: 0.9 }, state: 'tracked', touches: 0, distance: 0, speed: 0, frames: 1, trackedFrames: 1, trackRate: 1 };
+        gc.start(trc);
+        const go = (x, y, frames) => { trc.pos = { x, y }; for (let i = 0; i < frames && !ended; i++) { gc.update(0.1, trc, tc); tc += 100; } };
+        for (let c = 0; c < 25 && !ended; c++) { go(0.2, 0.5, c % 2 ? 2 : 4); go(0.8, 0.5, c % 2 ? 2 : 4); } // 번갈아 느린/빠른 사이클
+        const lt = gc.stats.lapTimes;
+        check('K1 ends automatically at the target cycle count (20)', ended && ended.reason === 'done' && ended.cycles.done === 20 && lt.length === 20 && gc.running === false, ended && ended.cycles);
+        const avg = lt.reduce((a, b) => a + b, 0) / lt.length;
+        check('K1 average and fastest cycle time reported', Math.abs(ended.cycles.avg - avg) < 1e-9 && ended.cycles.best === Math.min(...lt) && ended.cycles.best < ended.cycles.avg && ended.items.find(([k]) => k === '완료 사이클')[1] === '20 / 20' && ended.items.find(([k]) => k === '가장 빠른 사이클')[1] === `${Math.min(...lt).toFixed(1)}s`, { avg: ended.cycles.avg, best: ended.cycles.best });
+      }
+      check('K1 cycle setting sanitized (10~100 step 10)', sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), courseCycles: 50 }).courseCycles === 50 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), courseCycles: 5 }).courseCycles === 10 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), courseCycles: 150 }).courseCycles === 10 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), courseCycles: 35 }).courseCycles === 10);
       // 포인트가 하나면 벗어났다가 다시 와야 또 인정
       const g1 = new Game(null); g1.setMode('free'); g1.plane = { A: 0.5, flip: false }; g1.course = { points: [{ n: 1, x: 0.5, y: 0.5 }], reach: 0.04 };
       g1.start(tr); tr.pos = { x: 0.5, y: 0.5 }; for (let i = 0; i < 20; i++) { g1.update(0.033, tr, tc); tc += 33; }
@@ -467,6 +484,28 @@
       gf.start(tr); tr.pos = { x: 0.3, y: 0.75 }; gf.update(0.033, tr, tc); tc += 33; // flip: v 0.75 -> 0.25
       check('K1 course uses plane coords with flip', gf.stats.reached === 1);
       check('K1 saved course sanitized', sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), course: [{ n: 1, x: 0.2, y: 0.3 }, { n: 1, x: 0.5, y: 0.5 }, { n: 11, x: 0.1, y: 0.1 }, { n: 3, x: 2, y: 0.1 }, 'x'] }).course.length === 1);
+    }
+
+    // ===== 내 퍽 표시 농도 (헤드업 훈련): 플레이 중 내 퍽을 흐리게/안 보이게 =====
+    {
+      const cv = document.getElementById('arcade'), cx2 = cv.getContext('2d');
+      const px = (x, y) => [...cx2.getImageData(Math.round(x), Math.round(y), 1, 1).data];
+      // alphaLayer 자체: 1 = 그대로, 0 = 안 그림, 0.5 = 절반
+      const paint = (a) => { cx2.fillStyle = '#ffffff'; cx2.fillRect(0, 0, cv.width, cv.height); alphaLayer(cx2, a, (c) => { c.fillStyle = '#000000'; c.fillRect(100, 100, 50, 50); }); return px(120, 120)[0]; };
+      const v1 = paint(1), v0 = paint(0), vh = paint(0.5);
+      check('H1 alpha layer: 1 opaque, 0 hidden, 0.5 half', v1 === 0 && v0 === 255 && vh > 110 && vh < 145, { v1, v0, vh });
+      // 아케이드: 플레이 중 내 퍽(빨간 원)이 농도 0이면 화면에 없음, 카운트다운 중에는 항상 보임
+      const ar2 = new Arcade(null); ar2.aspect = cv.height / cv.width; ar2.wash = 1; ar2.start({ distance: 0 }, 'normal', true);
+      ar2.avatar = ar2.toZone(0.5, 0.5);
+      const ax2 = ar2.avatar.x * cv.width, ay2 = ar2.avatar.y * cv.width;
+      const drawAr = (alpha, phase) => { ar2.puckAlpha = alpha; ar2.phase = phase; ar2.effects = []; cx2.clearRect(0, 0, cv.width, cv.height); ar2.draw(cx2, cv.width, cv.height, 1000, { trail: [], state: 'tracked' }); return px(ax2, ay2); };
+      const isRed = (p) => p[0] > 190 && p[1] < 110 && p[2] < 100;
+      const pFull = drawAr(1, 'play'), pZero = drawAr(0, 'play'), pHalf = drawAr(0.5, 'play'), pCount = drawAr(0, 'countdown');
+      check('H1 arcade puck visible at 100%', isRed(pFull), pFull);
+      check('H1 arcade puck hidden at 0% during play', !isRed(pZero) && pZero[1] > 200, pZero);
+      check('H1 arcade puck faded at 50%', !isRed(pHalf) && pHalf[0] > pHalf[1] + 25 && pHalf[1] > 120, pHalf);
+      check('H1 puck always visible during countdown (needed to place it)', isRed(pCount), pCount);
+      check('H1 puck opacity setting sanitized (0~100 step 10)', sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), puckOpacity: 30 }).puckOpacity === 30 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), puckOpacity: 0 }).puckOpacity === 0 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), puckOpacity: 35 }).puckOpacity === 100 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), puckOpacity: 130 }).puckOpacity === 100);
     }
 
     // ===== 휴대폰 거치대 플레이 =====

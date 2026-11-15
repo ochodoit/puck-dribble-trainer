@@ -315,6 +315,7 @@ async function startCamera() {
     await startStream();
     await populateCameras();
     els.splash.classList.add('hidden');
+    $('#splash-diag').classList.add('hidden');
     app.started = true;
     app.startedAt = performance.now();
     requestWakeLock();
@@ -328,6 +329,34 @@ async function startCamera() {
     showSplashError(describeCameraError(err));
     els.btnCamera.disabled = false;
     els.btnCamera.textContent = '다시 시도';
+    await showCameraDiagnostics(err);
+  }
+}
+
+/** 카메라 실패 진단: 감지된 장치 목록 + 선택 재시도 + 환경 정보 */
+async function showCameraDiagnostics(err) {
+  const box = $('#splash-diag'), sel = $('#diag-camera'), info = $('#diag-info');
+  box.classList.remove('hidden');
+  let devices = [];
+  try { devices = await camera.listDevices(); } catch { /* ignore */ }
+  sel.innerHTML = '<option value="">자동 선택</option>';
+  devices.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `카메라 ${i + 1} (권한 허용 후 이름 표시)`; sel.appendChild(o); });
+  if (settings.cameraId && devices.some((d) => d.deviceId === settings.cameraId)) sel.value = settings.cameraId;
+  let permission = '알 수 없음';
+  try { if (navigator.permissions?.query) permission = (await navigator.permissions.query({ name: 'camera' })).state; } catch { /* 미지원 */ }
+  const lines = [
+    `오류: ${err?.name || 'Error'} ${err?.message || ''}`,
+    `시도 기록: ${(camera.attemptLog || []).join(' | ') || '-'}`,
+    `카메라 권한 상태: ${permission}`,
+    `감지된 카메라: ${devices.length}개${devices.length ? ' - ' + devices.map((d) => d.label || '(이름 숨김)').join(', ') : ''}`,
+    `보안 컨텍스트(HTTPS): ${window.isSecureContext}`,
+    `브라우저: ${navigator.userAgent}`,
+  ];
+  info.textContent = lines.join('\n');
+  if (!sel.dataset.bound) {
+    sel.dataset.bound = '1';
+    $('#btn-retry-camera').addEventListener('click', () => { settings.cameraId = sel.value; persist(); els.splashError.classList.add('hidden'); startCamera(); });
+    $('#btn-copy-diag').addEventListener('click', async () => { try { await navigator.clipboard.writeText(info.textContent); toast('진단 정보를 복사했습니다'); } catch { toast('복사 실패: 아래 내용을 직접 선택해 복사하세요'); } });
   }
 }
 

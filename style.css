@@ -88,6 +88,28 @@ button, input, select { font: inherit; color: inherit; }
   border: 1px solid rgba(148,163,184,0.4); background: rgba(255,255,255,0.08); color: var(--text); }
 .pin-form .error { width: 100%; margin: 4px 0 0; font-size: 14px; }
 
+.auth-card { text-align: left; background: rgba(255,255,255,0.05); border: 1px solid rgba(148,163,184,0.25); border-radius: var(--radius); padding: 14px 16px; margin: 10px 0 16px; }
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.auth-tabs .tab { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid rgba(148,163,184,0.3); background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
+.auth-tabs .tab.active { background: rgba(56,189,248,0.15); color: var(--text); border-color: var(--accent); }
+.auth-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.auth-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.auth-grid input, .auth-grid select { font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(148,163,184,0.4); background: rgba(255,255,255,0.08); color: var(--text); }
+.auth-logged { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 16px; }
+.auth-logged b { color: var(--accent); }
+.rank-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.rank-filters select { flex: 1; min-width: 120px; background: rgba(255,255,255,0.06); border: 1px solid rgba(148,163,184,0.3); border-radius: 10px; padding: 10px 12px; color: var(--text); }
+.rank-table-wrap { max-height: 50vh; overflow: auto; border-radius: 10px; }
+.rank-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rank-table th, .rank-table td { padding: 8px 8px; text-align: left; border-bottom: 1px solid rgba(148,163,184,0.15); white-space: nowrap; }
+.rank-table th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--card); }
+.rank-table td:last-child, .rank-table th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.rank-table tr.me { background: rgba(56,189,248,0.12); }
+.rank-table tr.top1 td:first-child::before { content: '🥇 '; }
+.rank-table tr.top2 td:first-child::before { content: '🥈 '; }
+.rank-table tr.top3 td:first-child::before { content: '🥉 '; }
+.result-rank { margin: 12px 0 0; font-size: 16px; color: var(--accent-2); }
+
 /* ---------- 패널 ---------- */
 .panel { position: absolute; inset: 0; z-index: 10; }
 .splash { background: radial-gradient(1200px 600px at 50% 0%, #1e3a8a 0%, var(--bg) 60%); display: flex; align-items: center; justify-content: center;

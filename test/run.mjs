@@ -57,6 +57,20 @@ let failed = false;
     console.log(`${rejected && remembered ? 'PASS' : 'FAIL'} access code gate (wrong rejected, right unlocks and is remembered)`);
     if (!(rejected && remembered)) failed = true;
   } else { console.log('FAIL access code gate not shown'); failed = true; }
+  // 회원가입 (별명 + 6자리 비밀번호 + 국가/팀/나이)
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.click('.auth-tabs .tab[data-tab="register"]');
+  await page.fill('#auth-nick', '번개손'); await page.fill('#auth-pin', '12345');
+  await page.selectOption('#auth-country', 'KR'); await page.fill('#auth-team', '서울 유스'); await page.fill('#auth-age', '11');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForTimeout(200);
+  const pinErr = await page.isHidden('#auth-logged'); // 5자리는 브라우저 검증(pattern)에서 막혀 가입되지 않아야 함
+  await page.fill('#auth-pin', '123456');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#auth-logged:not(.hidden)');
+  const who = await page.textContent('#auth-who');
+  console.log(`${pinErr && who.includes('번개손') && who.includes('U12') ? 'PASS' : 'FAIL'} register with nickname + 6-digit pin (${who.trim()})`);
+  if (!(pinErr && who.includes('번개손'))) failed = true;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await page.waitForTimeout(2300);
@@ -120,6 +134,28 @@ let failed = false;
   await page.click('[data-close="panel-result"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
   console.log(`${saved.floorMode === 'full' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
+  // 기록 등록 + 랭킹 패널: 게임이 끝까지 진행된 결과를 흉내내어 onEnd 호출
+  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 30, items: [['반복 횟수', 17]] }); });
+  await page.waitForSelector('#result-rank:not(.hidden)');
+  const rankTxt = await page.textContent('#result-rank');
+  console.log(`${rankTxt.includes('1위/1명') && rankTxt.includes('U12') ? 'PASS' : 'FAIL'} score submitted and rank shown (${rankTxt.trim().slice(0, 60)})`);
+  if (!rankTxt.includes('1위/1명')) failed = true;
+  await page.click('#btn-result-rank');
+  await page.waitForSelector('#panel-rank:not(.hidden)');
+  await page.waitForFunction(() => document.querySelector('#rank-body').textContent.includes('번개손'));
+  await page.selectOption('#rank-age', 'U16');
+  await page.waitForFunction(() => document.querySelector('#rank-body').textContent.includes('아직 기록이 없습니다'));
+  await page.selectOption('#rank-age', 'U12');
+  await page.waitForFunction(() => document.querySelector('#rank-body').textContent.includes('번개손'));
+  console.log('PASS leaderboard panel filters by age group');
+  await page.click('[data-close="panel-rank"]'); // 결과 패널은 '랭킹 보기'를 누를 때 이미 닫힘
+  // 로그아웃 후 로그인
+  await page.click('#btn-settings'); await page.click('#btn-settings-logout'); await page.click('[data-close="panel-settings"]');
+  const loggedOut = await page.evaluate(() => !window.__puckTrainer.account.current());
+  const relogin = await page.evaluate(async () => { try { await window.__puckTrainer.account.login('번개손', '123456'); return !!window.__puckTrainer.account.current(); } catch { return false; } });
+  console.log(`${loggedOut && relogin ? 'PASS' : 'FAIL'} logout and login again`);
+  if (!(loggedOut && relogin)) failed = true;
+
   // 아케이드 모드: 시작 -> 카운트다운 화면
   await page.click('#btn-mode');
   await page.click('.mode-card:nth-child(1)');
@@ -168,6 +204,8 @@ let failed = false;
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`${base}/index.html`);
   if (await page.isVisible('#pin-form')) { await page.fill('#pin-input', '1234'); await page.tap('#pin-form button'); await page.waitForSelector('#btn-camera:visible'); }
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.tap('#auth-guest');
   await page.tap('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await page.waitForTimeout(1500);

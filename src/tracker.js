@@ -1,6 +1,8 @@
-// 퍽 추적: 정규화 바닥 좌표(u,v)에서 위치 스무딩, 속도, 드리블(방향 전환) 카운트
+// 퍽 추적: 정규화 바닥 좌표(u,v)에서 알파-베타(등속 예측) 필터 + 이상치 게이트, 속도, 드리블(방향 전환) 카운트
 const COAST_MS = 400;         // 미검출 시 예측 유지 시간
 const DIR_THRESHOLD = 0.35;   // 방향 전환 인정 최소 속도 (바닥폭/초)
+const DEADBAND = 0.004;       // 정지 시 이 이하 움직임은 무시 (미세 떨림 억제)
+const OUTLIER_FRAMES = 3;     // 튀는 측정값을 몇 프레임 연속이면 진짜 이동으로 받아들일지
 
 export class Tracker {
   constructor() { this.reset(); }
@@ -18,43 +20,73 @@ export class Tracker {
     this.distance = 0;        // 누적 이동 거리 (바닥폭 단위)
     this.frames = 0;          // 추적률 계산용
     this.trackedFrames = 0;
+    this.outliers = 0;        // 연속 이상치 수
+    this.rejected = 0;        // 통계: 무시한 측정값 수
   }
 
-  resetStats() { this.touches = 0; this.distance = 0; this.dirX = 0; this.frames = 0; this.trackedFrames = 0; }
+  resetStats() { this.touches = 0; this.distance = 0; this.dirX = 0; this.frames = 0; this.trackedFrames = 0; this.rejected = 0; }
 
   get trackRate() { return this.frames ? this.trackedFrames / this.frames : 0; }
+
+  /** 다음 프레임 예측 위치 */
+  predict(dt) { return this.pos ? { x: this.pos.x + this.vel.x * dt, y: this.pos.y + this.vel.y * dt } : null; }
+
+  /** 측정값이 예측에서 이만큼 넘게 벗어나면 이상치 (속도가 빠를수록 넓게) */
+  gate(dt) { return 0.07 + 2.5 * this.speed * dt; }
 
   /** meas: {u,v} | null, now: ms */
   update(meas, now) {
     const dt = this.lastTime ? Math.min(0.1, (now - this.lastTime) / 1000) : 1 / 30;
     this.lastTime = now;
 
-    if (meas) {
-      if (!this.pos || this.state === 'lost') {
-        this.pos = { x: meas.u, y: meas.v };
-        this.vel = { x: 0, y: 0 };
-      } else {
-        const nx = this.pos.x + (meas.u - this.pos.x) * 0.65;
-        const ny = this.pos.y + (meas.v - this.pos.y) * 0.65;
-        if (dt > 0) {
-          const vx = (nx - this.pos.x) / dt, vy = (ny - this.pos.y) / dt;
-          this.vel.x += (vx - this.vel.x) * 0.5;
-          this.vel.y += (vy - this.vel.y) * 0.5;
-        }
-        this.distance += Math.hypot(nx - this.pos.x, ny - this.pos.y);
-        this.pos.x = nx; this.pos.y = ny;
-      }
+    if (meas && (!this.pos || this.state === 'lost')) {
+      // 새로 획득
+      this.pos = { x: meas.u, y: meas.v };
+      this.vel = { x: 0, y: 0 };
+      this.outliers = 0;
       this.state = 'tracked';
       this.lastSeen = now;
+    } else if (meas) {
+      const pred = this.predict(dt);
+      const ix = meas.u - pred.x, iy = meas.v - pred.y;
+      const innovation = Math.hypot(ix, iy);
+      if (innovation > this.gate(dt) && this.outliers < OUTLIER_FRAMES) {
+        // 한두 프레임 튀는 값(다른 물체·조각 오검출): 무시하고 예측으로 유지
+        this.outliers++; this.rejected++;
+        this._coast(dt, now);
+        this.state = this.outliers >= 2 ? 'predicted' : 'tracked';
+      } else {
+        if (this.outliers >= OUTLIER_FRAMES) {
+          // 같은 곳으로 계속 측정됨 -> 진짜 이동(재획득): 속도 초기화 후 점프
+          this.pos = { x: meas.u, y: meas.v };
+          this.vel = { x: 0, y: 0 };
+        } else {
+          const slow = this.speed < 0.15;
+          const moved = Math.hypot(meas.u - this.pos.x, meas.v - this.pos.y);
+          if (slow && moved < DEADBAND) {
+            // 정지 상태 미세 떨림: 위치 유지, 속도 감쇠
+            this.vel.x *= 0.6; this.vel.y *= 0.6;
+          } else {
+            // 알파-베타 필터: 예측 + 잔차 보정 (느릴수록 더 부드럽게)
+            const alpha = slow ? 0.45 : 0.7, beta = slow ? 0.15 : 0.35;
+            const nx = pred.x + alpha * ix, ny = pred.y + alpha * iy;
+            if (dt > 0) { this.vel.x += (beta * ix) / dt; this.vel.y += (beta * iy) / dt; }
+            this.distance += Math.hypot(nx - this.pos.x, ny - this.pos.y);
+            this.pos.x = nx; this.pos.y = ny;
+          }
+        }
+        this.outliers = 0;
+        this.state = 'tracked';
+        this.lastSeen = now;
+      }
     } else if (this.pos && now - this.lastSeen < COAST_MS) {
-      this.pos.x += this.vel.x * dt * 0.5;
-      this.pos.y += this.vel.y * dt * 0.5;
-      this.vel.x *= 0.85; this.vel.y *= 0.85;
+      this._coast(dt, now);
       this.state = 'predicted';
     } else {
       this.state = 'lost';
       this.pos = null;
       this.vel = { x: 0, y: 0 };
+      this.outliers = 0;
     }
 
     this.speed = Math.hypot(this.vel.x, this.vel.y);
@@ -76,5 +108,11 @@ export class Tracker {
     } else if (this.trail.length) {
       this.trail = this.trail.filter((p) => now - p.t < 600);
     }
+  }
+
+  _coast(dt) {
+    this.pos.x += this.vel.x * dt * 0.6;
+    this.pos.y += this.vel.y * dt * 0.6;
+    this.vel.x *= 0.85; this.vel.y *= 0.85;
   }
 }

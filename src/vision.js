@@ -15,7 +15,7 @@ export class Vision {
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
     this.mirror = true;
     this.frame = null;          // 마지막 ImageData (보정용 샘플링)
-    this.floorAuto = null;      // EMA 적용된 자동 바닥 bbox {x0,y0,x1,y1}
+    this.floorAuto = null;      // EMA 적용된 자동 바닥 사다리꼴 {y0,y1,tl,tr,bl,br} (뒤쪽은 좁고 앞쪽은 넓은 원근)
     this.floorLocked = false;
     this.floorPolygon = [];     // 자동 감지 윤곽 (표시용)
     this.floorOnCount = 0; this.floorOffCount = 0;
@@ -110,8 +110,7 @@ export class Vision {
           if (!this.floorAuto) { if (this.floorOnCount >= FLOOR_ON_FRAMES) this.floorAuto = bbox; }
           else {
             const f = this.floorAuto, a = FLOOR_EMA;
-            f.x0 += (bbox.x0 - f.x0) * a; f.y0 += (bbox.y0 - f.y0) * a;
-            f.x1 += (bbox.x1 - f.x1) * a; f.y1 += (bbox.y1 - f.y1) * a;
+            for (const k of ['y0', 'y1', 'tl', 'tr', 'bl', 'br']) f[k] += (bbox[k] - f[k]) * a;
           }
         }
       } else {
@@ -121,8 +120,8 @@ export class Vision {
       }
       if (this.floorAuto) {
         const f = this.floorAuto;
-        quad = [[f.x0, f.y0], [f.x1, f.y0], [f.x1, f.y1], [f.x0, f.y1]];
-        this.floorPolygon = this._floorOutline(f);
+        quad = [[f.tl, f.y0], [f.tr, f.y0], [f.br, f.y1], [f.bl, f.y1]];
+        this.floorPolygon = this._floorOutline({ x0: Math.min(f.tl, f.bl), x1: Math.max(f.tr, f.br), y0: f.y0, y1: f.y1 });
         this.floorFallback = false;
       } else {
         // 폴백: 흰 바닥 없이도 바로 플레이 (카메라 화면 전체)
@@ -202,8 +201,11 @@ export class Vision {
     const calibrated = pm.area > 0;
     const expArea = calibrated ? pm.area : Math.max(6, 0.785 * Math.pow(floorW * 0.03, 2));
     // 보정된 경우 크기 범위를 좁혀 신발·바지 등 큰 어두운 물체를 배제
-    const minA = Math.max(3, expArea * 0.25), maxA = expArea * (calibrated ? 3 : 4.5);
+    const minA = Math.max(3, expArea * 0.25);
+    let maxA = expArea * (calibrated ? 3 : 4.5);
     const areaScale = calibrated ? 1.5 : 2.2;
+    // 빠르게 움직이면 모션 블러로 덩어리가 길어지므로 면적 상한을 넓힘 (추적 끊김 -> 마커 튐 방지)
+    if (this.lastPuck) { const sp = Math.hypot(this.lastPuck.vx, this.lastPuck.vy) / PW; maxA *= 1 + Math.min(1.5, sp / 0.02); }
     const comps = mergeClose(this._components(puckMask, bounds, Math.max(2, Math.floor(minA * 0.6))), 2);
 
     // 추적 게이트: 예측 위치 + 탐색 반경. 스틱이 퍽 근처면(타격 직후) 반경 확대
@@ -243,6 +245,18 @@ export class Vision {
       result.puckCandidates.push(c);
       if (score > bestScore) { bestScore = score; best = c; }
     }
+    // 히스테리시스: 추적 중이면 예측 위치 근처의 후보를 멀리 있는 고득점 후보보다 우선 (한 프레임 점프 방지)
+    if (best && last && !reacquiring) {
+      const dBest = Math.hypot(best.cx - predX, best.cy - predY);
+      if (dBest > sigma) {
+        let near = null, nearScore = 0;
+        for (const c of result.puckCandidates) {
+          const dd = Math.hypot(c.cx - predX, c.cy - predY);
+          if (dd <= sigma * 0.8 && c.score > nearScore) { near = c; nearScore = c.score; }
+        }
+        if (near && nearScore >= bestScore * 0.45) { best = near; bestScore = nearScore; }
+      }
+    }
     if (best && bestScore >= 0.18) {
       result.puck = { x: best.cx, y: best.cy, area: best.area, w: best.maxx - best.minx + 1, h: best.maxy - best.miny + 1, score: bestScore };
       if (last && last.missed === 0) {
@@ -262,8 +276,9 @@ export class Vision {
     return result;
   }
 
+  /** 흰 바닥 영역을 원근 사다리꼴로 추정: 위쪽 띠와 아래쪽 띠의 좌/우 끝(중앙값) */
   _autoFloorBBox() {
-    const { PW, PH, rowCount, colCount } = this;
+    const { PW, PH, rowCount, colCount, whiteMask } = this;
     const rowMin = PW * ROW_RATIO, colMin = PH * ROW_RATIO;
     let y0 = -1, y1 = -1, x0 = -1, x1 = -1;
     for (let y = 0; y < PH; y++) if (rowCount[y] >= rowMin) { y0 = y; break; }
@@ -272,7 +287,26 @@ export class Vision {
     for (let x = PW - 1; x >= 0; x--) if (colCount[x] >= colMin) { x1 = x; break; }
     if (y0 < 0 || x0 < 0) return null;
     if ((y1 - y0) < PH * MIN_FLOOR_SPAN || (x1 - x0) < PW * MIN_FLOOR_SPAN) return null;
-    return { x0, y0, x1: x1 + 1, y1: y1 + 1 };
+    const extents = (ya, yb) => {
+      const lefts = [], rights = [];
+      for (let y = ya; y <= yb; y++) {
+        if (rowCount[y] < rowMin) continue;
+        const row = y * PW; let lx = -1, rx = -1, run = 0;
+        for (let x = x0; x <= x1; x++) { if (whiteMask[row + x]) { if (++run >= 3) { lx = x - 2; break; } } else run = 0; }
+        run = 0;
+        for (let x = x1; x >= x0; x--) { if (whiteMask[row + x]) { if (++run >= 3) { rx = x + 2; break; } } else run = 0; }
+        if (lx >= 0 && rx > lx) { lefts.push(lx); rights.push(rx); }
+      }
+      if (lefts.length < 2) return null;
+      lefts.sort((a, b) => a - b); rights.sort((a, b) => a - b);
+      return [lefts[Math.floor(lefts.length / 2)], rights[Math.floor(rights.length / 2)] + 1];
+    };
+    const band = Math.max(3, Math.round((y1 - y0) * 0.12));
+    const top = extents(y0, y0 + band), bot = extents(y1 - band, y1);
+    let tl = x0, tr = x1 + 1, bl = x0, br = x1 + 1;
+    if (top && top[1] - top[0] >= PW * 0.2) { tl = top[0]; tr = top[1]; }
+    if (bot && bot[1] - bot[0] >= PW * 0.2) { bl = bot[0]; br = bot[1]; }
+    return { x0, y0, x1: x1 + 1, y1: y1 + 1, tl, tr, bl, br };
   }
 
   /** 자동 감지 바닥의 좌/우 윤곽선 (행마다 첫/마지막 흰색 런) */

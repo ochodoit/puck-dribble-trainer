@@ -219,7 +219,11 @@ function bindUI() {
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
   els.btnSettings.addEventListener('click', () => open(els.panelSettings));
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
-  els.btnFloorLock.addEventListener('click', toggleFloorLock);
+  els.btnFloorLock.addEventListener('click', toggleAreaEdit);
+  $('#area-done').addEventListener('click', () => endAreaEdit());
+  $('#area-auto').addEventListener('click', () => { settings.floorMode = 'auto'; vision.floorLocked = false; vision.floorAuto = null; $('#set-floorMode').value = 'auto'; applyFloorMode(); persist(); toast('흰 바닥 자동 감지 (사다리꼴). 바닥이 안 잡히면 화면 전체로 동작합니다'); endAreaEdit(false); });
+  $('#area-full').addEventListener('click', () => { settings.floorMode = 'full'; $('#set-floorMode').value = 'full'; applyFloorMode(); persist(); toast('카메라 화면 전체가 게임 영역입니다'); endAreaEdit(false); });
+  $('#area-reset').addEventListener('click', () => { settings.manualQuad = defaultTrapezoid(); positionHandles(); persist(); });
   els.btnFlip.addEventListener('click', flipCamera);
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
@@ -240,7 +244,7 @@ function bindUI() {
     const input = $('#set-' + key), out = $('#out-' + key);
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; });
   }
-  $('#set-floorMode').addEventListener('change', (e) => { settings.floorMode = e.target.value; applyFloorMode(); persist(); });
+  $('#set-floorMode').addEventListener('change', (e) => { settings.floorMode = e.target.value; if (app.areaEditing && settings.floorMode !== 'manual') endAreaEdit(false); applyFloorMode(); persist(); });
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
     settings.controller = e.target.value; persist(); tracker.reset();
@@ -291,6 +295,7 @@ function bindUI() {
       case 'r': case 'R': if (game.running) game.stop('manual'); game.resetState(); closeAllPanels(); updateHud(); toast('초기화'); break;
       case 'f': case 'F': toggleFullscreen(); break;
       case 'm': case 'M': renderModeList(); open(els.panelMode); break;
+      case 'a': case 'A': toggleAreaEdit(); break;
       case 'd': case 'D': settings.debug = !settings.debug; $('#set-debug').checked = settings.debug; els.debug.classList.toggle('hidden', !settings.debug); persist(); break;
       case 'Escape': closeAllPanels(); if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); break;
     }
@@ -474,7 +479,7 @@ function loop(now) {
 
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, autoStart: settings.autoStart, calib: app.calib });
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, autoStart: settings.autoStart, calib: app.calib, areaEditing: app.areaEditing });
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
@@ -488,7 +493,7 @@ function loop(now) {
 function updateIdleCircle(dt) {
   const c = app.calib;
   const panelsOpen = ![els.panelSettings, els.panelCalib, els.panelMode, els.panelRank].every((p) => p.classList.contains('hidden'));
-  const idle = app.started && !game.running && settings.autoStart && !panelsOpen && !app.calibTarget;
+  const idle = app.started && !game.running && settings.autoStart && !panelsOpen && !app.calibTarget && !app.areaEditing;
   if (!idle) { c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset(); $('#btn-replace-puck').classList.add('hidden'); return; }
   c.active = true; c.manual = false; c.target = 'puck';
   c.circle = vision.calibCircle();
@@ -577,7 +582,7 @@ function updateHud(force) {
 
 function updateChips(result) {
   setChip(els.chipFloor, result.floor.mapping ? (result.floor.detected || result.floor.fallback || result.floor.mode === 'full' ? 'ok' : 'warn') : 'bad',
-    result.floor.mode === 'manual' ? '바닥(수동)' : result.floor.mode === 'full' || result.floor.fallback ? '영역(전체화면)' : vision.floorLocked ? '바닥(고정)' : '바닥(흰색)');
+    result.floor.mode === 'manual' ? '영역(사다리꼴)' : result.floor.mode === 'full' || result.floor.fallback ? '영역(전체화면)' : vision.floorLocked ? '바닥(고정)' : '바닥(흰색)');
   const stickCtl = settings.controller === 'stick';
   setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && tracker.state === 'predicted') ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
   if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', stickCtl ? '스틱(조작)' : '스틱');
@@ -677,27 +682,48 @@ function renderModeList() {
   els.p1.value = settings.p1; els.p2.value = settings.p2;
 }
 
-// =============== 바닥 ===============
-function toggleFloorLock() {
-  if (settings.floorMode === 'manual') { toast('수동 바닥 모드에서는 모서리를 드래그해 조정하세요'); return; }
-  if (settings.floorMode === 'full') { toast('게임 영역이 카메라 화면 전체입니다 (설정에서 변경)'); return; }
-  vision.floorLocked = !vision.floorLocked;
-  els.btnFloorLock.classList.toggle('active', vision.floorLocked);
-  toast(vision.floorLocked ? '바닥 영역 고정됨' : '바닥 영역 자동 갱신');
+// =============== 영역 (원근 사다리꼴) ===============
+function defaultTrapezoid() { return [[0.22, 0.18], [0.78, 0.18], [0.98, 0.96], [0.02, 0.96]]; }
+
+/** 현재 영역(자동 감지 결과 포함)을 수동 사다리꼴로 가져와 편집 시작 */
+function toggleAreaEdit() {
+  if (app.areaEditing) { endAreaEdit(); return; }
+  if (game.running) game.stop('manual');
+  closeAllPanels();
+  const q = app.lastVision?.floor?.quad;
+  if (q && settings.floorMode !== 'manual') {
+    settings.manualQuad = q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]);
+  } else if (!settings.manualQuad) settings.manualQuad = defaultTrapezoid();
+  settings.floorMode = 'manual';
+  $('#set-floorMode').value = 'manual';
+  persist();
+  app.areaEditing = true;
+  app.calib.active = false; app.idleHold = 0;
+  applyFloorMode();
+  $('#area-bar').classList.remove('hidden');
+  els.btnFloorLock.classList.add('active');
+  toast('모서리를 드래그해 바닥에 맞추세요 (뒤쪽 좁게, 앞쪽 넓게)', 4000);
+}
+
+function endAreaEdit(announce = true) {
+  app.areaEditing = false;
+  $('#area-bar').classList.add('hidden');
+  els.handles.classList.add('hidden');
+  els.btnFloorLock.classList.remove('active');
+  persist();
+  if (announce) toast('영역 저장됨. 퍽을 원 안에 두면 시작합니다');
 }
 
 function applyFloorMode() {
   const manual = settings.floorMode === 'manual';
   if (manual && !settings.manualQuad) {
-    // 자동 감지 결과가 있으면 그대로 가져오고, 없으면 기본 사각형
-    const f = vision.floorAuto;
-    settings.manualQuad = f
-      ? [[f.x0 / vision.PW, f.y0 / vision.PH], [f.x1 / vision.PW, f.y0 / vision.PH], [f.x1 / vision.PW, f.y1 / vision.PH], [f.x0 / vision.PW, f.y1 / vision.PH]]
-      : [[0.1, 0.15], [0.9, 0.15], [0.95, 0.95], [0.05, 0.95]];
+    // 자동 감지 결과(사다리꼴)가 있으면 그대로, 없으면 기본 사다리꼴
+    const q = app.lastVision?.floor?.quad;
+    settings.manualQuad = q ? q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]) : defaultTrapezoid();
     persist();
   }
-  els.handles.classList.toggle('hidden', !manual);
-  els.btnFloorLock.classList.toggle('active', false);
+  // 핸들은 편집 중에만 표시 (플레이 중 터치 방해 방지)
+  els.handles.classList.toggle('hidden', !(manual && app.areaEditing));
   positionHandles();
 }
 

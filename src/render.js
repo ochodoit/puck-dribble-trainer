@@ -18,7 +18,7 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, autoStart = false, calib = null }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, autoStart = false, calib = null, areaEditing = false }) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
@@ -50,6 +50,27 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    // 원근 격자: 영역 편집 중에는 진하게, 평소 사다리꼴/흰 바닥 모드에서는 은은하게
+    if (mapping && (areaEditing || floor.mode === 'manual' || (floor.mode === 'auto' && !floor.fallback))) {
+      const strong = areaEditing;
+      ctx.lineWidth = unit * (strong ? 0.003 : 0.0015);
+      ctx.strokeStyle = strong ? 'rgba(56,189,248,0.75)' : 'rgba(56,189,248,0.22)';
+      const N = strong ? 6 : 4;
+      for (let i = 1; i < N; i++) {
+        const t = i / N;
+        ctx.beginPath(); let [ax, ay] = uvToC(t, 0); ctx.moveTo(ax, ay); [ax, ay] = uvToC(t, 1); ctx.lineTo(ax, ay); ctx.stroke();
+        ctx.beginPath(); [ax, ay] = uvToC(0, t); ctx.moveTo(ax, ay); [ax, ay] = uvToC(1, t); ctx.lineTo(ax, ay); ctx.stroke();
+      }
+      if (strong) {
+        ctx.font = `700 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center';
+        ctx.lineWidth = unit * 0.006; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.fillStyle = '#fff';
+        let [tx, ty] = uvToC(0.5, 0); ctx.textBaseline = 'bottom'; ctx.strokeText('뒤쪽 (멀리) — 좁게', tx, ty - unit * 0.01); ctx.fillText('뒤쪽 (멀리) — 좁게', tx, ty - unit * 0.01);
+        [tx, ty] = uvToC(0.5, 1); ctx.textBaseline = 'top'; ctx.strokeText('앞쪽 (카메라) — 넓게', tx, ty + unit * 0.01); ctx.fillText('앞쪽 (카메라) — 넓게', tx, ty + unit * 0.01);
+        // 퍽의 바닥 좌표 표시 (원근 보정 확인용)
+        if (puck.pos) { const [px, py] = uvToC(puck.pos.x, puck.pos.y); ctx.font = `${Math.round(fontPx * 0.8)}px system-ui`; ctx.textBaseline = 'bottom'; const t2 = `퍽 바닥 좌표 (${puck.pos.x.toFixed(2)}, ${puck.pos.y.toFixed(2)})`; ctx.strokeText(t2, px, py - unit * 0.03); ctx.fillText(t2, px, py - unit * 0.03); }
+      }
+    }
+
     // 자동 물체 지정 (가운데 원에 3초)
     if (calib?.active) {
       const c = vision && calib.circle;

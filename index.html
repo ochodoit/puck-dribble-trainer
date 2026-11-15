@@ -48,6 +48,7 @@
       </header>
 
       <button id="btn-flip" class="btn-flip" aria-label="전면/후면 카메라 전환" title="카메라 전환">🔄</button>
+      <button id="btn-replace-puck" class="btn btn-primary btn-replace hidden">이 물체로 퍽 교체 (3초)</button>
 
       <!-- 인식 상태 -->
       <div id="status" class="status">
@@ -209,7 +210,7 @@
           <div class="calib-item">
             <span class="swatch" id="swatch-puck"></span>
             <div><b>퍽</b><small id="calib-puck-desc">기본: 검정</small></div>
-            <button class="btn btn-primary" data-autocalib="puck">원 안에 3초 (자동)</button>
+            <button class="btn btn-primary" data-autocalib="puck">퍽 다시 등록 (원 안에 3초)</button>
             <button class="btn" data-calib="puck">터치로 지정</button>
             <button class="btn btn-ghost" data-calib-reset="puck">기본값</button>
           </div>

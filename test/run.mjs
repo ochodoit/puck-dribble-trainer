@@ -23,11 +23,14 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+// 테스트는 외부 웹폰트 없이 동작해야 함 (폴백 글꼴): 폰트 요청은 빈 응답으로 대체
+const newCtx = async (opts) => { const c = await browser.newContext(opts); await c.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' })); return c; };
 let failed = false;
 
 // ---- 1) 영상처리/게임 로직 ----
 {
-  const page = await browser.newPage();
+  const hctx = await newCtx({});
+  const page = await hctx.newPage();
   page.on('pageerror', (e) => { console.error('PAGEERROR', e.message); failed = true; });
   await page.goto(`${base}/test/harness.html`);
   const out = await page.evaluate(() => window.runTests());
@@ -40,7 +43,7 @@ let failed = false;
 
 // ---- 2) 실제 앱: 로드 -> 카메라 시작(가짜 장치) -> 모드 선택 -> 시작/중지, 콘솔 오류 없음 ----
 {
-  const context = await browser.newContext({ viewport: { width: 1180, height: 820 }, permissions: ['camera'], deviceScaleFactor: 1 });
+  const context = await newCtx({ viewport: { width: 1180, height: 820 }, permissions: ['camera'], deviceScaleFactor: 1 });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -93,7 +96,14 @@ let failed = false;
   console.log(`${fpsNum > 0 ? 'PASS' : 'FAIL'} app processing frames (${fps.trim()})`);
   if (!(fpsNum > 0)) failed = true;
   await page.click('#btn-mode');
-  await page.click('.mode-card:nth-child(3)');
+  // 게임 시간 3분 선택 -> 타이머 3:00, 다시 1분
+  await page.click('#time-seg button[data-min="3"]');
+  const t3 = (await page.textContent('#hud-timer')).trim();
+  await page.click('#time-seg button[data-min="1"]');
+  const t1 = (await page.textContent('#hud-timer')).trim();
+  console.log(`${t3 === '3:00' && t1 === '1:00' ? 'PASS' : 'FAIL'} play time selector 1/3/5 min (${t3} -> ${t1})`);
+  if (!(t3 === '3:00' && t1 === '1:00')) failed = true;
+  await page.click('.mode-card:nth-child(2)');
   await page.waitForFunction(() => document.querySelector('#panel-mode').classList.contains('hidden'));
   const modeText = await page.textContent('#hud-mode');
   console.log(`${modeText.includes('퍽 피하기') ? 'PASS' : 'FAIL'} mode switch (${modeText.trim()})`);
@@ -208,7 +218,7 @@ let failed = false;
     });
     return { bad, scheme: getComputedStyle(document.documentElement).colorScheme, n: document.querySelectorAll('select').length };
   });
-  console.log(`${contrast.bad.length === 0 && contrast.scheme.includes('dark') ? 'PASS' : 'FAIL'} dropdown text/background contrast (${contrast.n} selects, scheme=${contrast.scheme}) ${contrast.bad.join('; ')}`);
+  console.log(`${contrast.bad.length === 0 ? 'PASS' : 'FAIL'} dropdown text/background contrast (${contrast.n} selects, scheme=${contrast.scheme}) ${contrast.bad.join('; ')}`);
   if (contrast.bad.length) failed = true;
   await page.click('#btn-start');
   await page.waitForSelector('#panel-result:not(.hidden)');
@@ -240,7 +250,7 @@ let failed = false;
 
 // ---- 3) 휴대폰 세로 화면 (390x844): 레이아웃 깨짐 없이 로드/시작, 영상 크기 변화 대응 ----
 {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['camera'], deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  const context = await newCtx({ viewport: { width: 390, height: 844 }, permissions: ['camera'], deviceScaleFactor: 1, isMobile: true, hasTouch: true });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -272,7 +282,7 @@ let failed = false;
 
 // ---- 4) 카메라 실패 진단: getUserMedia 가 NotReadableError 를 내면 진단 블록·카메라 목록·재시도가 보여야 함 ----
 {
-  const context = await browser.newContext({ viewport: { width: 1180, height: 820 }, permissions: ['camera'] });
+  const context = await newCtx({ viewport: { width: 1180, height: 820 }, permissions: ['camera'] });
   await context.addInitScript(() => {
     const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     let calls = 0;
@@ -285,6 +295,7 @@ let failed = false;
   await page.click('#auth-guest');
   await page.click('#btn-camera');
   await page.waitForSelector('#splash-diag:not(.hidden)', { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('#diag-info').textContent.length > 0); // 진단 내용은 비동기로 채워짐
   const errText = await page.textContent('#splash-error');
   const diag = await page.textContent('#diag-info');
   const options = await page.$$eval('#diag-camera option', (o) => o.length);

@@ -210,6 +210,27 @@
     check('R9 sanitize restores defaults', bad.whiteV === 150 && bad.puckTol === 95 && bad.puckModel.r === 0 && bad.stickModel === null && bad.floorMode === 'auto' && bad.manualQuad === null && bad.difficulty === 'normal' && bad.p1 === '플레이어 1', bad);
     settings.stickModel = null;
 
+    // ===== 노트북 웹캠 대응 =====
+    // L1) 게임 영역 = 카메라 화면 전체: 흰 바닥 없이(회색 배경) 밝은 퍽 추적
+    settings.floorMode = 'full'; vision.mirror = false; vision.lastPuck = null;
+    sctx.fillStyle = '#4b5563'; sctx.fillRect(0, 0, 640, 480); // 어두운 방 바닥
+    sctx.fillStyle = '#f97316'; sctx.beginPath(); sctx.ellipse(150, 400, 14, 9, 0, 0, Math.PI * 2); sctx.fill(); // 주황 볼
+    const ballSample = (vision.process(scene, settings), vision.sampleObject(150 * 0.375, 400 * 0.375, 95));
+    settings.puckModel = { ...ballSample };
+    r = vision.process(scene, settings);
+    check('L1 full-frame area maps whole camera', r.floor.mode === 'full' && r.floor.mapping && r.floor.quad[0][0] < 6 && r.floor.quad[2][0] > vision.PW - 6);
+    check('L1 bright puck tracked without white floor', r.puck && Math.abs(r.puck.x - 150 * 0.375) < 2, r.puck && [r.puck.x, r.puck.y]);
+    const [lu, lv] = r.floor.mapping.toUV(r.puck.x, r.puck.y);
+    check('L1 uv inside unit square', lu > 0.2 && lu < 0.26 && lv > 0.8 && lv < 0.9, [lu, lv]);
+
+    // L2) 인식 해상도 변경 (400px) 후에도 동일 위치 인식
+    vision.setProcWidth(400);
+    r = vision.process(scene, settings);
+    const scale = 400 / 640;
+    check('L2 higher resolution tracks same spot', vision.PH === 300 && r.puck && Math.abs(r.puck.x - 150 * scale) < 2 && Math.abs(r.puck.y - 400 * scale) < 2, r.puck && [vision.PW, vision.PH, r.puck.x, r.puck.y]);
+    vision.setProcWidth(240);
+    settings.floorMode = 'auto'; settings.puckModel = { r: 0, g: 0, b: 0, area: 0 };
+
     // 9) 성능: 240x180 프레임 처리 시간
     settings.debug = true;
     const t0 = performance.now();

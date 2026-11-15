@@ -43,9 +43,9 @@ export class Renderer {
       ctx.beginPath();
       floor.quad.forEach(([x, y], i) => { const [cx, cy] = toC(x, y); i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy); });
       ctx.closePath();
-      ctx.lineWidth = unit * 0.005;
-      ctx.setLineDash(floor.locked || floor.mode === 'manual' ? [] : [unit * 0.02, unit * 0.012]);
-      ctx.strokeStyle = floor.detected ? 'rgba(56,189,248,0.9)' : 'rgba(245,158,11,0.9)';
+      ctx.lineWidth = unit * (floor.mode === 'full' ? 0.003 : 0.005);
+      ctx.setLineDash(floor.locked || floor.mode !== 'auto' ? [] : [unit * 0.02, unit * 0.012]);
+      ctx.strokeStyle = floor.mode === 'full' ? 'rgba(56,189,248,0.35)' : floor.detected ? 'rgba(56,189,248,0.9)' : 'rgba(245,158,11,0.9)';
       ctx.stroke();
       ctx.setLineDash([]);
     }

@@ -69,9 +69,10 @@
       <div class="splash-inner">
         <div class="logo">🏒</div>
         <h1>퍽 드리블 트레이너</h1>
-        <p>아이패드 카메라로 흰 바닥·스틱·퍽을 실시간으로 인식해 장애물 피하기와 드리블 훈련을 진행합니다.</p>
+        <p>아이패드 또는 노트북 카메라로 바닥·스틱·퍽을 실시간으로 인식해 장애물 피하기와 드리블 훈련을 진행합니다.</p>
         <ol class="tips">
-          <li>아이패드를 거치대에 세워 흰 바닥(연습판)이 화면에 가득 차도록 비춥니다.</li>
+          <li><b>아이패드</b>: 거치대에 세워 흰 바닥(연습판)이 화면에 가득 차도록 비춥니다.</li>
+          <li><b>노트북 웹캠</b>: 노트북을 바닥 가까이 두고 화면을 뒤로 젖혀 연습 공간을 비춥니다. 흰 바닥이 없으면 설정 &gt; 게임 영역을 <b>카메라 화면 전체</b>로 바꾸고, 퍽은 밝은 색(주황 볼·연습용 퍽)을 터치로 지정하세요.</li>
           <li>퍽은 기본 검정색으로 인식됩니다. 스틱은 블레이드에 <b>눈에 띄는 색 테이프</b>를 감으면 가장 잘 인식됩니다.</li>
           <li>시작 후 <b>보정</b>에서 퍽과 스틱을 화면에서 터치해 색을 지정하세요. 스틱을 지정하면 세게 쳤을 때도 퍽을 놓치지 않습니다.</li>
           <li>바닥 위에 퍽과 같은 색의 다른 물체(검정 신발·가방 등)를 두지 마세요. 앱이 가려지거나 화면이 꺼지면 추적이 멈춥니다.</li>
@@ -120,10 +121,24 @@
           <label>스틱 색 허용 오차 <output id="out-stickTol"></output>
             <input type="range" id="set-stickTol" min="20" max="200" step="1" />
           </label>
-          <label>바닥 영역
+          <label>게임 영역
             <select id="set-floorMode">
-              <option value="auto">자동 감지(흰색 영역)</option>
+              <option value="auto">흰 바닥 자동 감지</option>
               <option value="manual">수동 지정(모서리 드래그)</option>
+              <option value="full">카메라 화면 전체 (노트북 웹캠 추천)</option>
+            </select>
+          </label>
+          <label>인식 해상도
+            <select id="set-procWidth">
+              <option value="240">보통 (240px, 빠름)</option>
+              <option value="320">높음 (320px)</option>
+              <option value="400">최고 (400px, 퍽이 작게 보일 때)</option>
+            </select>
+          </label>
+          <label>조작 대상
+            <select id="set-controller">
+              <option value="puck">퍽</option>
+              <option value="stick">스틱 블레이드 (퍽 없이 연습)</option>
             </select>
           </label>
           <label>난이도

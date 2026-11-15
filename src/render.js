@@ -51,6 +51,14 @@ export class Renderer {
     }
     if (!mapping) return;
 
+    // 아케이드: 화면 공간 렌더 (바닥 사각형 위 오브젝트 대신)
+    if (game.mode.id === 'arcade') {
+      // 실제 퍽 위치를 작은 점으로 표시해 매핑 관계를 보여줌
+      if (vision.puck) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.006, 0, Math.PI * 2); ctx.fillStyle = 'rgba(56,189,248,0.8)'; ctx.fill(); }
+      game.arcade.draw(ctx, W, H, now, puck);
+      return;
+    }
+
     const floorPxW = Math.hypot(...sub(uvToC(1, 0.5), uvToC(0, 0.5))); // 캔버스 상 바닥 폭
     const R = (r) => r * floorPxW; // 정규화 반지름 -> 캔버스 px (가로 기준)
 

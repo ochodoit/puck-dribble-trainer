@@ -1,5 +1,9 @@
 // 게임/트레이닝 로직. 좌표는 바닥 정규화 좌표 (u: 0..1 가로, v: 0..1 세로)
+import { Arcade } from './arcade.js';
+
 export const MODES = [
+  { id: 'arcade', name: '아케이드 서바이벌', duration: 0, icon: '🕹️',
+    desc: '퍽의 X·Y를 화면 하단 플레이 존에 매핑. 수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하고 황금 퍽을 모아 콤보! 하트 3개.' },
   { id: 'free', name: '자유 연습', duration: 0, icon: '🏒',
     desc: '퍽·스틱 인식을 보면서 자유롭게 드리블. 터치 수·속도·이동거리를 실시간 표시.' },
   { id: 'obstacle', name: '장애물 코스', duration: 60, icon: '🚧',
@@ -31,6 +35,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 export class Game {
   constructor(sfx) {
     this.sfx = sfx;
+    this.arcade = new Arcade(sfx);
     this.mode = MODES[0];
     this.difficulty = 'normal';
     this.onEnd = null;
@@ -70,6 +75,11 @@ export class Game {
     const p = puck?.pos || { x: 0.5, y: 0.5 };
 
     switch (this.mode.id) {
+      case 'arcade':
+        this.lives = 3;
+        this.arcade.start(puck, this.difficulty);
+        this.instruction = this.arcade.instruction;
+        break;
       case 'obstacle':
         this.lives = 3;
         this.stats = { targets: 0, hits: 0 };
@@ -118,6 +128,7 @@ export class Game {
     if (!this.running) return;
     this.running = false;
     const result = this._buildResult(reason);
+    if (this.mode.id === 'arcade') this.arcade.phase = 'idle';
     this.sfx?.end();
     this.onEnd?.(result);
     return result;
@@ -152,6 +163,13 @@ export class Game {
     const pp = pos ? { x: pos.x, y: pos.y } : null;
 
     switch (this.mode.id) {
+      case 'arcade': {
+        this.arcade.update(dt, puck, now);
+        this.score = this.arcade.score; this.lives = this.arcade.lives; this.instruction = this.arcade.instruction;
+        if (this.arcade.phase !== 'play') this.elapsed -= dt; // 카운트다운/일시정지는 플레이 시간에서 제외
+        if (this.arcade.phase === 'over') this.stop('lives');
+        break;
+      }
       case 'obstacle': {
         if (Math.floor(this.elapsed / d.addEvery) > Math.floor((this.elapsed - dt) / d.addEvery) && this.cones.length < d.maxCones) {
           this._spawnCone(pp || { x: 0.5, y: 0.5 }, d, true);
@@ -305,6 +323,11 @@ export class Game {
     const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, items: [] };
     const s = this.stats;
     switch (this.mode.id) {
+      case 'arcade': {
+        const a = this.arcade.result(this.tracker);
+        r.items = a.items_; r.arcade = a;
+        break;
+      }
       case 'obstacle':
         r.items = [['점수', this.score], ['통과한 타겟', s.targets], ['충돌', s.hits], ['버틴 시간', `${this.elapsed.toFixed(1)}s`]];
         break;

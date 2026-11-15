@@ -2,3 +2,4 @@
 node_modules/
 .DS_Store
 test/screenshot.png
+test/arcade-demo.png

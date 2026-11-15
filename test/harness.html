@@ -15,6 +15,9 @@
   import { rankKey, FLYER_R } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
   import { decideIdle, stepChoice, stepDwell, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
+  import { LocalCommunityStore, buildPost, boardOf, courseSig, betterRecord, STARTER_POSTS } from '../src/community.js';
+  import { timeAgo, courseSvg } from '../src/community-ui.js';
+  import { tr, setLang, getLang, detectLang, initI18n } from '../src/i18n.js';
 
   const scene = document.getElementById('scene');
   const sctx = scene.getContext('2d');
@@ -695,6 +698,89 @@
     const duTop = mp.toUV(170 * 0.375 + 20, 130 * 0.375)[0] - mp.toUV(170 * 0.375, 130 * 0.375)[0];
     const duBot = mp.toUV(170 * 0.375 + 20, 430 * 0.375)[0] - mp.toUV(170 * 0.375, 430 * 0.375)[0];
     check('T3 perspective mapping: same pixel step is a larger floor step at the back', duTop > duBot * 1.15, { duTop, duBot });
+
+    // C) 커뮤니티: 코스 공유 · 기록 게시판 · 기록 갱신
+    {
+      const memStore = () => { const m = {}; return { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; } }; };
+      const mem = memStore();
+      const cs = new LocalCommunityStore(mem);
+      const A = { id: 'ace', nick: 'Ace', team: 'Blades', country: 'KR', ageGroup: 'U12' }, B = { id: 'bee', nick: 'Bee', team: 'Hive', country: 'US', ageGroup: '성인' };
+      const starters = await cs.list();
+      check('C1 community starts with starter courses', starters.length === STARTER_POSTS.length && starters.every((p) => p.official && p.course.length >= 2 && !p.record));
+      const pts = [{ n: 2, x: 0.8, y: 0.5 }, { n: 1, x: 0.2, y: 0.5 }];
+      const errs = [
+        buildPost(null, { type: 'course', title: 't', body: 'b', course: pts, cycles: 10 }).error,
+        buildPost(A, { type: 'course', title: '', body: 'b', course: pts, cycles: 10 }).error,
+        buildPost(A, { type: 'course', title: 't', body: '', course: pts, cycles: 10 }).error,
+        buildPost(A, { type: 'course', title: 't', body: 'b', course: [pts[0]], cycles: 10 }).error,
+        buildPost(A, { type: 'course', title: 'x'.repeat(31), body: 'b', course: pts, cycles: 10 }).error,
+        buildPost(A, { type: 'course', title: 't', body: 'b', course: pts, cycles: 15 }).error,
+        buildPost(A, { type: 'record', title: 't' }).error,
+        buildPost(A, { type: 'beat', title: 't', course: pts, cycles: 10, record: { avg: 2, best: 1.5 } }).error,
+      ];
+      check('C2 post validation rejects bad input', errs.every((e) => typeof e === 'string' && e.length > 0), errs);
+      const post = await cs.create(A, { type: 'course', title: '와이드 2포인트', body: '리치가 좋아집니다', course: pts, cycles: 10, record: { avg: 3.2, best: 2.5 } });
+      check('C3 course post saved with sorted points and author record', post.course.map((p) => p.n).join() === '1,2' && post.record.avg === 3.2 && post.nick === 'Ace' && (await cs.list('course')).some((p) => p.id === post.id) && !(await cs.list('record')).some((p) => p.id === post.id));
+      check('C3 newest post first', (await cs.list())[0].id === post.id);
+      const r1 = await cs.submitRecord(B, post.id, { avg: 3.5, best: 3.0 });
+      check('C4 slower challenger ranks below the author', r1.improved && r1.rank === 2 && !r1.isHolder && !r1.beatAuthor && r1.prevHolder.nick === 'Ace', r1);
+      const r2 = await cs.submitRecord(B, post.id, { avg: 2.9, best: 2.2 });
+      check('C4 faster challenger takes the record from the author', r2.improved && r2.rank === 1 && r2.isHolder && r2.beatAuthor && r2.prevHolder.nick === 'Ace', r2);
+      const r3 = await cs.submitRecord(B, post.id, { avg: 3.0, best: 2.0 });
+      const board3 = boardOf(await cs.get(post.id));
+      check('C4 worse run keeps the personal best (one row per player)', !r3.improved && r3.isHolder && board3.length === 2 && board3[0].nick === 'Bee' && board3[0].avg === 2.9 && board3[1].author === true, board3);
+      const r4 = await cs.submitRecord(A, post.id, { avg: 2.5, best: 2.0 });
+      const after4 = await cs.get(post.id);
+      check('C4 author can win the record back (updates the post record)', r4.improved && r4.isHolder && r4.prevHolder.nick === 'Bee' && after4.record.avg === 2.5 && boardOf(after4)[0].author === true, r4);
+      let guestErr = ''; try { await cs.submitRecord(null, post.id, { avg: 1, best: 1 }); } catch (e) { guestErr = e.message; }
+      check('C4 guest cannot submit a record', guestErr.length > 0);
+      const beat = await cs.create(B, { type: 'beat', title: '기록 갱신!', body: '', course: pts, cycles: 10, record: { avg: 2.9, best: 2.2 }, ref: { id: post.id, title: post.title, nick: 'Ace', avg: 3.2 } });
+      const brag = await cs.create(A, { type: 'record', title: '1200점!', body: '', modeId: 'arcade', seconds: 60, score: 1200.4 });
+      const recList = await cs.list('record');
+      check('C5 beat post and record brag are listed under records', beat.ref.nick === 'Ace' && brag.score === 1200 && recList.length === 2 && recList.every((p) => p.type !== 'course'));
+      const c1 = await cs.cheer(B, post.id), c2 = await cs.cheer(A, post.id), c3 = await cs.cheer(B, post.id);
+      check('C6 cheer toggles once per player', c1 === 1 && c2 === 2 && c3 === 1, [c1, c2, c3]);
+      let delErr = ''; try { await cs.remove(B, post.id); } catch (e) { delErr = e.message; }
+      let offErr = ''; try { await cs.remove(A, STARTER_POSTS[0].id); } catch (e) { offErr = e.message; }
+      const persisted = (await new LocalCommunityStore(mem).list()).length;
+      const removed = await cs.remove(A, post.id);
+      check('C7 only the author can delete; posts persist in storage', delErr.length > 0 && offErr.length > 0 && persisted === STARTER_POSTS.length + 3 && removed && !(await cs.get(post.id)));
+      check('C8 course signature ignores tiny differences but not cycles', courseSig(pts, 10) === courseSig([{ n: 1, x: 0.20004, y: 0.5 }, { n: 2, x: 0.8, y: 0.5 }], 10) && courseSig(pts, 10) !== courseSig(pts, 20) && courseSig(pts, 10) !== courseSig([{ n: 1, x: 0.3, y: 0.5 }, { n: 2, x: 0.8, y: 0.5 }], 10));
+      check('C8 record comparison: lower average wins, ties by fastest cycle', betterRecord({ avg: 2, best: 1 }, { avg: 2.1, best: 0.5 }) && betterRecord({ avg: 2, best: 1 }, { avg: 2, best: 1.5 }) && !betterRecord({ avg: 2, best: 1 }, { avg: 2, best: 1 }) && betterRecord({ avg: 2, best: 1 }, null));
+      const now = 1e12;
+      check('C9 time ago + course preview', timeAgo(now - 5000, now) === '방금' && timeAgo(now - 5 * 60000, now) === '5분 전' && timeAgo(now - 3 * 3600000, now) === '3시간 전' && timeAgo(now - 2 * 86400000, now) === '2일 전' && (courseSvg(pts).match(/<circle/g) || []).length === 2);
+    }
+    // L) 언어 전환 (한국어 원문 -> 영어)
+    {
+      check('L1 language detection', detectLang(null, 'ko-KR') === 'ko' && detectLang(null, 'en-US') === 'en' && detectLang(null, 'fr-FR') === 'en' && detectLang('en', 'ko-KR') === 'en' && detectLang('ko', 'en-US') === 'ko' && detectLang('xx', 'ko') === 'ko');
+      setLang('ko');
+      check('L2 Korean leaves text untouched', tr('아케이드') === '아케이드');
+      initI18n();
+      setLang('en');
+      const cases = [
+        ['아케이드', 'Arcade'], ['3분', '3 min'], ['아케이드 · 1분 — Time up', 'Arcade · 1 min — Time up'],
+        ['성인 3위/10명', 'Adult #3 of 10'], ['평균 3.2s · 최고 2.1s', 'avg 3.2s · best 2.1s'], ['퍽 피하기 선택됨', 'Puck Dodge selected'],
+        ['퍽 등록 완료 · rgb(1,2,3) · 크기 300px · 원 안에 3초 더 두면 시작', 'Puck registered · rgb(1,2,3) · size 300px · hold 3 s more in the circle to start'],
+        ['충돌 −100 · 1.5초 무적', 'Hit −100 · 1.5 s safe'], ['3번으로', 'Go to 3'], ['번개손', '번개손'], ['  시작  ', '  Start  '], ['Score', 'Score'],
+      ];
+      const bad = cases.filter(([ko, en]) => tr(ko) !== en).map(([ko]) => [ko, tr(ko)]);
+      check('L3 dictionary, patterns and segment-wise translation', bad.length === 0, bad);
+      const camMsg = tr('카메라 권한이 거부되었습니다. (NotAllowedError: Permission denied)\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.');
+      check('L3 multi-line camera help is fully translated', !/[가-힣]/.test(camMsg) && camMsg.includes('(NotAllowedError: Permission denied)') && camMsg.includes('\n'), camMsg);
+      // DOM: 새로 들어온 글자·속성도 따라가며 번역, 사용자가 쓴 글(data-ugc)은 그대로, 한국어로 돌리면 원문 복원
+      const box = document.createElement('div');
+      box.innerHTML = '<p id="l-a">설정</p><input id="l-b" placeholder="접속 코드"><b id="l-c" data-ugc>설정</b><span id="l-d"></span>';
+      document.body.appendChild(box);
+      await new Promise((r) => setTimeout(r, 30));
+      const d1 = [box.querySelector('#l-a').textContent, box.querySelector('#l-b').placeholder, box.querySelector('#l-c').textContent];
+      box.querySelector('#l-d').textContent = '랭킹';
+      await new Promise((r) => setTimeout(r, 30));
+      const d2 = box.querySelector('#l-d').textContent;
+      setLang('ko');
+      const d3 = [box.querySelector('#l-a').textContent, box.querySelector('#l-b').placeholder, box.querySelector('#l-d').textContent];
+      check('L4 DOM text and attributes follow the language, user content untouched', d1.join('|') === 'Settings|Access code|설정' && d2 === 'Ranking' && d3.join('|') === '설정|접속 코드|랭킹' && document.documentElement.lang === 'ko', { d1, d2, d3 });
+      box.remove();
+    }
 
     // 9) 성능: 240x180 프레임 처리 시간
     settings.debug = true;

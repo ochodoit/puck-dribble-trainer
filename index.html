@@ -104,6 +104,7 @@
     <!-- 시작 화면 -->
     <div id="splash" class="panel splash">
       <div class="splash-inner">
+        <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
         <div class="masthead"><span>by camera</span><span>iPad · Phone · Laptop</span></div>
         <h1 class="lockup">Puck Dribble<span class="lockup-script">Trainer</span></h1>
         <svg class="hero-art" viewBox="0 0 420 150" role="img" aria-label="스틱과 퍽 일러스트" fill="none" stroke="#161616" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
@@ -200,6 +201,9 @@
       <div class="modal-card">
         <header><h2>Settings</h2><button class="btn btn-ghost btn-close" data-close="panel-settings">닫기</button></header>
         <div class="settings-grid">
+          <label><span data-ugc>언어 · Language</span>
+            <span class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></span>
+          </label>
           <label>카메라
             <select id="sel-camera"></select>
           </label>
@@ -319,6 +323,7 @@
         <header><h2 id="result-title">결과</h2><button class="btn btn-ghost btn-close" data-close="panel-result">닫기</button></header>
         <div id="result-body" class="result-body"></div>
         <p id="result-rank" class="result-rank hidden"></p>
+        <div id="result-share" class="result-share hidden"></div>
         <div id="result-choice" class="choice">
           <button id="btn-result-again" class="choice-opt left"><span class="choice-fill"></span><span class="choice-label">한 번 더</span><small>← 퍽을 왼쪽에</small></button>
           <button id="btn-result-next" class="choice-opt left hidden"><span class="choice-fill"></span><span class="choice-label">다음 플레이어</span><small>← 퍽을 왼쪽에</small></button>
@@ -329,6 +334,37 @@
           </div>
           <button id="btn-result-mode" class="choice-opt right"><span class="choice-fill"></span><span class="choice-label">모드 선택</span><small>퍽을 오른쪽에 →</small></button>
         </div>
+      </div>
+    </div>
+
+    <!-- 커뮤니티: 코스·기록 공유, 코스 기록 게시판 -->
+    <div id="panel-community" class="panel modal hidden">
+      <div class="modal-card community">
+        <header><h2>Community</h2><button class="btn btn-ghost btn-close" data-close="panel-community">닫기</button></header>
+        <div class="comm-bar">
+          <div id="comm-filter" class="seg" role="group" aria-label="글 종류">
+            <button type="button" data-filter="all" class="active">전체</button>
+            <button type="button" data-filter="course">코스</button>
+            <button type="button" data-filter="record">기록 자랑</button>
+          </div>
+          <button type="button" id="comm-write" class="btn btn-primary">글쓰기</button>
+        </div>
+        <p id="comm-note" class="muted"></p>
+        <form id="comm-form" class="comm-form hidden" autocomplete="off">
+          <div id="comm-type" class="seg" role="group" aria-label="글 종류">
+            <button type="button" data-type="course">내 코스 공유</button>
+            <button type="button" data-type="record">기록 자랑</button>
+          </div>
+          <div id="comm-preview" class="comm-preview"></div>
+          <label>제목<input id="comm-title" type="text" maxlength="30" placeholder="예: 백핸드 와이드 4포인트" required /></label>
+          <label>내용 <output id="comm-count">0/200</output><textarea id="comm-body" rows="3" maxlength="200"></textarea></label>
+          <p id="comm-error" class="error hidden"></p>
+          <div class="row">
+            <button type="submit" id="comm-submit" class="btn btn-primary">올리기</button>
+            <button type="button" id="comm-cancel" class="btn btn-ghost">취소</button>
+          </div>
+        </form>
+        <div id="comm-list" class="comm-list"></div>
       </div>
     </div>
 

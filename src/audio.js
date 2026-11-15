@@ -33,4 +33,9 @@ export class Sfx {
   start() { this._tone(523, 0.1); setTimeout(() => this._tone(659, 0.1), 110); setTimeout(() => this._tone(784, 0.18), 220); }
   end() { this._tone(784, 0.12); setTimeout(() => this._tone(659, 0.12), 130); setTimeout(() => this._tone(523, 0.25), 260); }
   fail() { this._tone(300, 0.3, 'sawtooth', 0.2, 120); }
+  deke() { this._tone(700, 0.08, 'square', 0.12, 1400); setTimeout(() => this._tone(1800, 0.14, 'triangle', 0.16), 60); }
+  combo() { [660, 880, 1100].forEach((f, i) => setTimeout(() => this._tone(f, 0.09, 'triangle', 0.14), i * 70)); }
+  heal() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this._tone(f, 0.16, 'sine', 0.14), i * 90)); }
+  go() { this._tone(988, 0.35, 'square', 0.16); }
+  beam() { this._tone(90, 0.5, 'sawtooth', 0.12, 240); }
 }

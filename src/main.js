@@ -13,7 +13,7 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
 const els = {
   view: $('#view'), video: $('#video'), overlay: $('#overlay'), debug: $('#debug'),
   handles: $('#floor-handles'), tapHint: $('#tap-hint'),
-  hudMode: $('#hud-mode'), hudInstruction: $('#hud-instruction'), hudTimer: $('#hud-timer'), hudScore: $('#hud-score'), hudLives: $('#hud-lives'),
+  hudMode: $('#hud-mode'), hudInstruction: $('#hud-instruction'), hudTimer: $('#hud-timer'), hudScore: $('#hud-score'), hudLives: $('#hud-lives'), hudCombo: $('#hud-combo'),
   chipFloor: $('#chip-floor'), chipPuck: $('#chip-puck'), chipStick: $('#chip-stick'), chipFps: $('#chip-fps'),
   btnMode: $('#btn-mode'), btnFloorLock: $('#btn-floor-lock'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
   splash: $('#splash'), btnCamera: $('#btn-camera'), splashError: $('#splash-error'),
@@ -80,9 +80,9 @@ function bindUI() {
   $('#set-mirror').addEventListener('change', (e) => { settings.mirror = e.target.checked; applyMirror(); persist(); });
   $('#set-debug').addEventListener('change', (e) => { settings.debug = e.target.checked; els.debug.classList.toggle('hidden', !settings.debug); persist(); });
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM']) {
     const input = $('#set-' + key), out = $('#out-' + key);
-    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); });
+    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; });
   }
   $('#set-floorMode').addEventListener('change', (e) => { settings.floorMode = e.target.value; applyFloorMode(); persist(); });
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
@@ -202,6 +202,7 @@ async function populateCameras() {
 function layout() {
   const rect = els.view.getBoundingClientRect();
   renderer.resize(rect.width, rect.height);
+  if (rect.width > 0) game.arcade.aspect = rect.height / rect.width;
   els.debug.width = vision.PW; els.debug.height = vision.PH;
   positionHandles();
 }
@@ -275,6 +276,11 @@ function updateHud(force) {
   }
   els.hudScore.textContent = String(game.score);
   els.hudLives.textContent = game.lives > 0 ? '❤️'.repeat(game.lives) : '';
+  if (game.mode.id === 'arcade' && game.running) {
+    const a = game.arcade;
+    els.hudCombo.textContent = a.combo > 0 ? `COMBO ${a.combo}  ×${a.multiplier}` : '';
+    els.hudCombo.className = 'hud-combo' + (a.combo >= 20 ? ' fever' : a.combo >= 10 ? ' gold' : '');
+  } else els.hudCombo.textContent = '';
   els.btnStart.textContent = game.running ? '중지' : '시작';
   els.btnStart.classList.toggle('stop', game.running);
   if (force) els.btnFloorLock.classList.toggle('active', vision.floorLocked);
@@ -483,9 +489,10 @@ function applySettingsToUI() {
   $('#set-debug').checked = settings.debug;
   $('#set-sound').checked = settings.sound;
   els.debug.classList.toggle('hidden', !settings.debug);
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
   }
+  game.arcade.floorWidthM = settings.floorWidthM;
   $('#set-floorMode').value = settings.floorMode;
   $('#set-procWidth').value = String(settings.procWidth);
   $('#set-controller').value = settings.controller;

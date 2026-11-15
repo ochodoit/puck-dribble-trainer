@@ -34,7 +34,7 @@
       <!-- 상단 HUD -->
       <header id="hud" class="hud">
         <div class="hud-left">
-          <span id="hud-mode" class="hud-mode">자유 연습</span>
+          <span id="hud-mode" class="hud-mode">아케이드 서바이벌</span>
           <span id="hud-instruction" class="hud-instruction"></span>
         </div>
         <div class="hud-center">
@@ -43,6 +43,7 @@
         <div class="hud-right">
           <span id="hud-score" class="hud-score">0</span>
           <span id="hud-lives" class="hud-lives"></span>
+          <span id="hud-combo" class="hud-combo"></span>
         </div>
       </header>
 
@@ -69,7 +70,7 @@
       <div class="splash-inner">
         <div class="logo">🏒</div>
         <h1>퍽 드리블 트레이너</h1>
-        <p>아이패드 또는 노트북 카메라로 바닥·스틱·퍽을 실시간으로 인식해 장애물 피하기와 드리블 훈련을 진행합니다.</p>
+        <p>노트북 웹캠이나 아이패드 카메라로 퍽의 위치를 실시간 추적해, 수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하는 체감형 아케이드와 드리블 훈련을 진행합니다.</p>
         <ol class="tips">
           <li><b>아이패드</b>: 거치대에 세워 흰 바닥(연습판)이 화면에 가득 차도록 비춥니다.</li>
           <li><b>노트북 웹캠</b>: 노트북을 바닥 가까이 두고 화면을 뒤로 젖혀 연습 공간을 비춥니다. 흰 바닥이 없으면 설정 &gt; 게임 영역을 <b>카메라 화면 전체</b>로 바꾸고, 퍽은 밝은 색(주황 볼·연습용 퍽)을 터치로 지정하세요.</li>
@@ -140,6 +141,9 @@
               <option value="puck">퍽</option>
               <option value="stick">스틱 블레이드 (퍽 없이 연습)</option>
             </select>
+          </label>
+          <label>게임 영역 실제 폭 (m) <output id="out-floorWidthM"></output>
+            <input type="range" id="set-floorWidthM" min="0.5" max="6" step="0.1" />
           </label>
           <label>난이도
             <select id="set-difficulty">

@@ -33,6 +33,8 @@ let failed = false;
   const out = await page.evaluate(() => window.runTests());
   out.logs.forEach((l) => console.log(l));
   if (!out.ok) failed = true;
+  await page.evaluate(() => window.renderArcadeDemo());
+  await page.locator('#arcade').screenshot({ path: join(ROOT, 'test', 'arcade-demo.png') });
   await page.close();
 }
 
@@ -52,7 +54,7 @@ let failed = false;
   console.log(`${fpsNum > 0 ? 'PASS' : 'FAIL'} app processing frames (${fps.trim()})`);
   if (!(fpsNum > 0)) failed = true;
   await page.click('#btn-mode');
-  await page.click('.mode-card:nth-child(2)');
+  await page.click('.mode-card:nth-child(3)');
   await page.waitForFunction(() => document.querySelector('#panel-mode').classList.contains('hidden'));
   const modeText = await page.textContent('#hud-mode');
   console.log(`${modeText.includes('장애물') ? 'PASS' : 'FAIL'} mode switch (${modeText.trim()})`);
@@ -107,7 +109,20 @@ let failed = false;
   await page.click('[data-close="panel-result"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
   console.log(`${saved.floorMode === 'full' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
+  // 아케이드 모드: 시작 -> 카운트다운 화면
+  await page.click('#btn-mode');
+  await page.click('.mode-card:nth-child(1)');
+  await page.waitForFunction(() => document.querySelector('#panel-mode').classList.contains('hidden'));
+  await page.click('#btn-start');
+  await page.waitForTimeout(700);
+  const arcadeRunning = (await page.textContent('#btn-start')).trim() === '중지' && (await page.textContent('#hud-instruction')).includes('원');
+  console.log(`${arcadeRunning ? 'PASS' : 'FAIL'} arcade mode starts with head-up countdown`);
+  if (!arcadeRunning) failed = true;
   await page.screenshot({ path: join(ROOT, 'test', 'screenshot.png') });
+  await page.click('#btn-start');
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  const resultText = await page.textContent('#result-body');
+  console.log(`${resultText.includes('최고 콤보') && resultText.includes('DEKE') ? 'PASS' : 'FAIL'} arcade result report`);
   if (errors.length) { console.error('FAIL console errors:', errors); failed = true; } else console.log('PASS no console errors');
   await context.close();
 }

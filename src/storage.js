@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   controller: 'puck',                         // 게임 조작 대상: 'puck' | 'stick'(퍽 없이 스틱 블레이드로)
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
+  floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
   cameraId: '',
   p1: '플레이어 1',
   p2: '플레이어 2',
@@ -54,6 +55,7 @@ export function sanitizeSettings(s) {
     s.manualQuad.every((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((c) => Number.isFinite(c) && c >= 0 && c <= 1));
   if (!quadOk) { s.manualQuad = null; if (s.floorMode === 'manual') s.floorMode = 'auto'; }
   s.difficulty = ['easy', 'normal', 'hard'].includes(s.difficulty) ? s.difficulty : d.difficulty;
+  s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.cameraId = typeof s.cameraId === 'string' ? s.cameraId : '';
   s.p1 = typeof s.p1 === 'string' && s.p1.trim() ? s.p1.slice(0, 10) : d.p1;
   s.p2 = typeof s.p2 === 'string' && s.p2.trim() ? s.p2.slice(0, 10) : d.p2;

@@ -47,6 +47,8 @@
         </div>
       </header>
 
+      <button id="btn-flip" class="btn-flip" aria-label="전면/후면 카메라 전환" title="카메라 전환">🔄</button>
+
       <!-- 인식 상태 -->
       <div id="status" class="status">
         <span class="chip" id="chip-floor"><i></i>바닥</span>
@@ -73,6 +75,7 @@
         <p>노트북 웹캠이나 아이패드 카메라로 퍽의 위치를 실시간 추적해, 수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하는 체감형 아케이드와 드리블 훈련을 진행합니다.</p>
         <ol class="tips">
           <li><b>아이패드</b>: 거치대에 세워 흰 바닥(연습판)이 화면에 가득 차도록 비춥니다.</li>
+          <li><b>휴대폰</b>: 거치대에 세우고 <b>전면 카메라</b>(기본)로 자신과 바닥이 보이게 둡니다. 🔄 버튼으로 전·후면 전환. 멀리서도 퍽을 가운데 원에 3초 두면 자동 시작·재시작됩니다.</li>
           <li><b>노트북 웹캠</b>: 노트북을 바닥 가까이 두고 화면을 뒤로 젖혀 연습 공간을 비춥니다. 흰 바닥이 없으면 설정 &gt; 게임 영역을 <b>카메라 화면 전체</b>로 바꾸고, 퍽은 밝은 색(주황 볼·연습용 퍽)을 터치로 지정하세요.</li>
           <li>퍽은 기본 검정색으로 인식됩니다. 스틱은 블레이드에 <b>눈에 띄는 색 테이프</b>를 감으면 가장 잘 인식됩니다.</li>
           <li>시작 후 <b>보정</b>에서 퍽과 스틱을 화면에서 터치해 색을 지정하세요. 스틱을 지정하면 세게 쳤을 때도 퍽을 놓치지 않습니다.</li>
@@ -109,6 +112,7 @@
           <label class="switch"><input type="checkbox" id="set-mirror" checked /><span>좌우 반전(거울 모드)</span></label>
           <label class="switch"><input type="checkbox" id="set-debug" /><span>인식 마스크 표시(디버그)</span></label>
           <label class="switch"><input type="checkbox" id="set-sound" checked /><span>효과음</span></label>
+          <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>핸즈프리 시작 (퍽을 원 안에 3초)</span></label>
 
           <label>바닥 밝기 기준 <output id="out-whiteV"></output>
             <input type="range" id="set-whiteV" min="80" max="240" step="1" />
@@ -188,6 +192,7 @@
       <div class="modal-card">
         <header><h2 id="result-title">결과</h2><button class="btn btn-ghost btn-close" data-close="panel-result">닫기</button></header>
         <div id="result-body" class="result-body"></div>
+        <p id="result-hint" class="muted" style="margin-top:10px">거치대에 둔 채로 다시 하려면 퍽을 가운데 원 안에 3초 두세요.</p>
         <div class="row">
           <button id="btn-result-again" class="btn btn-primary">다시 하기</button>
           <button id="btn-result-next" class="btn btn-primary hidden">다음 플레이어</button>

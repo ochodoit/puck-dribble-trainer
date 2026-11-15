@@ -72,7 +72,7 @@ export class Game {
     this.resetState();
   }
 
-  start(puck) {
+  start(puck, opts = {}) {
     this.resetState();
     this.tracker = puck;
     this.running = true;
@@ -83,7 +83,7 @@ export class Game {
     switch (this.mode.id) {
       case 'arcade':
         this.lives = 3;
-        this.arcade.start(puck, this.difficulty);
+        this.arcade.start(puck, this.difficulty, !!opts.handsFree);
         this.instruction = this.arcade.instruction;
         break;
       case 'obstacle':

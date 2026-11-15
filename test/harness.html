@@ -358,6 +358,17 @@
     for (let i = 0; i < 400; i++) { ar.update(0.033, fakePuck(0.05, 0.05), t); t += 33; ar.obstacles.forEach((o) => types.add(o.type)); ar.invulnUntil = t + 1e6; ar.lives = 3; if (ar.spawnTimer > 0.2) ar.spawnTimer = 0.2; }
     check('A10 spawner produces all 4 obstacle types', ['blocker', 'gate', 'beam', 'gap'].every((k) => types.has(k)), [...types]);
 
+    // ===== 휴대폰 거치대 플레이 =====
+    // P1) 핸즈프리 시작: 카운트다운 생략하고 바로 플레이
+    ar = mk(); ar.start(fakePuck(0.5, 0.5), 'normal', true);
+    check('P1 hands-free start skips countdown', ar.phase === 'play' && ar.instruction === 'GO!');
+    // P2) 세로 화면(9:16)에서는 낙하 속도를 높여 체감 시간이 같도록
+    const land = new Arcade(null); land.aspect = 0.5625; land.start(fakePuck(0.5, 0.5), 'normal', true); land.pickupTimer = 1e9; land.spawnTimer = 0;
+    const port = new Arcade(null); port.aspect = 1.78; port.start(fakePuck(0.5, 0.5), 'normal', true); port.pickupTimer = 1e9; port.spawnTimer = 0;
+    land.update(0.033, fakePuck(0.05, 0.05), 1000); port.update(0.033, fakePuck(0.05, 0.05), 1000);
+    const vl = land.obstacles.find((o) => o.type !== 'beam')?.vy, vp = port.obstacles.find((o) => o.type !== 'beam')?.vy;
+    check('P2 portrait fall speed scaled (x2 cap)', port.fallScale === 2 && land.fallScale === 1 && (!vl || !vp || Math.abs(vp / vl - 2) < 0.3), { vl, vp, fs: port.fallScale });
+
     // 9) 성능: 240x180 프레임 처리 시간
     settings.debug = true;
     const t0 = performance.now();

@@ -124,7 +124,56 @@ let failed = false;
   await page.waitForSelector('#panel-result:not(.hidden)');
   const resultText = await page.textContent('#result-body');
   console.log(`${resultText.includes('최고 콤보') && resultText.includes('DEKE') ? 'PASS' : 'FAIL'} arcade result report`);
+  // 핸즈프리 재시작: 결과 패널이 열린 채로 퍽이 가운데 원 안에 3초 머물면 자동 시작 (측정값을 중앙으로 고정)
+  await page.evaluate(() => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: 0.5, v: 0.5 }, now); }; });
+  await page.waitForTimeout(1500);
+  const notYet = (await page.textContent('#btn-start')).trim() === '시작';
+  await page.waitForTimeout(2300);
+  const autoStarted = (await page.textContent('#btn-start')).trim() === '중지' && (await page.isHidden('#panel-result'));
+  const arcadePhase = await page.evaluate(() => window.__puckTrainer.game.arcade.phase);
+  console.log(`${notYet && autoStarted && arcadePhase === 'play' ? 'PASS' : 'FAIL'} hands-free restart from result panel after 3s hold (phase=${arcadePhase})`);
+  if (!(notYet && autoStarted && arcadePhase === 'play')) failed = true;
+  await page.evaluate(() => { const t = window.__puckTrainer.tracker; delete t.update; });
+  await page.click('#btn-start');
+  await page.waitForTimeout(200);
+  if (await page.isVisible('#panel-result')) await page.click('[data-close="panel-result"]');
+  // 전면/후면 전환 버튼: 스트림 재시작, 오류 없음, 설정 저장
+  await page.click('#btn-flip');
+  await page.waitForTimeout(1200);
+  const flipped = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).facing);
+  const fpsAfterFlip = parseInt(await page.textContent('#chip-fps'), 10);
+  console.log(`${flipped === 'environment' && fpsAfterFlip >= 0 ? 'PASS' : 'FAIL'} camera flip restarts stream (facing=${flipped})`);
+  if (flipped !== 'environment') failed = true;
   if (errors.length) { console.error('FAIL console errors:', errors); failed = true; } else console.log('PASS no console errors');
+  await context.close();
+}
+
+// ---- 3) 휴대폰 세로 화면 (390x844): 레이아웃 깨짐 없이 로드/시작, 영상 크기 변화 대응 ----
+{
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['camera'], deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.goto(`${base}/index.html`);
+  await page.tap('#btn-camera');
+  await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
+  await page.waitForTimeout(1500);
+  const noHScroll = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  const controlsVisible = await page.evaluate(() => { const r = document.querySelector('#btn-start').getBoundingClientRect(); return r.bottom <= window.innerHeight && r.width > 0; });
+  console.log(`${noHScroll && controlsVisible ? 'PASS' : 'FAIL'} phone portrait layout (no overflow, controls visible)`);
+  if (!(noHScroll && controlsVisible)) failed = true;
+  await page.tap('#btn-settings');
+  await page.selectOption('#set-floorMode', 'full');
+  await page.tap('[data-close="panel-settings"]');
+  await page.tap('#btn-start');
+  await page.waitForTimeout(600);
+  const running = (await page.textContent('#btn-start')).trim() === '중지';
+  const aspect = await page.evaluate(() => { const c = document.querySelector('#overlay'); return c.height / c.width; });
+  console.log(`${running && aspect > 0.5 ? 'PASS' : 'FAIL'} arcade runs on phone (canvas aspect ${aspect.toFixed(2)})`);
+  if (!running) failed = true;
+  await page.screenshot({ path: join(ROOT, 'test', 'screenshot-phone.png') });
+  if (errors.length) { console.error('FAIL phone console errors:', errors); failed = true; } else console.log('PASS phone: no console errors');
   await context.close();
 }
 

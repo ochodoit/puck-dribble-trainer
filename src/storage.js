@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS = {
   difficulty: 'normal',
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
   cameraId: '',
+  facing: 'user',                             // 'user' 전면(기본: 화면을 보며 플레이) | 'environment' 후면
+  autoStart: true,                            // 핸즈프리 시작: 퍽을 가운데 원에 3초 두면 시작/재시작
   p1: '플레이어 1',
   p2: '플레이어 2',
 };
@@ -57,6 +59,8 @@ export function sanitizeSettings(s) {
   s.difficulty = ['easy', 'normal', 'hard'].includes(s.difficulty) ? s.difficulty : d.difficulty;
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.cameraId = typeof s.cameraId === 'string' ? s.cameraId : '';
+  s.facing = s.facing === 'environment' ? 'environment' : 'user';
+  s.autoStart = typeof s.autoStart === 'boolean' ? s.autoStart : d.autoStart;
   s.p1 = typeof s.p1 === 'string' && s.p1.trim() ? s.p1.slice(0, 10) : d.p1;
   s.p2 = typeof s.p2 === 'string' && s.p2.trim() ? s.p2.slice(0, 10) : d.p2;
   return s;

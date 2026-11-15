@@ -42,8 +42,17 @@ button, input, select { font: inherit; color: inherit; }
 #overlay { pointer-events: none; }
 #debug { pointer-events: none; opacity: 0.55; mix-blend-mode: screen; }
 
-#floor-handles .handle { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
-  border: 3px solid var(--accent); background: rgba(56, 189, 248, 0.25); padding: 0; touch-action: none; }
+#floor-handles .handle { position: absolute; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%;
+  border: 3px solid var(--accent); background: rgba(56, 189, 248, 0.3); padding: 0; touch-action: none; z-index: 4; }
+#floor-handles .handle::after { content: attr(data-label); position: absolute; left: 50%; top: 100%; transform: translate(-50%, 6px);
+  white-space: nowrap; font-size: 12px; font-weight: 700; color: #fff; background: rgba(15,23,42,0.85); padding: 2px 8px; border-radius: 999px; pointer-events: none; }
+#floor-handles .handle[data-i="0"]::after, #floor-handles .handle[data-i="1"]::after { top: auto; bottom: 100%; transform: translate(-50%, -6px); }
+.area-bar { position: absolute; left: var(--safe-left); right: var(--safe-right); top: calc(var(--safe-top) + 70px); display: flex; flex-direction: column; gap: 8px; align-items: center;
+  padding: 10px 14px; z-index: 5; pointer-events: none; }
+.area-bar .area-hint { background: rgba(15,23,42,0.88); border: 1px solid rgba(56,189,248,0.5); border-radius: 12px; padding: 8px 14px; font-size: 14px; max-width: 720px; text-align: center; }
+.area-bar .area-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
+.area-bar .btn { background: rgba(15,23,42,0.9); }
+.area-bar .btn-primary { background: var(--accent); }
 #floor-handles .handle:active { background: rgba(56, 189, 248, 0.6); }
 
 .tap-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(15, 23, 42, 0.9);

@@ -61,7 +61,8 @@ export class Game {
     this.plane = { A: 1, flip: false };
     this.me = null;          // 평면 위의 내 퍽 위치
     // 자유 연습 코스: points = [{n, x, y}] (x, y는 평면 경기장의 0~1 비율), 번호 순으로 정렬. reach = 도착 판정 반경(평면 폭 단위)
-    this.course = { points: [], reach: 0.04 };
+    // cycles = 목표 사이클 수(10~100). 한 사이클 = 놓은 포인트를 번호 순서대로 한 번 다 찍는 것
+    this.course = { points: [], reach: 0.04, cycles: 10 };
     this.onEnd = null;
     this.running = false;
     this.resetState();
@@ -326,21 +327,21 @@ export class Game {
             this.stats.reached++;
             this.sfx?.rep();
             this.courseIdx++;
-            if (this.courseIdx >= pts.length) {
-              this.courseIdx = 0;
-              if (pts.length > 1) {
-                const lt = this.elapsed - this.lapStart;
-                this.stats.laps++; this.stats.lapTimes.push(lt);
-                this._pop(tg.x, tg.y * A - 0.07, `Lap ${lt.toFixed(1)}s`, C.red, 'script');
-                this.sfx?.target();
-              }
-              this.lapStart = this.elapsed;
-            }
             if (pts.length === 1) this.courseLeft = false;
+            if (this.courseIdx >= pts.length) {
+              // 한 사이클 완료: 걸린 시간 기록
+              this.courseIdx = 0;
+              const lt = this.elapsed - this.lapStart;
+              this.stats.laps++; this.stats.lapTimes.push(lt);
+              this._pop(tg.x, tg.y * A - 0.07, `Cycle ${this.stats.laps} · ${lt.toFixed(1)}s`, C.red, 'script');
+              this.sfx?.target();
+              this.lapStart = this.elapsed;
+              if (this.stats.laps >= (this.course.cycles || 10)) { this.score = this.stats.laps; this.stop('done'); return; } // 목표 사이클 달성
+            }
             this.instruction = `${pts[this.courseIdx].n}번으로`;
           }
         }
-        this.score = pts.length ? this.stats.reached : puck.touches;
+        this.score = pts.length ? this.stats.laps : puck.touches;
         this.stats.touches = puck.touches; this.stats.distance = puck.distance;
       }
     }
@@ -450,10 +451,13 @@ export class Game {
       }
       default: {
         const lt = s.lapTimes || [];
+        const sec = (v) => `${v.toFixed(1)}s`;
+        const target = this.course.cycles || 10; // 값이 없으면 기본 10 사이클
+        r.cycles = { done: s.laps || 0, target, avg: lt.length ? lt.reduce((a, b) => a + b, 0) / lt.length : null, best: lt.length ? Math.min(...lt) : null };
         r.items = this.course.points.length
-          ? [['통과한 포인트', s.reached || 0], ['완주 바퀴', s.laps || 0],
-            ['최고 바퀴', lt.length ? `${Math.min(...lt).toFixed(1)}s` : '-'], ['평균 바퀴', lt.length ? `${(lt.reduce((a, b) => a + b, 0) / lt.length).toFixed(1)}s` : '-'],
-            ['이동 거리', `${(s.distance || 0).toFixed(1)} 폭`], ['연습 시간', `${Math.round(this.elapsed)}s`]]
+          ? [['완료 사이클', `${s.laps || 0} / ${target}`],
+            ['평균 사이클', lt.length ? sec(r.cycles.avg) : '-'], ['가장 빠른 사이클', lt.length ? sec(r.cycles.best) : '-'], ['가장 느린 사이클', lt.length ? sec(Math.max(...lt)) : '-'],
+            ['통과한 포인트', s.reached || 0], ['총 시간', sec(this.elapsed)], ['이동 거리', `${(s.distance || 0).toFixed(1)} 폭`]]
           : [['터치(방향 전환)', s.touches || 0], ['이동 거리', `${(s.distance || 0).toFixed(1)} 폭`], ['연습 시간', `${Math.round(this.elapsed)}s`]];
       }
     }

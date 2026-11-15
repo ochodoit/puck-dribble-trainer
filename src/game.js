@@ -31,6 +31,12 @@ const DIFF = {
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+/** 점과 콘 사이 거리. 움직이는 콘은 좌우 이동 범위(선분) 전체를 차지하는 것으로 계산 */
+const coneDist = (p, c) => {
+  if (!c.moving) return dist(p, c);
+  const x0 = c.baseX - c.amp, x1 = c.baseX + c.amp;
+  return Math.hypot(p.x - Math.min(x1, Math.max(x0, p.x)), p.y - c.y);
+};
 
 export class Game {
   constructor(sfx) {
@@ -269,14 +275,15 @@ export class Game {
   _spawnCone(avoid, d, moving) {
     for (let tries = 0; tries < 40; tries++) {
       const c = { x: rand(0.05, 0.95), y: rand(0.08, 0.92), r: CONE_R, moving, hitUntil: 0 };
-      if (dist(c, avoid) < 0.22) continue;
-      if (this.cones.some((o) => dist(o, c) < 0.17)) continue;
-      if (this.targets.some((t) => dist(t, c) < 0.2)) continue;
       if (moving) {
         c.baseX = Math.min(0.8, Math.max(0.2, c.x));
         c.amp = rand(0.1, 0.2); c.phase = rand(0, Math.PI * 2);
         c.speed = d.speed * rand(0.8, 1.3) / 0.16;
+        c.x = c.baseX + Math.sin(c.phase) * c.amp;
       }
+      if (coneDist(avoid, c) < 0.22) continue;
+      if (this.cones.some((o) => coneDist(o, c) < 0.17)) continue;
+      if (this.targets.some((t) => coneDist(t, c) < 0.2)) continue;
       this.cones.push(c);
       return;
     }
@@ -287,11 +294,18 @@ export class Game {
       const t = { x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_R, born: performance.now() };
       const dd = dist(t, avoid);
       if (dd < minDist || dd > maxDist) continue;
-      if (this.cones.some((c) => dist(c, t) < c.r + t.r + 0.04)) continue;
+      if (this.cones.some((c) => coneDist(t, c) < c.r + t.r + 0.04)) continue;
       this.targets = [t];
       return;
     }
-    this.targets = [{ x: 0.5, y: 0.5, r: TARGET_R, born: performance.now() }];
+    // 빈자리를 못 찾으면 콘에서 가장 먼 후보를 사용
+    let bestT = null, bestD = -1;
+    for (let i = 0; i < 40; i++) {
+      const t = { x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_R, born: performance.now() };
+      const dmin = Math.min(dist(t, avoid), ...this.cones.map((c) => coneDist(t, c)));
+      if (dmin > bestD) { bestD = dmin; bestT = t; }
+    }
+    this.targets = [bestT];
   }
 
   _checkTargets(pp, onHit) {

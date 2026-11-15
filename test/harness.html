@@ -127,6 +127,14 @@
     check('result built', result && result.items.length >= 2, result && result.items);
 
     // 7) 장애물 모드: 타겟 위치로 퍽 이동 시 점수 증가, 콘 충돌 시 생명 감소
+    // 타겟이 움직이는 콘의 이동 범위와 겹치지 않는지 (200판 반복)
+    let unsafe = 0;
+    for (let i = 0; i < 200; i++) {
+      const g4 = new Game(null); g4.setMode('obstacle'); g4.difficulty = 'hard'; g4.start({ pos: { x: 0.5, y: 0.5 } });
+      const tg = g4.targets[0];
+      for (const c of g4.cones) { const x0 = c.moving ? c.baseX - c.amp : c.x, x1 = c.moving ? c.baseX + c.amp : c.x; const dx = tg.x - Math.min(x1, Math.max(x0, tg.x)); if (Math.hypot(dx, tg.y - c.y) < c.r + 0.03) unsafe++; }
+    }
+    check('target never spawns in a moving cone path', unsafe === 0, unsafe);
     game.setMode('obstacle');
     game.difficulty = 'normal';
     game.start(tracker);

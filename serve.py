@@ -70,22 +70,57 @@ def local_ip():
         s.close()
 
 
+def print_qr(url):
+    """qrcode 패키지가 설치되어 있으면 터미널에 QR 코드 출력 (pip install qrcode)"""
+    try:
+        import qrcode  # type: ignore
+    except ImportError:
+        return False
+    qr = qrcode.QRCode(border=1)
+    qr.add_data(url)
+    qr.make(fit=True)
+    qr.print_ascii(invert=True)
+    return True
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     use_http = '--http' in sys.argv
     port = int(args[0]) if args else (8080 if use_http else 8443)
-    httpd = http.server.ThreadingHTTPServer(('0.0.0.0', port), Handler)
+    try:
+        httpd = http.server.ThreadingHTTPServer(('0.0.0.0', port), Handler)
+    except OSError as e:
+        print('포트 %d 를 열 수 없습니다 (%s). 다른 포트로 실행하세요: python3 serve.py 9443' % (port, e), file=sys.stderr)
+        sys.exit(1)
     scheme = 'http'
     if not use_http and ensure_cert():
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(CERT, KEY)
         httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
         scheme = 'https'
-    print('퍽 드리블 트레이너 개발 서버')
-    print('  로컬:   %s://localhost:%d' % (scheme, port))
-    print('  아이패드: %s://%s:%d' % (scheme, local_ip(), port))
+    ip = local_ip()
+    url = '%s://%s:%d' % (scheme, ip, port)
+    line = '=' * 64
+    print(line)
+    print(' 퍽 드리블 트레이너 서버 실행 중')
+    print(line)
+    print(' 이 컴퓨터에서 열기 : %s://localhost:%d' % (scheme, port))
+    print('')
+    print(' 휴대폰 / 아이패드에서 열기 (같은 Wi-Fi):')
+    print('')
+    print('      %s' % url)
+    print('')
+    print(' 위 주소를 휴대폰 브라우저 주소창에 그대로 입력하세요. (%s 가 이 컴퓨터의 IP입니다)' % ip)
     if scheme == 'https':
-        print('  (자체 서명 인증서 경고가 뜨면 "세부사항 보기 > 웹사이트 방문"으로 계속하세요)')
+        print(' 인증서 경고가 뜨면: iPhone Safari "세부사항 보기 > 이 웹 사이트 방문", Android Chrome "고급 > 이동"')
+    else:
+        print(' 주의: http 모드에서는 휴대폰 카메라가 허용되지 않습니다. 휴대폰 테스트는 --http 없이 실행하세요.')
+    print(' 안 열리면: 1) 휴대폰과 컴퓨터가 같은 Wi-Fi인지  2) 방화벽에서 Python 허용(개인 네트워크)  3) 공유기 AP 격리 해제')
+    if ip.startswith('127.'):
+        print(' 경고: 네트워크 IP를 찾지 못했습니다. Wi-Fi/이더넷 연결을 확인하세요.')
+    if not print_qr(url):
+        print(' (pip install qrcode 를 설치하면 여기 QR 코드가 표시됩니다)')
+    print(line)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

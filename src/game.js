@@ -1,22 +1,29 @@
 // 게임/트레이닝 로직. 좌표는 바닥 정규화 좌표 (u: 0..1 가로, v: 0..1 세로)
 import { Arcade } from './arcade.js';
+import { C } from './theme.js';
 
+// timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
-  { id: 'arcade', name: '아케이드 서바이벌', duration: 0, icon: '🕹️',
-    desc: '퍽의 X·Y를 화면 하단 플레이 존에 매핑. 수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하고 황금 퍽을 모아 콤보! 하트 3개.' },
-  { id: 'free', name: '자유 연습', duration: 0, icon: '🏒',
-    desc: '퍽·스틱 인식을 보면서 자유롭게 드리블. 터치 수·속도·이동거리를 실시간 표시.' },
-  { id: 'obstacle', name: '퍽 피하기 서바이벌', duration: 0, icon: '🔴',
-    desc: '사방에서 날아오는 빨간 퍽을 최대한 오래 피하세요. 속도는 제각각, 시간이 갈수록 동시에 날아오는 퍽이 늘어납니다. 하트 3개.' },
-  { id: 'wide', name: '와이드 드리블', duration: 30, icon: '↔️',
+  { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true,
+    desc: '수비수·슬라럼 게이트·스윕 빔·좁은 틈새를 피하고 황금 퍽을 모아 콤보. 제한 시간 동안의 점수로 겨룹니다.' },
+  { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
+    desc: '사방에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
+  { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 30,
     desc: '좌우 끝 구역을 번갈아 터치. 넓은 가동 범위 훈련.' },
-  { id: 'figure8', name: '8자 드리블', duration: 45, icon: '♾️',
+  { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
     desc: '두 콘 사이를 8자로 돌며 순서대로 게이트 통과. 콘을 치면 감점.' },
-  { id: 'quick', name: '퀵 핸즈', duration: 20, icon: '⚡',
+  { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 20,
     desc: '가운데 박스 안에서 최대한 빠르게 좌우로 퍽을 움직이세요.' },
-  { id: 'reaction', name: '반응 타겟', duration: 30, icon: '🎯',
+  { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
     desc: '무작위로 나타나는 타겟으로 퍽을 최대한 빨리 이동. 평균 반응 시간 측정.' },
+  { id: 'free', name: '자유 연습', en: 'Free', duration: 0,
+    desc: '인식 상태를 보며 자유롭게 드리블. 터치 수·속도·이동 거리 표시. 기록 없음.' },
 ];
+
+export const PLAY_MINUTES = [1, 3, 5];
+export const DODGE_HIT_PENALTY = 50;
+/** 랭킹 키: 시간제 모드는 시간별로 따로 집계 (예: arcade@60) */
+export const rankKey = (modeId, seconds) => { const m = MODES.find((x) => x.id === modeId); return m?.timed ? `${modeId}@${seconds}` : modeId; };
 
 export const PUCK_R = 0.025;
 const CONE_R = 0.045;
@@ -48,16 +55,20 @@ export class Game {
     this.arcade = new Arcade(sfx);
     this.mode = MODES[0];
     this.difficulty = 'normal';
+    this.playSeconds = 60;   // 시간제 모드의 제한 시간 (60 | 180 | 300)
     this.onEnd = null;
     this.running = false;
     this.resetState();
   }
 
+  /** 이 판의 제한 시간(초). 0이면 무제한(자유 연습) */
+  get limit() { return this.mode.timed ? this.playSeconds : this.mode.duration; }
+
   resetState() {
-    this.timeLeft = this.mode.duration;
+    this.timeLeft = this.limit;
     this.elapsed = 0;
     this.score = 0;
-    this.lives = 0;
+    this.hits = 0;
     this.instruction = '';
     this.cones = [];
     this.targets = [];
@@ -87,12 +98,10 @@ export class Game {
 
     switch (this.mode.id) {
       case 'arcade':
-        this.lives = 3;
         this.arcade.start(puck, this.difficulty, !!opts.handsFree);
         this.instruction = this.arcade.instruction;
         break;
       case 'obstacle':
-        this.lives = 3;
         this.stats = { dodged: 0, hits: 0, close: 0, maxFlyers: 0 };
         this.flyers = [];
         this.flySpawnTimer = 0.6;
@@ -154,8 +163,8 @@ export class Game {
     if (!this.running) return;
     const d = DIFF[this.difficulty] || DIFF.normal;
 
-    if (this.mode.duration > 0) {
-      this.timeLeft = Math.max(0, this.mode.duration - this.elapsed);
+    if (this.limit > 0) {
+      this.timeLeft = Math.max(0, this.limit - this.elapsed);
       const sec = Math.ceil(this.timeLeft);
       if (sec <= 3 && sec !== this.lastTickSec && sec > 0) { this.sfx?.tick(); this.lastTickSec = sec; }
       if (this.timeLeft <= 0) { this.stop('time'); return; }
@@ -176,9 +185,9 @@ export class Game {
     switch (this.mode.id) {
       case 'arcade': {
         this.arcade.update(dt, puck, now);
-        this.score = this.arcade.score; this.lives = this.arcade.lives; this.instruction = this.arcade.instruction;
-        if (this.arcade.phase !== 'play') this.elapsed -= dt; // 카운트다운/일시정지는 플레이 시간에서 제외
-        if (this.arcade.phase === 'over') this.stop('lives');
+        this.score = this.arcade.score; this.hits = this.arcade.hits; this.instruction = this.arcade.instruction;
+        this.elapsed = this.arcade.elapsed; // 카운트다운·일시정지 동안은 시계가 멈춤
+        this.timeLeft = Math.max(0, this.limit - this.elapsed);
         break;
       }
       case 'obstacle': {
@@ -190,7 +199,8 @@ export class Game {
           this.flySpawnTimer = this.flyers.length < want ? rand(0.25, 0.6) : 0;
         }
         this.stats.maxFlyers = Math.max(this.stats.maxFlyers, this.flyers.length);
-        this.score = Math.floor(this.elapsed) * 10 + this.stats.dodged * 5 + this.stats.close * 15;
+        this.hits = this.stats.hits;
+        this.score = Math.max(0, Math.floor(this.elapsed) * 10 + this.stats.dodged * 5 + this.stats.close * 15 - this.stats.hits * DODGE_HIT_PENALTY);
         const canHit = pp && tracked && now >= this.invulnUntil;
         for (const f of this.flyers) {
           if (now < f.launchAt) continue;              // 가장자리 경고 중
@@ -201,12 +211,11 @@ export class Game {
             const dd = dist(pp, f);
             f.minDist = Math.min(f.minDist, dd);
             if (canHit && !f.hit && dd < FLYER_R + PUCK_R) {
-              f.hit = true; this.lives--; this.stats.hits++;
+              f.hit = true; this.stats.hits++; // 목숨 없음: 감점 + 1.2초 무적
               this.invulnUntil = now + 1200;
-              this._pop(f.x, f.y - 0.08, '충돌!', '#ef4444');
+              this._pop(f.x, f.y - 0.08, `충돌 −${DODGE_HIT_PENALTY}`, C.red);
               this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
               this.sfx?.hit();
-              if (this.lives <= 0) { this.stop('lives'); return; }
             }
           }
           const gone = f.x < -FLYER_MARGIN - 0.05 || f.x > 1 + FLYER_MARGIN + 0.05 || f.y < -FLYER_MARGIN - 0.05 || f.y > 1 + FLYER_MARGIN + 0.05;
@@ -214,13 +223,13 @@ export class Game {
             f.counted = true;
             if (!f.hit) {
               this.stats.dodged++;
-              if (f.minDist < FLYER_R + PUCK_R + 0.035) { this.stats.close++; this._pop(pp?.x ?? 0.5, (pp?.y ?? 0.5) - 0.1, '아슬! +15', '#38bdf8'); this.sfx?.rep(); }
+              if (f.minDist < FLYER_R + PUCK_R + 0.035) { this.stats.close++; this._pop(pp?.x ?? 0.5, (pp?.y ?? 0.5) - 0.1, '아슬! +15', C.red, 'script'); this.sfx?.rep(); }
             }
           }
         }
         this.flyers = this.flyers.filter((f) => !f.counted && now - f.born < 20000);
         const n = this.flyers.filter((f) => now >= f.launchAt).length;
-        this.instruction = `동시에 ${Math.max(n, 1)}개 · ${Math.floor(this.elapsed)}초 생존`;
+        this.instruction = `동시에 ${Math.max(n, 1)}개`;
         break;
       }
       case 'wide': {
@@ -228,7 +237,7 @@ export class Game {
           const z = this.zones.find((z) => z.active);
           if (z && this._inZone(pp, z)) {
             this.stats.reps++; this.score = this.stats.reps;
-            this._pop(z.x, z.y, '+1', '#22c55e');
+            this._pop(z.x, z.y, '+1', C.ink);
             this.sfx?.rep();
             this.zones.forEach((zz) => (zz.active = !zz.active));
             this.instruction = this.zones[0].active ? '← 왼쪽 구역으로' : '오른쪽 구역으로 →';
@@ -243,7 +252,7 @@ export class Game {
             this.stats.gates++; this.score += 1;
             this.sfx?.rep();
             this.wpIndex = (this.wpIndex + 1) % this.waypoints.length;
-            if (this.wpIndex === 0) { this.stats.laps++; this.score += 4; this._pop(0.5, 0.5, `${this.stats.laps}바퀴!`, '#f59e0b'); this.sfx?.target(); }
+            if (this.wpIndex === 0) { this.stats.laps++; this.score += 4; this._pop(0.5, 0.5, `${this.stats.laps}바퀴!`, C.red, 'script'); this.sfx?.target(); }
             this.instruction = `다음 게이트 ${this.wpIndex + 1}/${this.waypoints.length}`;
           }
           this._checkCones(pp, now, () => { this.stats.hits++; this.score = Math.max(0, this.score - 2); });
@@ -278,7 +287,7 @@ export class Game {
             const rt = ((t.movedAt || now) - t.spawnedAt) / 1000;
             this.stats.times.push(rt); this.stats.travel.push(total - rt); this.stats.hits++;
             this.score += Math.max(1, Math.round(10 - rt * 8));
-            this._pop(t.x, t.y, `반응 ${rt.toFixed(2)}s`, '#22c55e');
+            this._pop(t.x, t.y, `반응 ${rt.toFixed(2)}s`, C.ink);
             this.sfx?.target();
             this.targets = [];
             this.nextSpawn = now + rand(500, 1400); // 예측 못 하게 랜덤 지연
@@ -356,7 +365,7 @@ export class Game {
       if (dist(pp, c) < c.r + PUCK_R) {
         c.hitUntil = now + 500;
         this.invulnUntil = now + 1200;
-        this._pop(c.x, c.y - 0.08, '충돌!', '#ef4444');
+        this._pop(c.x, c.y - 0.08, '충돌!', C.red);
         this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
         this.sfx?.hit();
         onHit(c);
@@ -367,19 +376,20 @@ export class Game {
 
   _inZone(p, z) { return Math.abs(p.x - z.x) < z.w / 2 && Math.abs(p.y - z.y) < z.h / 2; }
 
-  _pop(x, y, text, color) { this.effects.push({ type: 'pop', x, y, text, color, t0: performance.now(), dur: 900, age: 0 }); }
+  _pop(x, y, text, color = C.ink, style = 'display') { this.effects.push({ type: 'pop', x, y, text, color, style, t0: performance.now(), dur: 900, age: 0 }); }
 
   _buildResult(reason) {
-    const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, items: [] };
+    const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, limit: this.limit, rankKey: rankKey(this.mode.id, this.playSeconds), items: [] };
+    const minutes = `${Math.round(this.limit / 60)}분`;
     const s = this.stats;
     switch (this.mode.id) {
       case 'arcade': {
         const a = this.arcade.result(this.tracker);
-        r.items = a.items_; r.arcade = a;
+        r.items = [...a.items_, ['게임 시간', minutes]]; r.arcade = a;
         break;
       }
       case 'obstacle':
-        r.items = [['점수', this.score], ['생존 시간', `${this.elapsed.toFixed(1)}s`], ['피한 퍽', s.dodged], ['아슬아슬 회피', s.close], ['충돌', s.hits], ['최대 동시 퍽', s.maxFlyers]];
+        r.items = [['점수', this.score], ['피한 퍽', s.dodged], ['아슬아슬 회피', s.close], ['충돌', s.hits], ['최대 동시 퍽', s.maxFlyers], ['게임 시간', minutes]];
         break;
       case 'wide':
         r.items = [['반복 횟수', s.reps], ['분당 반복', Math.round(s.reps / Math.max(1, this.elapsed) * 60)]];

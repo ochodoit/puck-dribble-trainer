@@ -1,12 +1,16 @@
-// 아케이드 서바이벌: 웹캠으로 추적한 퍽의 (X, Y)를 화면 하단 플레이 존에 매핑하는 체감형 스틱핸들링 게임
+// 아케이드: 웹캠으로 추적한 퍽의 (X, Y)를 화면 하단 플레이 존에 매핑하는 체감형 스틱핸들링 게임
 // 좌표계: 화면 폭 = 1 단위, 높이 = aspect (H/W). 플레이 존은 하단 30%.
+// 규칙: 제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점 + 콤보 초기화.
+import { C, F, rgba, text, pill, sparks, font } from './theme.js';
 
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const PUCK_R = 0.022;         // 퍽 아바타 반지름 (화면 폭 단위)
+export const HIT_PENALTY = 100;      // 충돌 감점
+export const FEVER_BONUS = 300;      // 20콤보마다 보너스
 const INVULN_MS = 1500;              // 피격 후 무적
 const NEAR_MISS = 0.15;              // 히트박스 바깥 15% = DEKE 범위
 const COUNTDOWN_S = 3;               // 헤드업 카운트다운 (페이스오프 서클에 정지)
-const PAUSE_AFTER_LOST_MS = 600;     // 추적 끊김이 이 시간을 넘으면 일시정지
+const PAUSE_AFTER_LOST_MS = 600;     // 추적 끊김이 이 시간을 넘으면 일시정지 (시간도 멈춤)
 
 const DIFF = {
   easy:   { speed: 0.20, interval: 2.1, gapPucks: 2.5, beamWeight: 6,  gateWeight: 14, maxSpeed: 0.55 },
@@ -22,21 +26,21 @@ export class Arcade {
     this.sfx = sfx;
     this.aspect = 0.75;
     this.floorWidthM = 1.5;
-    this.phase = 'idle';   // idle | countdown | play | over
+    this.phase = 'idle';   // idle | countdown | play
     this.reset();
   }
 
   reset() {
-    this.score = 0; this.scoreAcc = 0;
-    this.lives = 3; this.combo = 0; this.maxCombo = 0;
+    this.score = 0;
+    this.combo = 0; this.maxCombo = 0;
     this.dekes = 0; this.passed = 0; this.items = 0; this.hits = 0;
     this.elapsed = 0; this.survivalAcc = 0;
     this.level = 0; this.speedMul = 1;
     this.obstacles = []; this.pickups = []; this.effects = [];
     this.spawnTimer = 0.8; this.pickupTimer = 2.5; this.pickupSide = 1; this.gateSide = 1;
     this.invulnUntil = 0; this.hold = 0; this.countdownShown = -1;
-    this.paused = false; this.lostSince = 0; this.feverHealed = 0;
-    this.instruction = ''; this.avatar = null; this.lastHeal = 0;
+    this.paused = false; this.lostSince = 0;
+    this.instruction = ''; this.avatar = null;
     this.startDistance = 0;
     this.idleHold = 0; this.idleAutoStart = false;
   }
@@ -53,7 +57,7 @@ export class Arcade {
       // 핸즈프리 시작: 이미 원 안에 3초 정지했으므로 바로 GO
       this.phase = 'play';
       this.instruction = 'GO!';
-      this._pop(0.5, this.zoneTop - 0.1, 'GO!', '#22c55e', 900);
+      this._pop(0.5, this.zoneTop - 0.1, 'Go!', C.red, 900, 'script');
       this.sfx?.go?.();
     } else {
       this.phase = 'countdown';
@@ -70,7 +74,7 @@ export class Arcade {
   update(dt, puck, now) {
     for (const e of this.effects) e.age = (now - e.t0) / e.dur;
     this.effects = this.effects.filter((e) => e.age < 1);
-    if (this.phase === 'idle' || this.phase === 'over') return;
+    if (this.phase === 'idle') return;
 
     // 퍽 아바타 위치 (가림 보정: predicted 상태는 추적기의 속도 예측값 사용)
     const tracked = puck.state === 'tracked';
@@ -85,7 +89,7 @@ export class Arcade {
     this.paused = false;
     this.elapsed += dt;
 
-    // 생존 점수: 1초마다 +10
+    // 시간 점수: 1초마다 +10
     this.survivalAcc += dt;
     while (this.survivalAcc >= 1) { this.survivalAcc -= 1; this._addScore(10); }
 
@@ -132,7 +136,7 @@ export class Arcade {
             o.passed = true; this.passed++;
             this._combo(now);
             this._addScore(50, o.x, o.y - o.h / 2 - 0.03, '+50');
-            if (o.nearMiss) { this.dekes++; this._addScore(100, a.x, a.y - 0.08, 'DEKE! +100', '#38bdf8'); this.sfx?.deke?.(); }
+            if (o.nearMiss) { this.dekes++; this._addScore(100, a.x, a.y - 0.08, 'Deke! +100', C.red, 'script'); this.sfx?.deke?.(); }
           }
         }
       }
@@ -145,13 +149,13 @@ export class Arcade {
       if (a && tracked && !p.taken && Math.hypot(a.x - p.x, a.y - p.y) < p.r + PUCK_R) {
         p.taken = true; this.items++;
         this._combo(now);
-        this._addScore(200, p.x, p.y - 0.04, '+200', '#fbbf24');
+        this._addScore(200, p.x, p.y - 0.04, '+200');
         this.sfx?.target?.();
       }
     }
     this.pickups = this.pickups.filter((p) => !p.taken && p.y < this.aspect + 0.05);
 
-    this.instruction = this.combo >= 20 ? 'FEVER! ×3' : this.combo >= 10 ? `콤보 ${this.combo} ×2` : this.combo >= 5 ? `콤보 ${this.combo} ×1.5` : '장애물을 피하고 황금 퍽을 모으세요';
+    this.instruction = this.combo >= 20 ? 'FEVER ×3' : this.combo >= 5 ? `콤보 ${this.combo} ×${this.multiplier}` : '장애물을 피하고 황금 퍽을 모으세요';
   }
 
   _updateCountdown(dt, tracked, now) {
@@ -164,7 +168,7 @@ export class Arcade {
     if (this.hold >= COUNTDOWN_S) {
       this.phase = 'play';
       this.instruction = 'GO!';
-      this._pop(0.5, this.zoneTop - 0.1, 'GO!', '#22c55e', 900);
+      this._pop(0.5, this.zoneTop - 0.1, 'Go!', C.red, 900, 'script');
       this.sfx?.go?.();
     }
   }
@@ -198,10 +202,9 @@ export class Arcade {
       }
       case 'beam': {
         const near = Math.random() < 0.7; // 70%는 가까운 띠 -> 몸쪽으로 당기기(토 드래그)
+        const x = Math.random() < 0.5 ? 0 : 1;
         this.obstacles.push({ type, band: near ? 'near' : 'far', state: 'warn', t: 0, warn: 0.9, sweep: 1.3 / Math.min(1.6, this.speedMul),
-          x: Math.random() < 0.5 ? 0 : 1, dir: 1, w: 0.016, h: this.zoneH / 2, y: 0, done: false, nearMiss: false });
-        const b = this.obstacles[this.obstacles.length - 1];
-        b.dir = b.x === 0 ? 1 : -1;
+          x, dir: x === 0 ? 1 : -1, w: 0.016, h: this.zoneH / 2, y: 0, done: false, nearMiss: false });
         break;
       }
     }
@@ -234,7 +237,7 @@ export class Arcade {
       if (!o.hit) {
         this.passed++; this._combo(now);
         this._addScore(50, 0.5, this.zoneTop - 0.03, '+50');
-        if (o.nearMiss && a) { this.dekes++; this._addScore(100, a.x, a.y - 0.08, 'DEKE! +100', '#38bdf8'); this.sfx?.deke?.(); }
+        if (o.nearMiss && a) { this.dekes++; this._addScore(100, a.x, a.y - 0.08, 'Deke! +100', C.red, 'script'); this.sfx?.deke?.(); }
       }
     }
   }
@@ -250,36 +253,37 @@ export class Arcade {
     return [{ x0: o.x - o.w / 2, x1: o.x + o.w / 2, y0: o.y - o.h / 2, y1: o.y + o.h / 2 }];
   }
 
+  /** 충돌: 목숨 대신 감점 + 콤보 초기화 + 1.5초 무적 */
   _onHit(o, now) {
     o.hit = true;
-    this.lives--; this.hits++;
+    this.hits++;
     this.combo = 0;
+    this.score = Math.max(0, this.score - HIT_PENALTY);
     this.invulnUntil = now + INVULN_MS;
     this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
-    this._pop(this.avatar.x, this.avatar.y - 0.07, '충돌!', '#ef4444', 800);
+    this._pop(this.avatar.x, this.avatar.y - 0.07, `충돌 −${HIT_PENALTY}`, C.red, 900);
     this.sfx?.hit?.();
-    if (this.lives <= 0) { this.phase = 'over'; this.instruction = '게임 오버'; }
-    else this.instruction = '무적 1.5초! 퍽을 빼세요';
+    this.instruction = `충돌 −${HIT_PENALTY} · 1.5초 무적`;
   }
 
-  _combo(now) {
+  _combo() {
     this.combo++;
     this.maxCombo = Math.max(this.maxCombo, this.combo);
-    if (this.combo === 5 || this.combo === 10) { this._pop(this.avatar?.x ?? 0.5, (this.avatar?.y ?? this.zoneTop) - 0.12, `콤보 ×${this.multiplier}`, this.combo >= 10 ? '#fbbf24' : '#38bdf8', 1000); this.sfx?.combo?.(); }
+    if (this.combo === 5 || this.combo === 10) { this._pop(this.avatar?.x ?? 0.5, (this.avatar?.y ?? this.zoneTop) - 0.12, `Combo ×${this.multiplier}`, C.red, 1000, 'script'); this.sfx?.combo?.(); }
     if (this.combo >= 20 && this.combo % 20 === 0) {
-      this._pop(0.5, this.zoneTop - 0.12, 'FEVER ×3!', '#f472b6', 1200);
-      if (this.lives < 3) { this.lives++; this._pop(0.5, this.zoneTop - 0.05, '❤ 회복', '#f87171', 1200); this.sfx?.heal?.(); }
-      else this.sfx?.combo?.();
+      this.score += FEVER_BONUS;
+      this._pop(0.5, this.zoneTop - 0.12, `Fever! +${FEVER_BONUS}`, C.red, 1300, 'script');
+      this.sfx?.heal?.();
     }
   }
 
-  _addScore(base, x, y, text, color = '#22c55e') {
+  _addScore(base, x, y, label, color = C.ink, style = 'display') {
     const pts = Math.round(base * this.multiplier);
     this.score += pts;
-    if (text) this._pop(x, y, this.multiplier > 1 && base !== 10 ? `${text} ×${this.multiplier}` : text, color, 900);
+    if (label) this._pop(x, y, this.multiplier > 1 && base !== 10 ? `${label} ×${this.multiplier}` : label, color, 900, style);
   }
 
-  _pop(x, y, text, color, dur = 900) { this.effects.push({ type: 'pop', x, y, text, color, t0: performance.now(), dur, age: 0 }); }
+  _pop(x, y, str, color, dur = 900, style = 'display') { this.effects.push({ type: 'pop', x, y, text: str, color, style, t0: performance.now(), dur, age: 0 }); }
 
   result(puck) {
     const distM = Math.max(0, (puck?.distance || 0) - this.startDistance) * this.floorWidthM;
@@ -288,47 +292,41 @@ export class Arcade {
       elapsed: this.elapsed, distanceM: distM, level: this.level,
       items_: [
         ['점수', this.score], ['최고 콤보', this.maxCombo], ['아슬아슬 회피 (DEKE)', this.dekes],
-        ['통과한 장애물', this.passed], ['황금 퍽', this.items], ['생존 시간', `${this.elapsed.toFixed(1)}s`],
+        ['통과한 장애물', this.passed], ['황금 퍽', this.items], ['충돌', this.hits],
         ['퍽 이동 거리', `${distM.toFixed(1)} m`], ['도달 속도', `×${(this.speedMul).toFixed(2)}`],
       ],
     };
   }
 
   // =================== 렌더링 (화면 좌표, 폭 = W) ===================
+  // 종이색으로 덮은 화면 위에 잉크 도형. 레드는 플레이어의 퍽과 스윕 빔에만.
   draw(ctx, W, H, now, puck) {
     const S = W; // 1 단위 = 화면 폭
     const zt = this.zoneTop * S, zh = this.zoneH * S;
-    const font = Math.round(W * 0.03);
+    const dpr = W / (ctx.canvas.clientWidth || W);
+    const fs = Math.max(11 * dpr, W * 0.019); // 본문 글자 크기 (CSS 11px 이상)
+    const hair = Math.max(1.2, W * 0.0016);
     ctx.save();
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
-    // 배경 어둡게 + 플레이 존
-    ctx.fillStyle = 'rgba(2,6,23,0.5)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(56,189,248,0.08)'; ctx.fillRect(0, zt, W, zh);
-    ctx.setLineDash([W * 0.015, W * 0.01]); ctx.strokeStyle = 'rgba(56,189,248,0.6)'; ctx.lineWidth = W * 0.003;
-    ctx.beginPath(); ctx.moveTo(0, zt); ctx.lineTo(W, zt); ctx.stroke();
-    ctx.setLineDash([W * 0.006, W * 0.012]); ctx.strokeStyle = 'rgba(148,163,184,0.35)';
-    ctx.beginPath(); ctx.moveTo(0, zt + zh / 2); ctx.lineTo(W, zt + zh / 2); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(148,163,184,0.7)'; ctx.font = `${Math.round(font * 0.7)}px system-ui`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('↑ 몸쪽(당기기)', W * 0.012, zt + W * 0.008);
-    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText('↓ 카메라쪽(밀기)', W - W * 0.012, H - W * 0.008);
+    // 종이 워시: 카메라 영상은 은은하게만 비친다
+    ctx.fillStyle = rgba(C.paper, 0.86); ctx.fillRect(0, 0, W, H);
+    // 플레이 존: 위쪽 잉크 선 하나 + 가운데 점선
+    ctx.fillStyle = rgba(C.paper2, 0.55); ctx.fillRect(0, zt, W, zh);
+    ctx.beginPath(); ctx.moveTo(0, zt); ctx.lineTo(W, zt); ctx.lineWidth = hair * 1.4; ctx.strokeStyle = C.ink; ctx.stroke();
+    ctx.setLineDash([hair * 2, hair * 6]); ctx.beginPath(); ctx.moveTo(0, zt + zh / 2); ctx.lineTo(W, zt + zh / 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.45); ctx.stroke(); ctx.setLineDash([]);
+    text(ctx, 'PLAY ZONE', W * 0.014, zt + fs * 0.9, fs * 0.72, { weight: 600, color: C.mute, align: 'left', halo: false });
+    text(ctx, '↑ 몸쪽 · 당기기', W * 0.014, zt + fs * 2.1, fs * 0.8, { weight: 500, color: C.inkSoft, align: 'left', halo: false });
+    text(ctx, '↓ 카메라쪽 · 밀기', W - W * 0.014, H - fs * 0.9, fs * 0.8, { weight: 500, color: C.inkSoft, align: 'right', halo: false });
 
     if (this.phase === 'idle') {
       if (this.idleAutoStart) {
         const c = this.faceoff();
-        const cx = c.x * S, cy = c.y * S, r = c.r * S;
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(34,197,94,0.12)'; ctx.fill();
-        ctx.lineWidth = W * 0.005; ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.stroke();
-        if (this.idleHold > 0) {
-          ctx.beginPath(); ctx.arc(cx, cy, r * 1.18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.idleHold / COUNTDOWN_S));
-          ctx.lineWidth = W * 0.01; ctx.strokeStyle = '#22c55e'; ctx.stroke();
-          this._text(ctx, String(Math.ceil(COUNTDOWN_S - this.idleHold)), W / 2, zt - W * 0.1, font * 3.5, '#fff', true);
-        }
-        this._text(ctx, '퍽을 원 안에 3초 두면 자동 시작 (핸즈프리)', W / 2, zt - W * 0.04, font, '#e5e7eb');
+        this._drawCircle(ctx, S, c, Math.min(1, this.idleHold / COUNTDOWN_S));
+        if (this.idleHold > 0) text(ctx, String(Math.ceil(COUNTDOWN_S - this.idleHold)), W / 2, zt - W * 0.11, W * 0.13, { family: F.display, weight: 900, halo: false });
+        text(ctx, '퍽을 원 안에 3초 두면 시작', W / 2, zt - W * 0.035, fs, { weight: 500, color: C.inkSoft, halo: false });
       } else {
-        this._text(ctx, '시작을 누르면 카운트다운이 시작됩니다', W / 2, zt - W * 0.05, font, '#e5e7eb');
+        text(ctx, '시작을 누르면 카운트다운이 시작됩니다', W / 2, zt - W * 0.045, fs, { weight: 500, color: C.inkSoft, halo: false });
       }
       this._drawAvatar(ctx, S, now, puck, true);
       ctx.restore();
@@ -337,106 +335,95 @@ export class Arcade {
 
     // 카운트다운: 페이스오프 서클
     if (this.phase === 'countdown') {
-      const c = this.faceoff();
-      const cx = c.x * S, cy = c.y * S, r = c.r * S;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(239,68,68,0.15)'; ctx.fill();
-      ctx.lineWidth = W * 0.006; ctx.strokeStyle = '#ef4444'; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx, cy, r * 0.12, 0, Math.PI * 2); ctx.fillStyle = '#ef4444'; ctx.fill();
-      if (this.hold > 0) {
-        ctx.beginPath(); ctx.arc(cx, cy, r * 1.18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (this.hold / COUNTDOWN_S));
-        ctx.lineWidth = W * 0.01; ctx.strokeStyle = '#22c55e'; ctx.stroke();
-        this._text(ctx, String(Math.ceil(COUNTDOWN_S - this.hold)), W / 2, zt - W * 0.12, font * 4, '#fff', true);
-      } else {
-        this._text(ctx, '퍽을 원 안에 멈추세요', W / 2, zt - W * 0.06, font * 1.3, '#fca5a5', true);
-      }
-      this._text(ctx, '👀 시선은 화면에 (헤드업)', W / 2, zt - W * 0.02, font, '#e5e7eb');
+      this._drawCircle(ctx, S, this.faceoff(), Math.min(1, this.hold / COUNTDOWN_S));
+      if (this.hold > 0) text(ctx, String(Math.ceil(COUNTDOWN_S - this.hold)), W / 2, zt - W * 0.12, W * 0.15, { family: F.display, weight: 900, halo: false });
+      else text(ctx, '퍽을 원 안에 멈추세요', W / 2, zt - W * 0.075, W * 0.042, { family: F.display, weight: 900, halo: false });
+      text(ctx, 'Head up — 시선은 화면에', W / 2, zt - W * 0.028, fs, { weight: 500, color: C.inkSoft, halo: false });
     }
 
-    // 장애물
     for (const o of this.obstacles) {
       if (o.type === 'beam') this._drawBeam(ctx, S, o, now);
       else this._drawObstacle(ctx, S, o, now);
     }
-    // 황금 퍽
+    // 황금 퍽: 옐로 원 + 잉크 외곽선
     for (const p of this.pickups) {
-      const x = p.x * S, y = p.y * S, r = p.r * S * (1 + 0.08 * Math.sin(now / 150));
-      const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
-      g.addColorStop(0, '#fef3c7'); g.addColorStop(0.5, '#fbbf24'); g.addColorStop(1, '#b45309');
-      ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.7, 0, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
-      ctx.lineWidth = W * 0.003; ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(x, y, r * 1.6, r * 1.1, 0, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(251,191,36,0.35)'; ctx.stroke();
+      const x = p.x * S, y = p.y * S, r = p.r * S * (1 + 0.06 * Math.sin(now / 160));
+      ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.72, 0, 0, Math.PI * 2);
+      ctx.fillStyle = C.yellow; ctx.fill(); ctx.lineWidth = hair * 1.4; ctx.strokeStyle = C.ink; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x - r * 0.25, y - r * 0.2, r * 0.3, r * 0.14, -0.4, 0, Math.PI * 2); ctx.fillStyle = rgba(C.paper, 0.85); ctx.fill();
+      sparks(ctx, x, y, r * 1.45, r * 1.8, 6, C.ink, hair, now / 900);
     }
 
     this._drawAvatar(ctx, S, now, puck, false);
 
     // 이펙트
     for (const e of this.effects) {
-      if (e.type === 'flash') { ctx.fillStyle = `rgba(239,68,68,${0.4 * (1 - e.age)})`; ctx.fillRect(0, 0, W, H); }
-      else if (e.type === 'pop') {
-        ctx.globalAlpha = 1 - e.age;
-        const big = e.text.startsWith('DEKE') || e.text.startsWith('FEVER') || e.text === 'GO!';
-        this._text(ctx, e.text, clamp(e.x, 0.08, 0.92) * S, Math.max(font, e.y * S - e.age * W * 0.06), font * (big ? 1.9 : 1.2), e.color, true);
+      if (e.type === 'flash') {
+        const a = 1 - e.age, bw = W * 0.012;
+        ctx.lineWidth = bw; ctx.strokeStyle = rgba(C.red, a); ctx.strokeRect(bw / 2, bw / 2, W - bw, H - bw);
+      } else if (e.type === 'pop') {
+        ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
+        const script = e.style === 'script';
+        const size = script ? W * 0.07 : W * 0.03;
+        text(ctx, e.text, clamp(e.x, 0.12, 0.88) * S, Math.max(size, e.y * S - e.age * W * 0.05), size,
+          { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color, halo: true });
         ctx.globalAlpha = 1;
       }
     }
 
     if (this.paused && this.phase === 'play') {
-      ctx.fillStyle = 'rgba(2,6,23,0.55)'; ctx.fillRect(0, 0, W, H);
-      this._text(ctx, '퍽을 찾는 중…', W / 2, H / 2, font * 1.8, '#f59e0b', true);
-      this._text(ctx, '퍽을 카메라에 보이게 두면 이어서 진행됩니다', W / 2, H / 2 + font * 2, font, '#e5e7eb');
+      ctx.fillStyle = rgba(C.paper, 0.9); ctx.fillRect(0, 0, W, H);
+      text(ctx, '퍽을 찾는 중', W / 2, H / 2 - W * 0.01, W * 0.055, { family: F.display, weight: 900, halo: false });
+      text(ctx, '퍽을 카메라에 보이게 두면 이어서 진행됩니다 · 시간은 멈춰 있습니다', W / 2, H / 2 + W * 0.04, fs, { weight: 500, color: C.inkSoft, halo: false });
     }
-    if (this.phase === 'over') this._text(ctx, 'GAME OVER', W / 2, zt - W * 0.08, font * 2.4, '#ef4444', true);
 
-    // 레벨/속도 표시
-    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-    ctx.fillStyle = 'rgba(226,232,240,0.7)'; ctx.font = `${Math.round(font * 0.8)}px system-ui`;
-    ctx.fillText(`LV ${this.level + 1} · 속도 ×${this.speedMul.toFixed(1)}`, W - W * 0.012, zt - W * 0.008);
+    text(ctx, `LV ${this.level + 1}  ·  ×${this.speedMul.toFixed(1)}`, W - W * 0.014, zt - fs * 0.9, fs * 0.8, { weight: 600, color: C.mute, align: 'right', halo: false });
     ctx.restore();
   }
 
+  _drawCircle(ctx, S, c, progress) {
+    const W = S, cx = c.x * S, cy = c.y * S, r = c.r * S;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(C.paper, 0.7); ctx.fill();
+    ctx.setLineDash(progress > 0 ? [] : [W * 0.008, W * 0.008]); ctx.lineWidth = Math.max(1.5, W * 0.0022); ctx.strokeStyle = C.ink; ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.09, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+    if (progress > 0) {
+      ctx.beginPath(); ctx.arc(cx, cy, r * 1.16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+      ctx.lineWidth = W * 0.006; ctx.strokeStyle = C.red; ctx.stroke();
+    }
+  }
+
   _drawObstacle(ctx, S, o, now) {
-    const W = S;
-    const hitFlash = o.hit && (Math.floor(now / 80) % 2 === 0);
+    const W = S, hair = Math.max(1.2, W * 0.0016);
+    const blink = o.hit && Math.floor(now / 80) % 2 === 0;
+    const body = blink ? C.red : C.ink;
     if (o.type === 'gap') {
-      const h = o.hole / 2;
-      const rects = [[-0.02, o.holeX - h], [o.holeX + h, 1.02]];
-      for (const [x0, x1] of rects) {
-        const g = ctx.createLinearGradient(0, (o.y - o.h / 2) * S, 0, (o.y + o.h / 2) * S);
-        g.addColorStop(0, hitFlash ? '#fca5a5' : '#c084fc'); g.addColorStop(1, hitFlash ? '#ef4444' : '#6d28d9');
-        ctx.fillStyle = g;
-        ctx.fillRect(x0 * S, (o.y - o.h / 2) * S, (x1 - x0) * S, o.h * S);
-      }
-      // 구멍 표시
-      ctx.setLineDash([W * 0.01, W * 0.008]); ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.lineWidth = W * 0.003;
-      ctx.strokeRect((o.holeX - h) * S, (o.y - o.h / 2) * S, o.hole * S, o.h * S); ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = `700 ${Math.round(W * 0.022)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('↓ 틈새', o.holeX * S, (o.y - o.h / 2) * S - W * 0.02);
+      const h = o.hole / 2, y0 = (o.y - o.h / 2) * S, hh = o.h * S;
+      ctx.fillStyle = body;
+      ctx.fillRect(-2, y0, (o.holeX - h) * S + 2, hh);
+      ctx.fillRect((o.holeX + h) * S, y0, W - (o.holeX + h) * S + 2, hh);
+      // 틈새 표시: 레드 꺾쇠 두 개
+      ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red;
+      for (const sx of [-1, 1]) { const ex = (o.holeX + sx * h) * S; ctx.beginPath(); ctx.moveTo(ex, y0 - hh * 0.35); ctx.lineTo(ex, y0 + hh * 1.35); ctx.stroke(); }
+      text(ctx, '틈새', o.holeX * S, y0 - W * 0.02, W * 0.017, { weight: 600, color: C.ink, halo: false });
       return;
     }
     const x = (o.x - o.w / 2) * S, y = (o.y - o.h / 2) * S, w = o.w * S, h = o.h * S;
-    const g = ctx.createLinearGradient(x, y, x, y + h);
-    if (o.type === 'gate') { g.addColorStop(0, hitFlash ? '#fca5a5' : '#fb923c'); g.addColorStop(1, hitFlash ? '#ef4444' : '#c2410c'); }
-    else { g.addColorStop(0, hitFlash ? '#fca5a5' : '#f87171'); g.addColorStop(1, hitFlash ? '#ef4444' : '#991b1b'); }
-    ctx.fillStyle = g;
+    ctx.fillStyle = body;
     ctx.beginPath();
     if (o.type === 'blocker' && o.round) ctx.ellipse(o.x * S, o.y * S, w / 2, h / 2, 0, 0, Math.PI * 2);
-    else ctx.roundRect(x, y, w, h, W * 0.012);
+    else ctx.roundRect(x, y, w, h, o.type === 'gate' ? h / 2 : W * 0.012);
     ctx.fill();
-    ctx.lineWidth = W * 0.003; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
     if (o.type === 'gate') {
-      // 경고 줄무늬 + 열린 쪽 화살표
-      ctx.save(); ctx.clip();
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = h * 0.5;
-      for (let sx = x - h; sx < x + w + h; sx += h * 1.2) { ctx.beginPath(); ctx.moveTo(sx, y + h); ctx.lineTo(sx + h, y); ctx.stroke(); }
-      ctx.restore();
-      ctx.fillStyle = '#fff'; ctx.font = `700 ${Math.round(W * 0.03)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(o.side === 'R' ? '◀ 왼쪽으로' : '오른쪽으로 ▶', o.side === 'R' ? (o.x - o.w / 2) * S * 0.5 : ((o.x + o.w / 2) + (1 - (o.x + o.w / 2)) / 2) * S, o.y * S);
+      text(ctx, 'SLALOM', o.x * S, o.y * S, h * 0.42, { weight: 700, color: C.paper, halo: false });
+      const openX = o.side === 'R' ? (o.x - o.w / 2) * S * 0.5 : ((o.x + o.w / 2) + (1 - (o.x + o.w / 2)) / 2) * S;
+      text(ctx, o.side === 'R' ? '← 왼쪽' : '오른쪽 →', openX, o.y * S, W * 0.022, { weight: 600, color: C.ink, halo: false });
     } else {
-      // 수비수 아이콘 (헬멧)
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.beginPath(); ctx.arc(o.x * S, o.y * S - h * 0.08, h * 0.22, Math.PI, 0); ctx.fill();
-      ctx.fillRect(o.x * S - h * 0.22, o.y * S - h * 0.08, h * 0.44, h * 0.1);
+      // 수비수: 감은 눈 두 개 + 코 (선 일러스트 느낌)
+      const cx = o.x * S, cy = o.y * S, e = h * 0.16;
+      ctx.lineWidth = Math.max(1.5, h * 0.045); ctx.strokeStyle = C.paper;
+      for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + sx * e * 1.5, cy - e * 0.3, e * 0.55, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(cx, cy - e * 0.1); ctx.lineTo(cx - e * 0.35, cy + e * 0.9); ctx.lineTo(cx + e * 0.2, cy + e * 0.9); ctx.stroke();
     }
   }
 
@@ -445,69 +432,56 @@ export class Arcade {
     const bandTop = (o.band === 'near' ? this.zoneTop + this.zoneH / 2 : this.zoneTop) * S;
     const bandH = (this.zoneH / 2) * S;
     if (o.state === 'warn') {
-      const blink = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(now / 70));
-      ctx.fillStyle = `rgba(239,68,68,${blink * 0.5})`; ctx.fillRect(0, bandTop, W, bandH);
-      ctx.strokeStyle = `rgba(239,68,68,${blink + 0.3})`; ctx.lineWidth = W * 0.004; ctx.strokeRect(W * 0.002, bandTop, W - W * 0.004, bandH);
-      const label = o.band === 'near' ? '⚠ 스윕 빔! 퍽을 몸쪽으로 당기세요 (토 드래그)' : '⚠ 스윕 빔! 퍽을 카메라 쪽으로 미세요';
-      this._text(ctx, label, W / 2, bandTop + bandH / 2, Math.round(W * 0.03), '#fecaca', true);
+      // 경고: 잉크 빗금 + 레드 알약 라벨
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, bandTop, W, bandH); ctx.clip();
+      ctx.lineWidth = Math.max(1, W * 0.0014); ctx.strokeStyle = rgba(C.ink, 0.22 + 0.18 * (0.5 + 0.5 * Math.sin(now / 70)));
+      const step = W * 0.022;
+      for (let x = -bandH; x < W + bandH; x += step) { ctx.beginPath(); ctx.moveTo(x, bandTop + bandH); ctx.lineTo(x + bandH, bandTop); ctx.stroke(); }
+      ctx.restore();
+      const label = o.band === 'near' ? '스윕 — 퍽을 몸쪽으로 당기세요' : '스윕 — 퍽을 카메라 쪽으로 미세요';
+      pill(ctx, label, W / 2, bandTop + bandH / 2, Math.max(12, W * 0.022), { bg: C.red, fg: C.paper, border: null, weight: 600 });
       return;
     }
-    const x = o.x * S;
-    ctx.fillStyle = 'rgba(239,68,68,0.12)'; ctx.fillRect(0, bandTop, W, bandH);
-    const grad = ctx.createLinearGradient(x - W * 0.03, 0, x + W * 0.03, 0);
-    grad.addColorStop(0, 'rgba(239,68,68,0)'); grad.addColorStop(0.5, 'rgba(254,202,202,0.95)'); grad.addColorStop(1, 'rgba(239,68,68,0)');
-    ctx.fillStyle = grad; ctx.fillRect(x - W * 0.03, bandTop, W * 0.06, bandH);
-    ctx.fillStyle = '#fff'; ctx.fillRect(x - o.w * S / 2, bandTop, o.w * S, bandH);
+    const x = o.x * S, bw = Math.max(3, o.w * S);
+    ctx.fillStyle = rgba(C.red, 0.1); ctx.fillRect(0, bandTop, W, bandH);
+    ctx.fillStyle = C.red; ctx.fillRect(x - bw / 2, bandTop, bw, bandH);
+    sparks(ctx, x, bandTop + bandH / 2, bw * 1.6, bw * 2.6, 8, C.red, Math.max(1.2, W * 0.0018), now / 200);
   }
 
   _drawAvatar(ctx, S, now, puck, ghost) {
-    const W = S;
+    const W = S, hair = Math.max(1.2, W * 0.0016);
     const a = this.avatar;
     if (!a) {
-      if (ghost) this._text(ctx, '퍽이 인식되면 여기에 표시됩니다', W / 2, (this.zoneTop + this.zoneH / 2) * S, Math.round(W * 0.025), '#94a3b8');
+      if (ghost) text(ctx, '퍽이 인식되면 여기에 표시됩니다', W / 2, (this.zoneTop + this.zoneH / 2) * S, Math.max(11, W * 0.017), { weight: 500, color: C.mute, halo: false });
       return;
     }
     const x = a.x * S, y = a.y * S, r = PUCK_R * S;
-    // 궤적
+    // 궤적: 가는 레드 선
     if (puck?.trail?.length > 1) {
       for (let i = 1; i < puck.trail.length; i++) {
         const p0 = this.toZone(puck.trail[i - 1].x, puck.trail[i - 1].y), p1 = this.toZone(puck.trail[i].x, puck.trail[i].y);
-        const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.6;
+        const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.55;
         if (alpha <= 0) continue;
         ctx.beginPath(); ctx.moveTo(p0.x * S, p0.y * S); ctx.lineTo(p1.x * S, p1.y * S);
-        ctx.strokeStyle = `rgba(56,189,248,${alpha})`; ctx.lineWidth = r * 0.5 * (i / puck.trail.length) + 1; ctx.stroke();
+        ctx.strokeStyle = rgba(C.red, alpha); ctx.lineWidth = hair * 1.5; ctx.stroke();
       }
     }
     const invuln = now < this.invulnUntil;
-    if (invuln && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.35;
+    if (invuln && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
     const predicted = puck?.state === 'predicted';
-    // 콤보 불꽃
+    // 콤보: 방사형 스파크 (5+ 잉크, 10+ 레드, 20+ 이중)
     if (this.combo >= 5 && !ghost) {
-      const gold = this.combo >= 10, fever = this.combo >= 20;
-      for (let k = 0; k < (fever ? 9 : 6); k++) {
-        const ang = now / 300 + k * (Math.PI * 2 / (fever ? 9 : 6));
-        const fr = r * (1.5 + 0.4 * Math.sin(now / 90 + k));
-        const fx = x + Math.cos(ang) * fr, fy = y - r * 0.6 + Math.sin(ang) * fr * 0.6 - Math.abs(Math.sin(now / 120 + k)) * r;
-        ctx.beginPath(); ctx.ellipse(fx, fy, r * 0.45, r * 0.8, ang, 0, Math.PI * 2);
-        ctx.fillStyle = fever ? `hsla(${(now / 4 + k * 40) % 360},90%,60%,0.75)` : gold ? 'rgba(251,191,36,0.75)' : 'rgba(56,189,248,0.7)';
-        ctx.fill();
-      }
+      const col = this.combo >= 10 ? C.red : C.ink;
+      sparks(ctx, x, y, r * 1.7, r * (2.3 + 0.25 * Math.sin(now / 90)), this.combo >= 10 ? 12 : 8, col, hair * 1.6, now / 500);
+      if (this.combo >= 20) sparks(ctx, x, y, r * 2.8, r * 3.3, 12, C.yellow, hair * 2.2, -now / 400);
     }
-    ctx.beginPath(); ctx.ellipse(x, y, r * 2, r * 1.4, 0, 0, Math.PI * 2);
-    ctx.fillStyle = predicted ? 'rgba(245,158,11,0.2)' : 'rgba(56,189,248,0.22)'; ctx.fill();
-    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.4, r * 0.1, x, y, r);
-    g.addColorStop(0, '#475569'); g.addColorStop(1, '#0f172a');
-    ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.72, 0, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
-    ctx.lineWidth = W * 0.004; ctx.strokeStyle = predicted ? '#f59e0b' : ghost ? 'rgba(148,163,184,0.8)' : '#38bdf8'; ctx.stroke();
+    // 퍽: 레드 원반 + 잉크 외곽선
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.74, 0, 0, Math.PI * 2);
+    if (ghost || predicted) { ctx.fillStyle = rgba(C.red, ghost ? 0.25 : 0.4); ctx.fill(); ctx.setLineDash([hair * 3, hair * 3]); }
+    else { ctx.fillStyle = C.red; ctx.fill(); }
+    ctx.lineWidth = hair * 1.6; ctx.strokeStyle = C.ink; ctx.stroke(); ctx.setLineDash([]);
     ctx.globalAlpha = 1;
-  }
-
-  _text(ctx, text, x, y, size, color, bold = false) {
-    ctx.font = `${bold ? 800 : 500} ${Math.round(size)}px system-ui, sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = Math.max(2, size * 0.14); ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-    ctx.strokeText(text, x, y);
-    ctx.fillStyle = color; ctx.fillText(text, x, y);
   }
 }
 
@@ -517,3 +491,5 @@ export function circleRectDist(cx, cy, r) {
   const dy = Math.max(r.y0 - cy, 0, cy - r.y1);
   return Math.hypot(dx, dy);
 }
+
+export { font };

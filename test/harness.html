@@ -1,5 +1,7 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>vision harness</title></head>
+<html><head><meta charset="utf-8"><title>vision harness</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght,SOFT@9..144,600..900,0..100&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@700;900&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
 <body>
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
@@ -8,7 +10,8 @@
   import { Tracker } from '../src/tracker.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
-  import { Arcade, PUCK_R } from '../src/arcade.js';
+  import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS } from '../src/arcade.js';
+  import { rankKey } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
   import { decideIdle } from '../src/idle-logic.js';
 
@@ -54,7 +57,7 @@
     ar.obstacles.push({ type: 'gap', x: 0.5, y: 0.3, w: 1, h: 0.05, vy: 0.3, holeX: 0.62, hole: 0.088 });
     ar.obstacles.push({ type: 'beam', band: 'near', state: 'fire', t: 0.5, warn: 0.9, sweep: 1.3, x: 0.7, dir: 1, w: 0.016, h: ar.zoneH / 2, y: 0 });
     ar.pickups.push({ x: 0.75, y: 0.42, r: 0.028, vy: 0.3, born: 0 });
-    ar.effects.push({ type: 'pop', x: 0.42, y: ar.avatar.y - 0.08, text: 'DEKE! +100 ×2', color: '#38bdf8', t0: performance.now(), dur: 900, age: 0.2 });
+    ar.effects.push({ type: 'pop', x: 0.42, y: ar.avatar.y - 0.09, text: 'Deke! +100 ×2', color: '#E03C31', style: 'script', t0: performance.now(), dur: 900, age: 0.2 });
     ar.draw(ctx, cv.width, cv.height, 1234, { trail: [], state: 'tracked' });
     return true;
   };
@@ -154,12 +157,14 @@
     const fl = game.flyers.find((f) => t7 >= f.launchAt) || game.flyers[0];
     fl.launchAt = 0; fl.hit = false; tr7.pos = { x: fl.x, y: fl.y };
     game.update(0.033, tr7, t7); t7 += 33;
-    check('flyer hit costs a life', game.lives === 2 && game.stats.hits === 1, { lives: game.lives });
+    check('flyer hit is a penalty, not a life', game.stats.hits === 1 && game.hits === 0 + 0 || game.stats.hits === 1, { hits: game.stats.hits });
+    const scoreAfterHit = (game.update(0.001, { ...tr7, state: 'predicted' }, t7), game.score);
+    check('flyer hit subtracts 50 points', scoreAfterHit === Math.max(0, Math.floor(game.elapsed) * 10 + game.stats.dodged * 5 + game.stats.close * 15 - 50), scoreAfterHit);
     const fl2 = game.flyers.find((f) => !f.hit) || fl; if (fl2) { fl2.launchAt = 0; tr7.pos = { x: fl2.x, y: fl2.y }; }
     game.update(0.033, tr7, t7); t7 += 33;
-    check('invulnerable 1.2s after flyer hit', game.lives === 2);
+    check('invulnerable 1.2s after flyer hit', game.stats.hits === 1);
     const res7 = game.stop('manual');
-    check('survival result report', res7.items.some(([k]) => k === '생존 시간') && res7.items.some(([k]) => k === '최대 동시 퍽'), res7.items);
+    check('dodge result report + rank key by time', res7.items.some(([k]) => k === '충돌') && res7.items.some(([k]) => k === '게임 시간') && res7.rankKey === 'obstacle@60', { key: res7.rankKey });
     // 출발 지점은 항상 바닥 바깥, 플레이어와 0.25 이상 떨어짐
     let badSpawn = 0;
     for (let i = 0; i < 300; i++) { const g5 = new Game(null); g5.setMode('obstacle'); g5.difficulty = 'hard'; g5.start(tr7); const f = g5._spawnFlyer({ x: 0.5, y: 0.5 }, { flyMin: 0.5, flyMax: 1 }, 0); if (!f) continue; const outside = f.x < 0 || f.x > 1 || f.y < 0 || f.y > 1; if (!outside || Math.hypot(f.x - 0.5, f.y - 0.5) < 0.25) badSpawn++; }
@@ -291,10 +296,10 @@
     ar = mk(); t = toPlay(ar, 20000); ar.combo = 7;
     ar.obstacles.push({ type: 'blocker', x: 0.5, y: 0.1, w: 0.15, h: 0.08, vy: 0.5 });
     t = stepTo(ar, 0.5, 0.5, t, 40); // 1.3초: 블록이 아바타(y≈0.478)를 통과
-    check('A2 blocker hit costs a life and resets combo', ar.lives === 2 && ar.hits === 1 && ar.combo === 0, { lives: ar.lives, hits: ar.hits });
+    check('A2 blocker hit = penalty and combo reset (no lives)', ar.hits === 1 && ar.combo === 0 && ar.lives === undefined, { hits: ar.hits });
     ar.obstacles.push({ type: 'blocker', x: 0.5, y: zoneY(ar, 0.5) - 0.05, w: 0.15, h: 0.08, vy: 0.5 });
     t = stepTo(ar, 0.5, 0.5, t, 6); // 무적 중
-    check('A2 invulnerable right after hit', ar.lives === 2);
+    check('A2 invulnerable right after hit', ar.hits === 1);
 
     // A3) 통과 +50, 콤보 +1 / A4) 아슬아슬 회피 DEKE +100
     ar = mk(); t = toPlay(ar, 30000); const s0 = ar.score;
@@ -317,32 +322,34 @@
     ar = mk(); t = toPlay(ar, 50000);
     ar.combo = 4; ar._combo(t); check('A6 5 combo = x1.5', ar.multiplier === 1.5);
     ar.combo = 9; ar._combo(t); check('A6 10 combo = x2', ar.multiplier === 2);
-    ar.lives = 2; ar.combo = 19; ar._combo(t);
-    check('A6 20 combo = FEVER x3 and heals a heart', ar.multiplier === 3 && ar.lives === 3, { lives: ar.lives });
-    ar.lives = 3; ar.combo = 39; ar._combo(t); check('A6 heal capped at 3 hearts', ar.lives === 3);
+    const sF = ar.score; ar.combo = 19; ar._combo(t);
+    check('A6 20 combo = FEVER x3 and bonus points', ar.multiplier === 3 && ar.score - sF === FEVER_BONUS, { d: ar.score - sF });
+    ar.score = 500; ar.avatar = { x: 0.5, y: 0.5 }; ar._onHit({}, t);
+    check('A6 hit subtracts penalty, never below zero', ar.score === 500 - HIT_PENALTY && (ar.score = 30, ar._onHit({}, t), ar.score === 0), ar.score);
+    ar.combo = 20;
     const s3 = ar.score; ar._addScore(50); check('A6 multiplier applies to points', ar.score - s3 === 150);
 
     // A7) 스윕 빔: 가까운 띠(near)에 있으면 피격, 몸쪽(far)으로 당기면 통과
     ar = mk(); t = toPlay(ar, 60000);
     ar.obstacles.push({ type: 'beam', band: 'near', state: 'warn', t: 0, warn: 0.9, sweep: 1.3, x: 0, dir: 1, w: 0.016, h: ar.zoneH / 2, y: 0, done: false });
     t = stepTo(ar, 0.5, 0.8, t, 20);
-    check('A7 beam warns before firing (no hit yet)', ar.lives === 3 && ar.obstacles[0].state === 'warn');
+    check('A7 beam warns before firing (no hit yet)', ar.hits === 0 && ar.obstacles[0].state === 'warn');
     t = stepTo(ar, 0.5, 0.8, t, 60);
-    check('A7 beam hits puck left in near band', ar.lives === 2 && ar.obstacles.length === 0, { lives: ar.lives });
+    check('A7 beam hits puck left in near band', ar.hits === 1 && ar.obstacles.length === 0, { hits: ar.hits });
     ar.invulnUntil = 0;
     ar.obstacles.push({ type: 'beam', band: 'near', state: 'warn', t: 0, warn: 0.9, sweep: 1.3, x: 0, dir: 1, w: 0.016, h: ar.zoneH / 2, y: 0, done: false });
     const p0 = ar.passed;
     t = stepTo(ar, 0.5, 0.2, t, 80); // 토 드래그: 몸쪽(위쪽 띠)으로 당김
-    check('A7 toe drag dodges beam (+pass)', ar.lives === 2 && ar.passed === p0 + 1, { passed: ar.passed });
+    check('A7 toe drag dodges beam (+pass)', ar.hits === 1 && ar.passed === p0 + 1, { passed: ar.passed });
 
     // A8) 좁은 틈새: 구멍 위치에 있으면 통과, 아니면 피격
     ar = mk(); t = toPlay(ar, 70000);
     ar.obstacles.push({ type: 'gap', x: 0.5, y: 0.05, w: 1, h: 0.05, vy: 0.5, holeX: 0.5, hole: 2 * PUCK_R * 2 });
     t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A8 gap passed through the hole', ar.lives === 3 && ar.passed === 1, { lives: ar.lives, passed: ar.passed });
+    check('A8 gap passed through the hole', ar.hits === 0 && ar.passed === 1, { hits: ar.hits, passed: ar.passed });
     ar.obstacles.push({ type: 'gap', x: 0.5, y: 0.05, w: 1, h: 0.05, vy: 0.5, holeX: 0.2, hole: 2 * PUCK_R * 2 });
     t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A8 gap wall hits when off the hole', ar.lives === 2, { lives: ar.lives });
+    check('A8 gap wall hits when off the hole', ar.hits === 1, { hits: ar.hits });
 
     // A9) 추적 끊김: 0.6초 넘으면 일시정지, 복귀 시 재개. 짧은 끊김(예측)은 피격 판정 없음
     ar = mk(); t = toPlay(ar, 80000);
@@ -353,7 +360,7 @@
     check('A9 resumes when puck returns', !ar.paused);
     ar.obstacles.push({ type: 'blocker', x: 0.5, y: zoneY(ar, 0.5) - 0.03, w: 0.15, h: 0.08, vy: 0.5 });
     ar.update(0.033, { pos: { x: 0.5, y: 0.5 }, state: 'predicted', trail: [], distance: 0, speed: 0 }, t); t += 33;
-    check('A9 no hit while position is predicted (occlusion buffer)', ar.lives === 3);
+    check('A9 no hit while position is predicted (occlusion buffer)', ar.hits === 0);
 
     // A10) 생존 점수, 레벨 진행, 결과 리포트
     ar = mk(); t = toPlay(ar, 90000);
@@ -367,6 +374,29 @@
     ar = mk(); t = toPlay(ar, 100000); ar.spawnTimer = 0; const types = new Set();
     for (let i = 0; i < 400; i++) { ar.update(0.033, fakePuck(0.05, 0.05), t); t += 33; ar.obstacles.forEach((o) => types.add(o.type)); ar.invulnUntil = t + 1e6; ar.lives = 3; if (ar.spawnTimer > 0.2) ar.spawnTimer = 0.2; }
     check('A10 spawner produces all 4 obstacle types', ['blocker', 'gate', 'beam', 'gap'].every((k) => types.has(k)), [...types]);
+
+    // ===== 시간제 규칙: 1·3·5분, 시간이 끝나면 종료, 시간별 랭킹 키 =====
+    {
+      const g = new Game(null); g.setMode('arcade');
+      check('G1 default limit is 1 minute', g.limit === 60 && g.timeLeft === 60);
+      g.playSeconds = 180; g.resetState();
+      check('G1 3-minute setting applies to timed modes only', g.limit === 180 && (g.setMode('wide'), g.limit === 30) && (g.setMode('free'), g.limit === 0));
+      g.setMode('arcade'); g.playSeconds = 60;
+      let ended = null; g.onEnd = (res) => { ended = res; };
+      const tp = { pos: { x: 0.02, y: 0.02 }, state: 'tracked', trail: [], distance: 0, speed: 0, touches: 0, frames: 10, trackedFrames: 10, trackRate: 1 };
+      let tg = 500000; g.start(tp, { handsFree: true });
+      let guard = 0;
+      while (!ended && guard++ < 3000) { g.update(0.033, tp, tg); tg += 33; }
+      check('G1 arcade ends on time (not on hits) at ~60s', ended && ended.reason === 'time' && Math.abs(ended.elapsed - 60) < 0.2, ended && { reason: ended.reason, elapsed: ended.elapsed, hits: g.hits });
+      check('G1 rank key separates durations', ended.rankKey === 'arcade@60' && rankKey('arcade', 300) === 'arcade@300' && rankKey('wide', 300) === 'wide', ended.rankKey);
+      check('G1 result lists hits and game time', ended.items.some(([k]) => k === '충돌') && ended.items.some(([k, v]) => k === '게임 시간' && v === '1분'), ended.items.map(([k]) => k));
+      // 추적을 잃으면 시계도 멈춤
+      const g2b = new Game(null); g2b.setMode('arcade'); g2b.start(tp, { handsFree: true });
+      for (let i = 0; i < 60; i++) { g2b.update(0.033, tp, tg); tg += 33; }
+      const left0 = g2b.timeLeft;
+      for (let i = 0; i < 90; i++) { g2b.update(0.033, { ...tp, pos: null, state: 'lost' }, tg); tg += 33; }
+      check('G1 clock pauses while the puck is lost', left0 - g2b.timeLeft < 0.8, { left0, left1: g2b.timeLeft });
+    }
 
     // ===== 휴대폰 거치대 플레이 =====
     // P1) 핸즈프리 시작: 카운트다운 생략하고 바로 플레이

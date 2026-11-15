@@ -67,6 +67,7 @@ function init() {
   game.playSeconds = settings.playMinutes * 60;
   game.resetState();
   renderModeList();
+  initCourse();
   updateHud(true);
   if (!Camera.isSupported()) {
     showSplashError('이 브라우저는 카메라(getUserMedia)를 지원하지 않습니다. Safari 또는 Chrome을 사용하세요.');
@@ -442,6 +443,11 @@ function layout() {
     renderer.topInset = clamp((hud.bottom - rect.top) / rect.height, 0, 0.4);
     const f = dodgeField(renderer.canvas.width, renderer.canvas.height, renderer.topInset);
     game.plane = { A: f.h / f.w, flip: settings.flipDepth };
+    // 자유 연습 코스 편집 영역(DOM)을 캔버스의 평면 경기장에 맞춤
+    const cw = renderer.canvas.width, chh = renderer.canvas.height, cf = $('#course-field');
+    cf.style.left = `${(f.x / cw) * 100}%`; cf.style.top = `${(f.y / chh) * 100}%`;
+    cf.style.width = `${(f.w / cw) * 100}%`; cf.style.height = `${(f.h / chh) * 100}%`;
+    game.course.reach = Math.max(0.04, 22 / Math.max(1, f.w / renderer.dpr)); // 화면상 최소 22px
   }
   els.debug.width = vision.PW; els.debug.height = vision.PH;
   positionHandles();
@@ -498,11 +504,13 @@ function loop(now) {
   const dt = app.lastLoop ? Math.min(0.1, (now - app.lastLoop) / 1000) : 1 / 60;
   app.lastLoop = now;
   game.update(dt, tracker, now);
+  updateCourseUI();
   const modeOpen = !els.panelMode.classList.contains('hidden');
   if (!modeOpen && app.modePick) { app.modePick = null; $('#mode-cursor').classList.add('hidden'); }
   if (app.calib.manual) updateAutoCalibration(dt);
   else if (!els.panelResult.classList.contains('hidden')) updateResultChoice(dt);
   else if (modeOpen) updateModeChoice(dt);
+  else if (game.mode.id === 'free' && !game.running && app.started && !app.areaEditing && !app.calibTarget) updateCourseIdle(dt);
   else updateIdleCircle(dt);
 
   game.arcade.idleAutoStart = settings.autoStart;
@@ -573,6 +581,96 @@ function updateModeChoice(dt) {
   app.modePick = null;
   cursor.classList.add('hidden');
   cards[fire].click();
+}
+
+// =============== 자유 연습: 코스 만들기 (번호 1~10을 끌어다 놓기) ===============
+function initCourse() {
+  const slots = $('#course-slots');
+  for (let n = 1; n <= 10; n++) {
+    const el = document.createElement('button');
+    el.type = 'button'; el.className = 'course-pt'; el.dataset.n = String(n); el.textContent = String(n);
+    el.setAttribute('aria-label', `포인트 ${n}`);
+    slots.appendChild(el);
+    bindCoursePoint(el);
+  }
+  $('#course-clear').addEventListener('click', () => { settings.course = []; syncCourse(); toast('코스를 비웠습니다'); });
+  syncCourse();
+}
+
+/** settings.course -> DOM 배치 + 게임 로직에 전달 (번호 순서) */
+function syncCourse() {
+  const field = $('#course-field'), slots = $('#course-slots');
+  const els10 = $$('.course-pt').sort((a, b) => Number(a.dataset.n) - Number(b.dataset.n));
+  for (const el of els10) {
+    const p = settings.course.find((q) => q.n === Number(el.dataset.n));
+    if (p) { field.appendChild(el); el.style.left = `${p.x * 100}%`; el.style.top = `${p.y * 100}%`; }
+    else { el.style.left = ''; el.style.top = ''; slots.appendChild(el); }
+  }
+  game.course.points = [...settings.course].sort((a, b) => a.n - b.n);
+  if (game.mode.id === 'free' && !game.running) game.resetState();
+  persist();
+}
+
+function bindCoursePoint(el) {
+  el.addEventListener('pointerdown', (e) => {
+    if (game.running) return;
+    e.preventDefault();
+    const layer = $('#course');
+    const lr = layer.getBoundingClientRect();
+    const move = (ev) => { el.style.left = `${ev.clientX - lr.left}px`; el.style.top = `${ev.clientY - lr.top}px`; };
+    layer.appendChild(el); el.classList.add('dragging');
+    try { el.setPointerCapture(e.pointerId); } catch { /* 일부 브라우저 */ }
+    move(e);
+    const up = (ev) => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up);
+      el.classList.remove('dragging');
+      const fr = $('#course-field').getBoundingClientRect(), tr = $('#course-tray').getBoundingClientRect();
+      const n = Number(el.dataset.n);
+      const inField = ev.type === 'pointerup' && ev.clientX >= fr.left && ev.clientX <= fr.right && ev.clientY > tr.bottom && ev.clientY <= fr.bottom;
+      settings.course = settings.course.filter((p) => p.n !== n);
+      // 경기장 안에 놓으면 포인트 생성, 위쪽 띠(트레이)나 밖에 놓으면 되돌림
+      if (inField) settings.course.push({ n, x: clamp((ev.clientX - fr.left) / fr.width, 0.03, 0.97), y: clamp((ev.clientY - fr.top) / fr.height, 0.03, 0.97) });
+      syncCourse();
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+}
+
+/** 코스 표시 상태: 자유 연습일 때만 보이고, 플레이 중에는 다음/완료 표시 */
+function updateCourseUI() {
+  const show = app.started && game.mode.id === 'free' && !app.calib.manual && !app.areaEditing;
+  const layer = $('#course');
+  layer.classList.toggle('hidden', !show);
+  if (!show) return;
+  layer.classList.toggle('running', game.running);
+  const pts = game.course.points;
+  const nextN = game.running && pts.length ? pts[game.courseIdx % pts.length].n : null;
+  for (const el of $$('#course-field > .course-pt')) {
+    const n = Number(el.dataset.n), order = pts.findIndex((p) => p.n === n);
+    el.classList.toggle('next', n === nextN);
+    el.classList.toggle('done', game.running && nextN !== null && order >= 0 && order < game.courseIdx);
+    if (game.running || n !== (pts[0] && pts[0].n)) el.style.setProperty('--dwell', '0');
+  }
+}
+
+/** 자유 연습 대기 중: 첫 포인트에 퍽을 2초 두면 시작 (핸즈프리). 가운데 원 대신 코스 편집 화면을 보여준다 */
+function updateCourseIdle(dt) {
+  const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
+  $('#btn-replace-puck').classList.add('hidden');
+  if (!app.courseDwell) app.courseDwell = { key: null, hold: 0, tick: -1 };
+  const cd = app.courseDwell, pts = game.course.points;
+  let key = null;
+  if (settings.autoStart && pts.length && tracker.state === 'tracked' && tracker.pos && !$('.course-pt.dragging')) {
+    const me = game.toPlane(tracker.pos.x, tracker.pos.y);
+    if (Math.hypot(me.x - pts[0].x, me.y - pts[0].y * game.plane.A) < game.course.reach * 1.2) key = pts[0].n;
+  }
+  const fire = stepDwell(cd, key, dt, CHOICE_HOLD_S);
+  const first = pts.length ? $(`#course-field > .course-pt[data-n="${pts[0].n}"]`) : null;
+  if (first) first.style.setProperty('--dwell', String(Math.min(1, cd.hold / CHOICE_HOLD_S)));
+  if (cd.key !== null && cd.hold > 0) { const remain = Math.ceil(CHOICE_HOLD_S - cd.hold); if (remain !== cd.tick) { cd.tick = remain; sfx.tick(); } } else cd.tick = -1;
+  if (fire === null || fire === undefined) return;
+  app.courseDwell = null;
+  startRun();
 }
 
 function paintChoice(u) {
@@ -766,7 +864,13 @@ function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
-  MODES.forEach((m, i) => {
+  // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(Coming soon)
+  const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'soon'];
+  CELLS.forEach((cell, pos) => {
+    const no = String(pos + 1).padStart(2, '0');
+    if (cell === 'wait') { const w = document.createElement('div'); w.className = 'mode-wait'; w.innerHTML = '<i></i><span>puck</span>'; els.modeList.appendChild(w); return; }
+    if (cell === 'soon') { const w = document.createElement('div'); w.className = 'mode-soon'; w.innerHTML = `<span class="no">${no}</span><b>Coming soon</b>`; els.modeList.appendChild(w); return; }
+    const m = MODES[cell], i = pos;
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
     const key = rankKey(m.id, game.playSeconds);

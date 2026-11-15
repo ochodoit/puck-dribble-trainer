@@ -62,6 +62,24 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
   white-space: nowrap; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--paper); background: var(--ink); padding: 3px 10px; border-radius: 999px; pointer-events: none; }
 #floor-handles .handle[data-i="0"]::after, #floor-handles .handle[data-i="1"]::after { top: auto; bottom: 100%; transform: translate(-50%, -8px); }
 
+/* 자유 연습 코스 편집: 번호 원을 끌어다 놓는다 */
+.course { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.course-field { position: absolute; pointer-events: none; }
+.course-tray { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 10px; padding: 7px 12px; flex-wrap: wrap;
+  background: rgba(244, 241, 234, 0.94); border-bottom: 1px solid var(--ink); pointer-events: auto; }
+.course-slots { display: flex; gap: 6px; flex-wrap: wrap; min-height: 40px; align-items: center; }
+.course-hint { font-size: 12px; color: var(--ink-soft); margin-left: auto; }
+.course-tray .btn { min-height: 32px; padding: 4px 10px; font-size: 12.5px; }
+.course-pt { width: 40px; height: 40px; border-radius: 50%; border: var(--line) solid var(--ink); background: var(--paper); color: var(--ink); padding: 0;
+  font-family: var(--display); font-weight: 900; font-size: 17px; line-height: 1; display: grid; place-items: center; cursor: grab; pointer-events: auto; touch-action: none; flex: none;
+  box-shadow: 0 0 0 calc(var(--dwell, 0) * 9px) rgba(224, 60, 49, 0.45); transition: background 0.15s, color 0.15s; }
+.course-field > .course-pt, .course > .course-pt { position: absolute; margin: -20px 0 0 -20px; }
+.course-pt.dragging { cursor: grabbing; transform: scale(1.15); z-index: 6; }
+.course-pt.next { background: var(--red); border-color: var(--red); color: var(--paper); }
+.course-pt.done { background: var(--ink); color: var(--paper); }
+.course.running .course-tray { display: none; }
+.course.running .course-pt { pointer-events: none; cursor: default; }
+
 .tap-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--paper);
   border: var(--line) solid var(--ink); border-radius: 999px; padding: 12px 24px; font-size: 16px; font-weight: 600; text-align: center; pointer-events: none; }
 
@@ -190,7 +208,13 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .seg button.active { background: var(--ink); color: var(--paper); }
 .time-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .time-row .muted { margin: 0; }
-.mode-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+/* 3×3 배치: 가운데(5번)는 퍽이 대기하는 자리라 비워 둔다. 9번은 Coming soon */
+.mode-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.mode-wait, .mode-soon { border-radius: var(--radius); min-height: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--mute); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
+.mode-wait i { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--mute); }
+.mode-soon { border: 1px solid rgba(22, 22, 22, 0.22); align-items: flex-start; justify-content: flex-start; padding: 14px 16px; text-transform: none; letter-spacing: 0; }
+.mode-soon .no { font-family: var(--display); font-weight: 900; font-size: 14px; }
+.mode-soon b { font-family: var(--script); font-weight: 700; font-size: 30px; line-height: 1; color: var(--red); margin-top: 10px; transform: rotate(-4deg); }
 .mode-card { position: relative; text-align: left; background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--radius); padding: 14px 16px 16px; cursor: pointer;
   display: grid; grid-template-columns: 1fr auto; row-gap: 2px; transition: background 0.15s, color 0.15s; }
 .mode-card { overflow: hidden; }
@@ -300,6 +324,19 @@ input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
   .modal-card { padding: 16px 16px 20px; border-radius: 20px; }
   .modal-card h2 { font-size: 24px; }
   .settings-grid { grid-template-columns: 1fr; }
+  .mode-list { gap: 6px; }
+  .mode-card { padding: 9px 9px 11px; border-radius: 14px; }
+  .mode-card b { font-size: 15px; margin-top: 4px; }
+  .mode-card em, .mode-card small { display: none; }
+  .mode-card .time { font-size: 9.5px; padding: 0 6px; }
+  .mode-card .best { font-size: 16px; margin-top: 4px; }
+  .mode-wait, .mode-soon { min-height: 70px; }
+  .mode-soon { padding: 9px; }
+  .mode-soon b { font-size: 20px; }
+  .course-pt { width: 32px; height: 32px; font-size: 14px; }
+  .course-field > .course-pt, .course > .course-pt { margin: -16px 0 0 -16px; }
+  .course-slots { gap: 4px; min-height: 32px; }
+  .course-hint { display: none; }
   .calib-item { grid-template-columns: 32px 1fr; }
   .stat:first-child b, .stat.full b { font-size: 44px; }
   .choice { grid-template-columns: 1fr 1fr; gap: 10px; }

@@ -58,3 +58,27 @@ export function sparks(ctx, x, y, r0, r1, n, color, width, phase = 0) {
     ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0); ctx.lineTo(x + Math.cos(a) * r1, y + Math.sin(a) * r1); ctx.stroke();
   }
 }
+
+let _layer = null;
+/**
+ * drawFn(ctx)이 그리는 내용을 통째로 alpha(0~1)만큼만 보이게 합성한다.
+ * 내 퍽 표시(본체·고리·궤적·스파크)를 한 덩어리로 흐리게 하거나 숨길 때 사용 — 헤드업 훈련용.
+ * alpha 1이면 그대로 그리고, 0이면 아무것도 그리지 않는다.
+ */
+export function alphaLayer(ctx, alpha, drawFn) {
+  if (alpha >= 0.999) { drawFn(ctx); return; }
+  if (alpha <= 0.001) return;
+  const cv = ctx.canvas;
+  if (!_layer) _layer = document.createElement('canvas');
+  if (_layer.width !== cv.width || _layer.height !== cv.height) { _layer.width = cv.width; _layer.height = cv.height; }
+  const lc = _layer.getContext('2d');
+  lc.setTransform(1, 0, 0, 1, 0, 0);
+  lc.clearRect(0, 0, _layer.width, _layer.height);
+  lc.globalAlpha = 1; lc.lineJoin = 'round'; lc.lineCap = 'round'; lc.setLineDash([]);
+  drawFn(lc);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(_layer, 0, 0);
+  ctx.restore();
+}

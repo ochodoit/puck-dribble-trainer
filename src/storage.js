@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS = {
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
   flipDepth: true,                            // 아케이드 앞뒤 방향: true = 카메라 쪽으로 밀면 화면 위로
+  puckOpacity: 100,                           // 플레이 중 내 퍽 표시 농도(%): 100 = 또렷이, 0 = 안 보임 (10 단위, 헤드업 훈련)
+  courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
   course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (평면 경기장 비율)
   bgTransparency: 12,                         // 게임 배경 투명도(%): 0 = 종이색으로 완전히 덮음, 100 = 카메라 영상 그대로
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
@@ -65,6 +67,8 @@ export function sanitizeSettings(s) {
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
   s.flipDepth = typeof s.flipDepth === 'boolean' ? s.flipDepth : d.flipDepth;
   s.bgTransparency = num(s.bgTransparency, 0, 100, d.bgTransparency);
+  s.puckOpacity = Number.isInteger(s.puckOpacity) && s.puckOpacity >= 0 && s.puckOpacity <= 100 && s.puckOpacity % 10 === 0 ? s.puckOpacity : d.puckOpacity;
+  s.courseCycles = Number.isInteger(s.courseCycles) && s.courseCycles >= 10 && s.courseCycles <= 100 && s.courseCycles % 10 === 0 ? s.courseCycles : d.courseCycles;
   s.course = Array.isArray(s.course)
     ? s.course.filter((p) => p && Number.isInteger(p.n) && p.n >= 1 && p.n <= 10 && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)
       .filter((p, i, arr) => arr.findIndex((q) => q.n === p.n) === i).map((p) => ({ n: p.n, x: p.x, y: p.y }))

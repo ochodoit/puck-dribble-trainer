@@ -2,7 +2,7 @@
 // 좌표계: 화면 폭 = 1 단위, 높이 = aspect (H/W). 좌우 테두리 안쪽이 경기장 레인, 플레이 존은 하단 30%.
 // 규칙: 색이 다른 퍽들이 무작위 위치에서 같은 속도로, 서로 겹치지 않게 내려온다. coin(노란 원)만 먹고, 나머지 색은 피한다.
 //       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점 + 콤보 초기화.
-import { C, F, rgba, text, sparks, font } from './theme.js';
+import { C, F, rgba, text, sparks, font, alphaLayer } from './theme.js';
 
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
@@ -44,6 +44,7 @@ export class Arcade {
     this.floorWidthM = 1.5;
     this.flipY = true;     // true: 카메라 쪽으로 밀면 화면 위로(퍽들이 내려오는 쪽), 몸쪽으로 당기면 아래로
     this.wash = 0.88;      // 경기장 종이 배경의 불투명도 (1 = 카메라 영상 완전히 가림, 0 = 영상 그대로)
+    this.puckAlpha = 1;    // 플레이 중 내 퍽 표시 농도 (1 = 또렷이, 0 = 안 보임: 화면이 아닌 감각으로 플레이)
     this.phase = 'idle';   // idle | countdown | play
     this.reset();
   }
@@ -325,7 +326,8 @@ export class Arcade {
     // coin: 동전 모양 (톱니 테두리 + 안쪽 고리 + 가운데 'coin' 글자)
     for (const p of this.pickups) drawCoin(ctx, p.x * S, p.y * S, p.r * S, hair);
 
-    this._drawAvatar(ctx, S, now, puck, false, hair);
+    // 내 퍽: 플레이 중에는 설정한 농도로 (카운트다운 동안은 항상 또렷이 — 원 안에 놓아야 하므로)
+    alphaLayer(ctx, this.phase === 'play' ? this.puckAlpha : 1, (c) => this._drawAvatar(c, S, now, puck, false, hair));
 
     // 이펙트
     for (const e of this.effects) {

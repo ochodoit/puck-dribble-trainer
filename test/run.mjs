@@ -124,6 +124,22 @@ let failed = false;
   const hintHidden = !(await page.isVisible('#tap-hint'));
   console.log(`${hintVisible && hintHidden ? 'PASS' : 'FAIL'} calibration tap flow`);
   if (!(hintVisible && hintHidden)) failed = true;
+  // 영역 편집: 버튼 -> 사다리꼴 핸들 4개 + 편집 바, 완료 -> 저장
+  await page.click('#btn-floor-lock');
+  await page.waitForSelector('#area-bar:not(.hidden)');
+  const handlesVisible = await page.$$eval('#floor-handles .handle', (hs) => hs.filter((h) => h.offsetParent !== null).length);
+  const h0 = await page.$('#floor-handles .handle[data-i="0"]');
+  const hb = await h0.boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + 60, hb.y + 40, { steps: 5 }); await page.mouse.up();
+  await page.click('#area-done');
+  const savedQuad = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
+  const areaOk = handlesVisible === 4 && savedQuad.floorMode === 'manual' && Array.isArray(savedQuad.manualQuad) && savedQuad.manualQuad[0][0] > 0.05;
+  console.log(`${areaOk ? 'PASS' : 'FAIL'} area edit mode (4 handles, drag, saved as manual trapezoid ${JSON.stringify(savedQuad.manualQuad?.[0])})`);
+  if (!areaOk) failed = true;
+  const handlesHidden = await page.$$eval('#floor-handles .handle', (hs) => hs.every((h) => h.offsetParent === null));
+  console.log(`${handlesHidden ? 'PASS' : 'FAIL'} handles hidden after done`);
+  if (!handlesHidden) failed = true;
+
   // 노트북 웹캠 흐름: 게임 영역 전체 화면 + 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경
   await page.click('#btn-settings');
   await page.selectOption('#set-floorMode', 'full');

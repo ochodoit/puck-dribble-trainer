@@ -73,7 +73,7 @@
     for (let i = 0; i < 12; i++) r = vision.process(scene, settings);
     check('floor detected', r.floor.detected && !!r.floor.mapping);
     const q = r.floor.quad;
-    check('floor bbox plausible', q && q[0][0] < 240 * 0.12 && q[1][0] > 240 * 0.85 && q[0][1] > 240 * 0.2 * 0.75 && q[2][1] > 240 * 0.68, q);
+    check('floor quad plausible (trapezoid)', q && q[3][0] < 240 * 0.12 && q[2][0] > 240 * 0.85 && q[0][0] > q[3][0] && q[1][0] < q[2][0] && q[0][1] > 240 * 0.2 * 0.75 && q[2][1] > 240 * 0.68, q);
     check('puck detected', !!r.puck, r.puck);
     // 퍽 위치: 640x480 -> 240x180 배율 0.375
     check('puck position', r.puck && Math.abs(r.puck.x - 320 * 0.375) < 2 && Math.abs(r.puck.y - 300 * 0.375) < 2, r.puck && [r.puck.x, r.puck.y]);
@@ -149,10 +149,10 @@
     for (let i = 0; i < 600; i++) { game.update(0.033, tr7, t7); t7 += 33; }
     check('flyer count grows over time', game.stats.maxFlyers >= 4 && game.stats.maxFlyers > early, { early, max: game.stats.maxFlyers });
     check('dodged pucks are counted', game.stats.dodged > 0 && game.score >= 200, { dodged: game.stats.dodged, score: game.score });
-    // 충돌: 플레이어를 날아오는 퍽 위에 둠
-    tr7.state = 'tracked';
+    // 충돌: 플레이어를 날아오는 퍽 위에 둠 (앞 구간의 우연한 충돌 영향을 없애기 위해 상태 초기화)
+    tr7.state = 'tracked'; game.lives = 3; game.stats.hits = 0; game.invulnUntil = 0;
     const fl = game.flyers.find((f) => t7 >= f.launchAt) || game.flyers[0];
-    fl.launchAt = 0; tr7.pos = { x: fl.x, y: fl.y };
+    fl.launchAt = 0; fl.hit = false; tr7.pos = { x: fl.x, y: fl.y };
     game.update(0.033, tr7, t7); t7 += 33;
     check('flyer hit costs a life', game.lives === 2 && game.stats.hits === 1, { lives: game.lives });
     const fl2 = game.flyers.find((f) => !f.hit) || fl; if (fl2) { fl2.launchAt = 0; tr7.pos = { x: fl2.x, y: fl2.y }; }
@@ -495,6 +495,37 @@
     const keptFloor = r.floor.fallback === false;
     drawMat({ lid: null }); r = v3.process(scene, floorSettings);
     check('F4 back to full frame after 3s without white floor', keptFloor && r.floor.fallback === true, { keptFloor, fb: r.floor.fallback });
+
+    // ===== 추적 안정성 + 원근 영역 =====
+    // T1) 한 프레임 튀는 측정값은 무시, 3프레임 계속되면 재획득
+    const trk = new Tracker(); let tt = 1000;
+    for (let i = 0; i < 20; i++) { trk.update({ u: 0.3 + i * 0.002, v: 0.5 }, tt); tt += 33; }
+    const before = { ...trk.pos };
+    trk.update({ u: 0.8, v: 0.5 }, tt); tt += 33; // 다른 물체 오검출 1프레임
+    check('T1 single-frame jump ignored', Math.abs(trk.pos.x - before.x) < 0.02 && trk.rejected === 1, { x: trk.pos.x, before: before.x });
+    trk.update({ u: 0.342, v: 0.5 }, tt); tt += 33;
+    check('T1 returns to normal tracking', trk.state === 'tracked' && Math.abs(trk.pos.x - 0.34) < 0.02, trk.pos.x);
+    for (let i = 0; i < 3; i++) { trk.update({ u: 0.8, v: 0.5 }, tt); tt += 33; }
+    trk.update({ u: 0.8, v: 0.5 }, tt); tt += 33;
+    check('T1 persistent jump accepted as real move', Math.abs(trk.pos.x - 0.8) < 0.02, trk.pos.x);
+    // T2) 정지 상태 미세 떨림 억제, 등속 이동은 지연 없이 따라감
+    const trk2 = new Tracker(); tt = 5000;
+    for (let i = 0; i < 30; i++) { trk2.update({ u: 0.5 + (i % 2 ? 0.002 : -0.002), v: 0.5 }, tt); tt += 33; }
+    const jitter = Math.abs(trk2.pos.x - 0.5);
+    check('T2 jitter at rest suppressed', jitter < 0.003 && trk2.speed < 0.05, { jitter, speed: trk2.speed });
+    const trk3 = new Tracker(); tt = 9000; let lag = 0;
+    for (let i = 0; i < 40; i++) { const u = 0.2 + i * 0.015; trk3.update({ u, v: 0.5 }, tt); tt += 33; if (i > 10) lag = Math.max(lag, Math.abs(trk3.pos.x - u)); }
+    check('T2 constant motion followed with small lag', lag < 0.02, lag);
+    // T3) 흰 바닥 자동 감지가 원근 사다리꼴(위 좁고 아래 넓음)로 잡힘
+    const v4 = new Vision(240); v4.mirror = false; v4.setSourceSize(640, 480);
+    for (let i = 0; i < 15; i++) { drawScene({ puck: null }); r = v4.process(scene, { ...settings, floorMode: 'auto', manualQuad: null, puckModel: { r: 0, g: 0, b: 0, area: 0 } }); }
+    const q4 = r.floor.quad;
+    check('T3 auto floor is a trapezoid narrower at the back', q4[0][0] > q4[3][0] + 10 && q4[1][0] < q4[2][0] - 10 && Math.abs(q4[0][0] - 120 * 0.375) < 8 && Math.abs(q4[3][0] - 40 * 0.375) < 8, q4);
+    // 같은 화면 x 라도 뒤쪽(위)에서는 더 큰 u 변화 -> 원근 보정된 바닥 좌표
+    const mp = r.floor.mapping;
+    const duTop = mp.toUV(170 * 0.375 + 20, 130 * 0.375)[0] - mp.toUV(170 * 0.375, 130 * 0.375)[0];
+    const duBot = mp.toUV(170 * 0.375 + 20, 430 * 0.375)[0] - mp.toUV(170 * 0.375, 430 * 0.375)[0];
+    check('T3 perspective mapping: same pixel step is a larger floor step at the back', duTop > duBot * 1.15, { duTop, duBot });
 
     // 9) 성능: 240x180 프레임 처리 시간
     settings.debug = true;

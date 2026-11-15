@@ -10,17 +10,18 @@ export class Camera {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   }
 
-  async start(deviceId = '') {
+  /** facing: 'user'(전면, 화면을 보며 플레이) | 'environment'(후면) */
+  async start(deviceId = '', facing = 'user') {
     this.stop();
     const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
-    const video = deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: 'environment' } };
+    const video = deviceId ? { ...base, deviceId: { exact: deviceId } } : { ...base, facingMode: { ideal: facing } };
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
     } catch (err) {
       if (deviceId) {
-        // 지정 장치 실패 시 기본 카메라로 재시도
-        stream = await navigator.mediaDevices.getUserMedia({ video: { ...base, facingMode: { ideal: 'environment' } }, audio: false });
+        // 지정 장치 실패 시 방향 기준 카메라로 재시도
+        stream = await navigator.mediaDevices.getUserMedia({ video: { ...base, facingMode: { ideal: facing } }, audio: false });
       } else {
         throw err;
       }
@@ -28,13 +29,15 @@ export class Camera {
     this.stream = stream;
     this.video.srcObject = stream;
     const track = stream.getVideoTracks()[0];
-    this.deviceId = track.getSettings().deviceId || deviceId;
+    const ts = track.getSettings();
+    this.deviceId = ts.deviceId || deviceId;
+    this.facing = ts.facingMode || facing;
     await new Promise((resolve) => {
       if (this.video.readyState >= 2) return resolve();
       this.video.onloadedmetadata = () => resolve();
     });
     try { await this.video.play(); } catch { /* autoplay 정책: muted+playsinline이면 보통 통과 */ }
-    return { width: this.video.videoWidth, height: this.video.videoHeight };
+    return { width: this.video.videoWidth, height: this.video.videoHeight, facing: this.facing };
   }
 
   stop() {

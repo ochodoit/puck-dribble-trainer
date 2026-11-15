@@ -18,7 +18,7 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, autoStart = false }) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
@@ -61,6 +61,23 @@ export class Renderer {
 
     const floorPxW = Math.hypot(...sub(uvToC(1, 0.5), uvToC(0, 0.5))); // 캔버스 상 바닥 폭
     const R = (r) => r * floorPxW; // 정규화 반지름 -> 캔버스 px (가로 기준)
+
+    // 핸즈프리 시작 원 (대기 중)
+    if (!game.running && autoStart) {
+      const [cx, cy] = uvToC(0.5, 0.5);
+      const r = R(0.1);
+      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(34,197,94,0.12)'; ctx.fill();
+      ctx.lineWidth = unit * 0.005; ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.stroke();
+      if (idleHold > 0) {
+        ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.2, r * 0.72, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, idleHold / 3));
+        ctx.lineWidth = unit * 0.01; ctx.strokeStyle = '#22c55e'; ctx.stroke();
+      }
+      ctx.font = `600 ${fontPx}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.lineWidth = unit * 0.006; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      const label = idleHold > 0 ? String(Math.ceil(3 - idleHold)) : '퍽을 원 안에 3초 두면 시작';
+      ctx.strokeText(label, cx, cy - r * 0.8); ctx.fillStyle = '#fff'; ctx.fillText(label, cx, cy - r * 0.8);
+    }
 
     // ---- 구역 ----
     for (const z of game.zones) {

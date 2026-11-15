@@ -15,7 +15,7 @@ const els = {
   handles: $('#floor-handles'), tapHint: $('#tap-hint'),
   hudMode: $('#hud-mode'), hudInstruction: $('#hud-instruction'), hudTimer: $('#hud-timer'), hudScore: $('#hud-score'), hudLives: $('#hud-lives'), hudCombo: $('#hud-combo'),
   chipFloor: $('#chip-floor'), chipPuck: $('#chip-puck'), chipStick: $('#chip-stick'), chipFps: $('#chip-fps'),
-  btnMode: $('#btn-mode'), btnFloorLock: $('#btn-floor-lock'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
+  btnMode: $('#btn-mode'), btnFloorLock: $('#btn-floor-lock'), btnFlip: $('#btn-flip'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
   splash: $('#splash'), btnCamera: $('#btn-camera'), splashError: $('#splash-error'),
   panelMode: $('#panel-mode'), modeList: $('#mode-list'), versusToggle: $('#versus-toggle'), versusNames: $('#versus-names'), p1: $('#p1-name'), p2: $('#p2-name'),
   panelSettings: $('#panel-settings'), selCamera: $('#sel-camera'),
@@ -42,6 +42,9 @@ const app = {
   hudAt: 0,
 };
 
+// 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등)
+window.__puckTrainer = { settings, vision, tracker, game, app };
+
 // =============== 초기화 ===============
 init();
 
@@ -66,6 +69,8 @@ function bindUI() {
   els.btnSettings.addEventListener('click', () => open(els.panelSettings));
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleFloorLock);
+  els.btnFlip.addEventListener('click', flipCamera);
+  $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
   $$('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) close(m); }));
 
@@ -123,7 +128,7 @@ function bindUI() {
   if (screen.orientation?.addEventListener) screen.orientation.addEventListener('change', () => setTimeout(layout, 200));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (game.running) game.stop('manual'); app.wasHidden = true; }
-    else if (app.wasHidden) { app.wasHidden = false; app.lastLoop = 0; toast('화면이 가려져 있는 동안 추적이 멈췄습니다. 앱을 항상 전면에 두세요.'); }
+    else if (app.wasHidden) { app.wasHidden = false; app.lastLoop = 0; requestWakeLock(); toast('화면이 가려져 있는 동안 추적이 멈췄습니다. 앱을 항상 전면에 두세요.'); }
   });
   // 키보드(외장 키보드/TV·PC에서 사용): Space·Enter 시작/중지, R 초기화, F 전체화면, M 모드, D 디버그
   document.addEventListener('keydown', (e) => {
@@ -159,6 +164,7 @@ async function startCamera() {
     els.splash.classList.add('hidden');
     app.started = true;
     app.startedAt = performance.now();
+    requestWakeLock();
     requestAnimationFrame(loop);
     toast('바닥(흰색 영역)이 파란 점선으로 표시되면 준비 완료');
     if (document.documentElement.requestFullscreen && !navigator.standalone) {
@@ -172,8 +178,32 @@ async function startCamera() {
   }
 }
 
+async function flipCamera() {
+  if (game.running) game.stop('manual');
+  settings.facing = settings.facing === 'user' ? 'environment' : 'user';
+  settings.cameraId = '';
+  settings.mirror = settings.facing === 'user'; // 전면은 거울, 후면은 그대로
+  $('#set-mirror').checked = settings.mirror;
+  persist();
+  try {
+    await startStream();
+    await populateCameras();
+    toast(settings.facing === 'user' ? '전면 카메라 (거울 모드)' : '후면 카메라');
+  } catch (err) { toast(describeCameraError(err)); }
+}
+
+async function requestWakeLock() {
+  // 휴대폰 화면 꺼짐 방지 (지원 브라우저만)
+  try {
+    if (!('wakeLock' in navigator)) return;
+    if (app.wakeLock && !app.wakeLock.released) return;
+    app.wakeLock = await navigator.wakeLock.request('screen');
+  } catch { /* 저전력 모드 등에서 거부될 수 있음 */ }
+}
+
 async function startStream() {
-  const { width, height } = await camera.start(settings.cameraId);
+  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing);
+  if (facing === 'user' || facing === 'environment') settings.facing = facing;
   const track = camera.stream.getVideoTracks()[0];
   track.addEventListener('ended', () => { app.cameraLost = true; toast('카메라 연결이 끊겼습니다. 설정에서 카메라를 다시 선택하세요.', 6000); if (game.running) game.stop('manual'); });
   app.cameraLost = false;
@@ -219,6 +249,13 @@ function loop(now) {
   const video = els.video;
   if (video.readyState < 2) return;
 
+  if (video.videoWidth && (video.videoWidth !== vision.srcW || video.videoHeight !== vision.srcH)) {
+    // 휴대폰 회전 등으로 영상 크기가 바뀜
+    vision.setSourceSize(video.videoWidth, video.videoHeight);
+    els.view.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    layout();
+  }
+
   let result = app.lastVision;
   if (video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
@@ -255,11 +292,33 @@ function loop(now) {
   const dt = app.lastLoop ? Math.min(0.1, (now - app.lastLoop) / 1000) : 1 / 60;
   app.lastLoop = now;
   game.update(dt, tracker, now);
+  updateHandsFree(dt);
 
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug });
+  game.arcade.idleAutoStart = settings.autoStart;
+  game.arcade.idleHold = app.idleHold;
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, autoStart: settings.autoStart });
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
+}
+
+/** 핸즈프리 시작: 대기 중 퍽을 가운데 원 안에 3초 두면 시작/재시작 (거치대에 둔 채로 플레이) */
+function updateHandsFree(dt) {
+  if (!settings.autoStart || game.running || app.calibTarget) { app.idleHold = 0; return; }
+  // 설정/보정/모드 패널이 열려 있으면 대기 (결과 패널은 허용)
+  if (![els.panelSettings, els.panelCalib, els.panelMode].every((p) => p.classList.contains('hidden'))) { app.idleHold = 0; return; }
+  const pos = tracker.pos;
+  const inside = pos && tracker.state === 'tracked' && Math.abs(pos.x - 0.5) < 0.1 && Math.abs(pos.y - 0.5) < 0.25;
+  if (!inside) { app.idleHold = 0; app.idleTick = -1; return; }
+  app.idleHold += dt;
+  const remain = Math.ceil(3 - app.idleHold);
+  if (remain !== app.idleTick && remain > 0) { app.idleTick = remain; sfx.tick(); }
+  if (app.idleHold >= 3) {
+    app.idleHold = 0;
+    close(els.panelResult);
+    if (app.versus && app.versus.current === 1 && app.versus.scores.length === 1) { /* 2P 차례: 그대로 진행 */ }
+    startRun({ handsFree: true });
+  }
 }
 
 // =============== HUD ===============
@@ -309,12 +368,12 @@ function toggleRun() {
   startRun();
 }
 
-function startRun() {
+function startRun(opts = {}) {
   if (!app.lastVision?.floor?.mapping) { toast('바닥이 인식되지 않았습니다. 흰 바닥이 보이게 카메라를 조정하거나 설정에서 수동 지정하세요.'); return; }
   if (settings.controller === 'stick' && !settings.stickModel) { toast('조작 대상이 스틱입니다. 보정에서 스틱 색을 먼저 지정하세요.'); return; }
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(주황 마름모)된 뒤 시작하세요.' : '퍽을 바닥 위에 놓아 인식(파란 원)된 뒤 시작하세요.'); }
   tracker.resetStats();
-  game.start(tracker);
+  game.start(tracker, opts);
   updateHud();
 }
 
@@ -357,6 +416,7 @@ function showResult(result, isBest) {
   }
   els.resultTitle.textContent = title;
   els.resultBody.innerHTML = body.join('');
+  $('#result-hint').classList.toggle('hidden', !settings.autoStart);
   open(els.panelResult);
 }
 
@@ -488,6 +548,7 @@ function applySettingsToUI() {
   $('#set-mirror').checked = settings.mirror;
   $('#set-debug').checked = settings.debug;
   $('#set-sound').checked = settings.sound;
+  $('#set-autoStart').checked = settings.autoStart;
   els.debug.classList.toggle('hidden', !settings.debug);
   for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];

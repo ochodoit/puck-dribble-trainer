@@ -38,19 +38,31 @@ export class Arcade {
     this.paused = false; this.lostSince = 0; this.feverHealed = 0;
     this.instruction = ''; this.avatar = null; this.lastHeal = 0;
     this.startDistance = 0;
+    this.idleHold = 0; this.idleAutoStart = false;
   }
 
   get zoneTop() { return this.aspect * (1 - ZONE_RATIO); }
   get zoneH() { return this.aspect * ZONE_RATIO; }
   get multiplier() { return this.combo >= 20 ? 3 : this.combo >= 10 ? 2 : this.combo >= 5 ? 1.5 : 1; }
 
-  start(puck, difficulty = 'normal') {
+  start(puck, difficulty = 'normal', skipCountdown = false) {
     this.reset();
     this.diff = DIFF[difficulty] || DIFF.normal;
-    this.phase = 'countdown';
     this.startDistance = puck?.distance || 0;
-    this.instruction = '퍽을 가운데 원 안에 멈추고 화면을 보세요';
+    if (skipCountdown) {
+      // 핸즈프리 시작: 이미 원 안에 3초 정지했으므로 바로 GO
+      this.phase = 'play';
+      this.instruction = 'GO!';
+      this._pop(0.5, this.zoneTop - 0.1, 'GO!', '#22c55e', 900);
+      this.sfx?.go?.();
+    } else {
+      this.phase = 'countdown';
+      this.instruction = '퍽을 가운데 원 안에 멈추고 화면을 보세요';
+    }
   }
+
+  /** 세로 화면(aspect 큼)에서도 장애물이 같은 시간에 떨어지도록 낙하 속도 보정 */
+  get fallScale() { return clamp(this.aspect / 0.5625, 1, 2); }
 
   /** 추적 좌표(u,v) -> 플레이 존 화면 좌표 */
   toZone(u, v) { return { x: u, y: this.zoneTop + v * this.zoneH }; }
@@ -80,7 +92,7 @@ export class Arcade {
     // 난이도 진행: 1000점마다 속도 +10%, 게이트/빔 빈도 증가
     this.level = Math.floor(this.score / 1000);
     this.speedMul = Math.min(this.diff.maxSpeed / this.diff.speed, Math.pow(1.1, this.level));
-    const speed = this.diff.speed * this.speedMul;
+    const speed = this.diff.speed * this.speedMul * this.fallScale;
 
     // 스폰
     this.spawnTimer -= dt;
@@ -303,7 +315,21 @@ export class Arcade {
     ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText('↓ 카메라쪽(밀기)', W - W * 0.012, H - W * 0.008);
 
     if (this.phase === 'idle') {
-      this._text(ctx, '시작을 누르면 카운트다운이 시작됩니다', W / 2, zt - W * 0.05, font, '#e5e7eb');
+      if (this.idleAutoStart) {
+        const c = this.faceoff();
+        const cx = c.x * S, cy = c.y * S, r = c.r * S;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(34,197,94,0.12)'; ctx.fill();
+        ctx.lineWidth = W * 0.005; ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.stroke();
+        if (this.idleHold > 0) {
+          ctx.beginPath(); ctx.arc(cx, cy, r * 1.18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.idleHold / COUNTDOWN_S));
+          ctx.lineWidth = W * 0.01; ctx.strokeStyle = '#22c55e'; ctx.stroke();
+          this._text(ctx, String(Math.ceil(COUNTDOWN_S - this.idleHold)), W / 2, zt - W * 0.1, font * 3.5, '#fff', true);
+        }
+        this._text(ctx, '퍽을 원 안에 3초 두면 자동 시작 (핸즈프리)', W / 2, zt - W * 0.04, font, '#e5e7eb');
+      } else {
+        this._text(ctx, '시작을 누르면 카운트다운이 시작됩니다', W / 2, zt - W * 0.05, font, '#e5e7eb');
+      }
       this._drawAvatar(ctx, S, now, puck, true);
       ctx.restore();
       return;

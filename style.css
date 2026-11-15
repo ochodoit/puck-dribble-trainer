@@ -66,6 +66,10 @@ button, input, select { font: inherit; color: inherit; }
 .chip.bad i { background: var(--bad); }
 .chip-fps { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+.btn-flip { position: absolute; right: calc(var(--safe-right) + 12px); top: calc(var(--safe-top) + 78px); width: 46px; height: 46px; border-radius: 50%;
+  border: 1px solid rgba(148,163,184,0.35); background: rgba(30,41,59,0.85); font-size: 22px; cursor: pointer; }
+.btn-flip:active { transform: rotate(180deg); }
+
 /* ---------- 컨트롤 ---------- */
 .controls { position: absolute; left: var(--safe-left); right: var(--safe-right); bottom: var(--safe-bottom); display: flex; gap: 10px;
   justify-content: center; padding: 10px 16px 14px; background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.65)); }
@@ -140,4 +144,27 @@ input[type="range"] { accent-color: var(--accent); height: 32px; }
   .hud-timer { font-size: 26px; }
   .hud-score { font-size: 24px; }
   .controls { flex-wrap: wrap; }
+}
+
+/* 휴대폰(좁은 화면) */
+@media (max-width: 600px) {
+  .hud { padding: 8px 10px; }
+  .hud-mode { font-size: 14px; }
+  .hud-instruction { font-size: 12px; }
+  .hud-timer { font-size: 22px; }
+  .hud-score { font-size: 20px; }
+  .hud-lives { font-size: 14px; letter-spacing: 0; }
+  .hud-combo { font-size: 13px; }
+  .btn { padding: 9px 11px; font-size: 14px; min-height: 40px; border-radius: 10px; }
+  .controls { gap: 6px; padding: 8px 8px 10px; }
+  .status { bottom: calc(var(--safe-bottom) + 100px); left: 8px; gap: 5px; flex-wrap: wrap; max-width: 70%; }
+  .chip { font-size: 11px; padding: 4px 8px; }
+  .btn-flip { top: calc(var(--safe-top) + 64px); width: 40px; height: 40px; font-size: 18px; }
+  .splash h1 { font-size: 26px; }
+  .splash p, .tips { font-size: 14px; }
+  .modal { padding: 10px; }
+  .modal-card { padding: 14px; }
+  .settings-grid { grid-template-columns: 1fr; }
+  .calib-item { grid-template-columns: 32px 1fr; }
+  .calib-item .btn { grid-column: span 1; }
 }

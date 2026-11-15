@@ -256,7 +256,7 @@ function bindUI() {
   $('#set-mirror').addEventListener('change', (e) => { settings.mirror = e.target.checked; applyMirror(); persist(); });
   $('#set-debug').addEventListener('change', (e) => { settings.debug = e.target.checked; els.debug.classList.toggle('hidden', !settings.debug); persist(); });
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckOpacity']) {
     const input = $('#set-' + key), out = $('#out-' + key);
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); });
   }
@@ -594,6 +594,18 @@ function initCourse() {
     bindCoursePoint(el);
   }
   $('#course-clear').addEventListener('click', () => { settings.course = []; syncCourse(); toast('코스를 비웠습니다'); });
+  // 목표 사이클 수: 10 단위로 10~100
+  const setCycles = (n) => {
+    settings.courseCycles = clamp(Math.round(n / 10) * 10, 10, 100);
+    game.course.cycles = settings.courseCycles;
+    $('#cycles-out').value = String(settings.courseCycles);
+    $('#cycles-dec').disabled = settings.courseCycles <= 10;
+    $('#cycles-inc').disabled = settings.courseCycles >= 100;
+    persist(); updateHud();
+  };
+  $('#cycles-dec').addEventListener('click', () => setCycles(settings.courseCycles - 10));
+  $('#cycles-inc').addEventListener('click', () => setCycles(settings.courseCycles + 10));
+  setCycles(settings.courseCycles);
   syncCourse();
 }
 
@@ -772,6 +784,15 @@ function updateHud(force) {
   }
   els.hudScore.textContent = String(game.score);
   els.hudLives.textContent = game.running && game.mode.timed && game.hits > 0 ? `충돌 ${game.hits}` : '';
+  // 자유 연습 코스: 사이클 진행(완료/목표)과 평균·가장 빠른 사이클 시간
+  const courseOn = game.mode.id === 'free' && game.course.points.length > 0;
+  $('.hud-right .hud-label').textContent = courseOn ? 'Cycle' : 'Score';
+  els.hudLives.classList.toggle('info', courseOn);
+  if (courseOn) {
+    const lt = (game.running && game.stats.lapTimes) || [];
+    els.hudScore.textContent = `${game.running ? game.stats.laps || 0 : 0}/${game.course.cycles}`;
+    els.hudLives.textContent = lt.length ? `평균 ${(lt.reduce((a, b) => a + b, 0) / lt.length).toFixed(1)}s · 최고 ${Math.min(...lt).toFixed(1)}s` : '';
+  }
   if (game.mode.id === 'arcade' && game.running) {
     const a = game.arcade;
     els.hudCombo.textContent = a.combo >= 2 ? `combo ${a.combo}${a.multiplier > 1 ? ` ×${a.multiplier}` : ''}` : '';
@@ -812,6 +833,7 @@ function startRun(opts = {}) {
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(마름모 표시)된 뒤 시작하세요.' : '퍽이 인식(빨간 점 표시)된 뒤 시작하세요.'); }
   tracker.resetStats();
   game.start(tracker, opts);
+  if (settings.puckOpacity < 100) toast(settings.puckOpacity === 0 ? '내 퍽 표시 0% — 화면에 퍽이 보이지 않습니다. 감각으로!' : `내 퍽 표시 ${settings.puckOpacity}%`, 2600);
   updateHud();
 }
 
@@ -826,6 +848,7 @@ game.onEnd = (result) => {
 function showResult(result, isBest) {
   let title = result.mode.timed ? `${result.mode.name} · ${Math.round(result.limit / 60)}분` : result.mode.name;
   if (result.reason === 'time') title += ' — Time up';
+  if (result.reason === 'done') title += ' — Complete';
   const body = [];
   if (isBest) body.push(`<div class="stat full winner"><small>New best</small><b>${result.score}</b></div>`);
   for (const [k, v] of result.items) { if (isBest && k === '점수') continue; body.push(`<div class="stat"><small>${k}</small><b>${v}</b></div>`); }
@@ -1055,7 +1078,7 @@ function applySettingsToUI() {
   $('#set-flipDepth').checked = settings.flipDepth;
   game.arcade.flipY = settings.flipDepth;
   els.debug.classList.toggle('hidden', !settings.debug);
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckOpacity']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
   }
   applyWash();
@@ -1075,6 +1098,10 @@ function applyWash() {
   const alpha = clamp(1 - settings.bgTransparency / 100, 0, 1);
   game.arcade.wash = alpha;
   renderer.wash = alpha;
+  // 내 퍽 표시 농도: 플레이 중 화면의 내 퍽을 흐리게/안 보이게 (감각으로 플레이하는 헤드업 훈련)
+  const pa = clamp(settings.puckOpacity / 100, 0, 1);
+  game.arcade.puckAlpha = pa;
+  renderer.puckAlpha = pa;
 }
 
 function persist() { saveSettings(settings); }

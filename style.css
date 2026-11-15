@@ -70,6 +70,13 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .course-slots { display: flex; gap: 6px; flex-wrap: wrap; min-height: 40px; align-items: center; }
 .course-hint { font-size: 12px; color: var(--ink-soft); margin-left: auto; }
 .course-tray .btn { min-height: 32px; padding: 4px 10px; font-size: 12.5px; }
+/* 목표 사이클 수 조절: − 10 + */
+.course-cycles { display: inline-flex; align-items: center; gap: 0; border: var(--line) solid var(--ink); border-radius: 999px; overflow: hidden; height: 34px; }
+.course-cycles span { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink-soft); padding: 0 10px 0 12px; }
+.course-cycles button { border: 0; border-left: var(--line) solid var(--ink); background: transparent; width: 34px; height: 100%; font-size: 18px; font-weight: 600; cursor: pointer; padding: 0; }
+.course-cycles button:hover { background: var(--ink); color: var(--paper); }
+.course-cycles button:disabled { opacity: 0.3; cursor: default; background: transparent; color: var(--ink); }
+.course-cycles output { font-family: var(--display); font-weight: 900; font-size: 17px; min-width: 44px; text-align: center; border-left: var(--line) solid var(--ink); align-self: stretch; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
 .course-pt { width: 40px; height: 40px; border-radius: 50%; border: var(--line) solid var(--ink); background: var(--paper); color: var(--ink); padding: 0;
   font-family: var(--display); font-weight: 900; font-size: 17px; line-height: 1; display: grid; place-items: center; cursor: grab; pointer-events: auto; touch-action: none; flex: none;
   box-shadow: 0 0 0 calc(var(--dwell, 0) * 9px) rgba(224, 60, 49, 0.45); transition: background 0.15s, color 0.15s; }
@@ -99,6 +106,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .hud-score { grid-column: 2; grid-row: 2; font-family: var(--display); font-weight: 900; font-variation-settings: "SOFT" 100; font-variant-numeric: tabular-nums; font-size: 38px; line-height: 1; }
 .hud-combo { grid-column: 1; grid-row: 2; font-family: var(--script); font-weight: 700; color: var(--red); font-size: 26px; line-height: 1; white-space: nowrap; transform: rotate(-4deg); }
 .hud-lives { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--red); min-height: 0; }
+.hud-lives.info { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
 .btn-flip { position: absolute; right: calc(var(--safe-right) + 14px); top: calc(var(--safe-top) + 84px); width: 44px; height: 44px; border-radius: 50%;
   border: var(--line) solid var(--ink); background: rgba(244, 241, 234, 0.92); display: grid; place-items: center; cursor: pointer; padding: 0; }

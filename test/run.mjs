@@ -46,6 +46,17 @@ let failed = false;
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`${base}/index.html`);
+  // 접속 코드 게이트: 틀린 코드는 거부, 맞는 코드(1234)로 해제
+  if (await page.isVisible('#pin-form')) {
+    await page.fill('#pin-input', '0000'); await page.click('#pin-form button');
+    await page.waitForTimeout(200);
+    const rejected = await page.isVisible('#pin-error') && await page.isHidden('#btn-camera');
+    await page.fill('#pin-input', '1234'); await page.click('#pin-form button');
+    await page.waitForSelector('#btn-camera:visible', { timeout: 3000 });
+    const remembered = await page.evaluate(() => !!localStorage.getItem('puck-trainer.access.v1'));
+    console.log(`${rejected && remembered ? 'PASS' : 'FAIL'} access code gate (wrong rejected, right unlocks and is remembered)`);
+    if (!(rejected && remembered)) failed = true;
+  } else { console.log('FAIL access code gate not shown'); failed = true; }
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await page.waitForTimeout(2300);
@@ -156,6 +167,7 @@ let failed = false;
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`${base}/index.html`);
+  if (await page.isVisible('#pin-form')) { await page.fill('#pin-input', '1234'); await page.tap('#pin-form button'); await page.waitForSelector('#btn-camera:visible'); }
   await page.tap('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await page.waitForTimeout(1500);

@@ -6,6 +6,7 @@ import { Game, MODES } from './game.js';
 import { Renderer } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
+import { isLocked, tryUnlock } from './access.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -51,6 +52,7 @@ init();
 function init() {
   applySettingsToUI();
   bindUI();
+  setupAccessGate();
   game.difficulty = settings.difficulty;
   renderModeList();
   updateHud(true);
@@ -60,6 +62,20 @@ function init() {
   } else if (!window.isSecureContext) {
     showSplashError('카메라는 HTTPS 주소에서만 동작합니다. https:// 로 열어주세요.');
   }
+}
+
+/** 접속 코드 게이트 (공개 호스팅에서 본인만 사용) */
+function setupAccessGate() {
+  const form = $('#pin-form'), input = $('#pin-input'), err = $('#pin-error');
+  if (!isLocked()) return;
+  form.classList.remove('hidden');
+  els.btnCamera.classList.add('hidden');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ok = await tryUnlock(input.value);
+    if (ok) { form.classList.add('hidden'); els.btnCamera.classList.remove('hidden'); els.btnCamera.focus(); }
+    else { err.classList.remove('hidden'); input.value = ''; input.focus(); }
+  });
 }
 
 function bindUI() {

@@ -181,6 +181,19 @@ let failed = false;
   console.log(`${arcadeRunning ? 'PASS' : 'FAIL'} arcade mode starts with head-up countdown (${btnTxt} / ${instrTxt})`);
   if (!arcadeRunning) failed = true;
   await page.screenshot({ path: join(ROOT, 'test', 'screenshot.png') });
+  // 드롭다운 대비: select/option 의 글자색과 배경색 밝기 차이가 충분해야 함 (흰 바탕 흰 글씨 회귀 방지)
+  const contrast = await page.evaluate(() => {
+    const lum = (c) => { const m = c.match(/\d+(\.\d+)?/g); if (!m) return null; const [r, g, b, a] = m.map(Number); if (a === 0) return null; return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
+    const bad = [];
+    document.querySelectorAll('select').forEach((sel) => {
+      const cs = getComputedStyle(sel); const l1 = lum(cs.color), l2 = lum(cs.backgroundColor);
+      if (l1 !== null && l2 !== null && Math.abs(l1 - l2) < 0.4) bad.push(`${sel.id}: ${cs.color} on ${cs.backgroundColor}`);
+      sel.querySelectorAll('option').forEach((o) => { const oc = getComputedStyle(o); const a = lum(oc.color), b = lum(oc.backgroundColor); if (a !== null && b !== null && Math.abs(a - b) < 0.4) bad.push(`${sel.id} option: ${oc.color} on ${oc.backgroundColor}`); });
+    });
+    return { bad, scheme: getComputedStyle(document.documentElement).colorScheme, n: document.querySelectorAll('select').length };
+  });
+  console.log(`${contrast.bad.length === 0 && contrast.scheme.includes('dark') ? 'PASS' : 'FAIL'} dropdown text/background contrast (${contrast.n} selects, scheme=${contrast.scheme}) ${contrast.bad.join('; ')}`);
+  if (contrast.bad.length) failed = true;
   await page.click('#btn-start');
   await page.waitForSelector('#panel-result:not(.hidden)');
   const resultText = await page.textContent('#result-body');

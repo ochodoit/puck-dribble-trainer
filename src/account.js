@@ -28,13 +28,23 @@ export function ageGroupOf(age) {
 export const NICK_RE = /^[\p{L}\p{N}_\-. ]{2,12}$/u;
 export const PIN_RE = /^\d{6}$/;
 
-export function validateProfile({ nick, pin, country, team, age }) {
+/** 등번호(선택): 비어 있으면 null, 아니면 0~99 정수. 형식이 틀리면 NaN */
+export function jerseyOf(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const s = String(v).trim();
+  return /^\d{1,2}$/.test(s) ? Number(s) : NaN;
+}
+/** 화면 표시용: '#87' (등번호가 없으면 빈 문자열) */
+export const jerseyLabel = (n) => (Number.isInteger(n) ? `#${n}` : '');
+
+export function validateProfile({ nick, pin, country, team, age, number }) {
   if (!NICK_RE.test(String(nick || '').trim())) return '별명은 2~12자 (한글·영문·숫자·_-.)';
   if (!PIN_RE.test(String(pin || ''))) return '비밀번호는 숫자 6자리';
   if (!country) return '국가를 선택하세요';
   if (!String(team || '').trim() || String(team).trim().length > 20) return '팀 이름은 1~20자';
   const a = Number(age);
   if (!Number.isInteger(a) || a < 3 || a > 99) return '나이는 3~99 사이 숫자';
+  if (Number.isNaN(jerseyOf(number))) return '등번호는 0~99 사이 숫자';
   return null;
 }
 
@@ -69,18 +79,18 @@ export class LocalAccountStore {
   _set(k, v) { try { this.storage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } }
   _users() { return this._get(this.USERS, {}); }
   _scores() { return this._get(this.SCORES, []); }
-  _public(u) { return { id: u.id, nick: u.nick, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup }; }
+  _public(u) { return { id: u.id, nick: u.nick, number: Number.isInteger(u.number) ? u.number : null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup }; }
 
   async ready() { return this; }
   current() { return this.user; }
 
-  async register({ nick, pin, country, team, age }) {
-    const err = validateProfile({ nick, pin, country, team, age });
+  async register({ nick, pin, country, team, age, number }) {
+    const err = validateProfile({ nick, pin, country, team, age, number });
     if (err) throw new Error(err);
     const users = this._users();
     const key = normNick(nick);
     if (users[key]) throw new Error('이미 사용 중인 별명입니다');
-    const u = { id: key, nick: String(nick).trim(), pinHash: await hashPin(nick, pin), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: Date.now() };
+    const u = { id: key, nick: String(nick).trim(), number: jerseyOf(number), pinHash: await hashPin(nick, pin), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: Date.now() };
     users[key] = u;
     this._set(this.USERS, users);
     this._set(this.SESSION, u.nick);
@@ -100,9 +110,11 @@ export class LocalAccountStore {
 
   logout() { this.user = null; try { this.storage.removeItem(this.SESSION); } catch { /* ignore */ } }
 
-  async updateProfile({ country, team, age }) {
+  async updateProfile({ country, team, age, number }) {
     if (!this.user) throw new Error('로그인이 필요합니다');
+    if (number !== undefined && Number.isNaN(jerseyOf(number))) throw new Error('등번호는 0~99 사이 숫자');
     const users = this._users(); const u = users[this.user.id];
+    if (number !== undefined) u.number = jerseyOf(number);
     if (country) u.country = country;
     if (team) u.team = String(team).trim();
     if (age !== undefined) { u.age = Number(age); u.ageGroup = ageGroupOf(age); }
@@ -117,7 +129,7 @@ export class LocalAccountStore {
     const scores = this._scores();
     const i = scores.findIndex((s) => s.uid === this.user.id && s.mode === mode);
     const u = this.user;
-    const entry = { uid: u.id, nick: u.nick, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1 };
+    const entry = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1 };
     let improved = true;
     if (i >= 0) {
       const prev = scores[i];

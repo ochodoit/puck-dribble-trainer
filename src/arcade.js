@@ -8,18 +8,19 @@ import { C, F, rgba, text, sparks, font, alphaLayer } from './theme.js';
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
 export const PUCK_R = 0.022;         // 내 퍽 반지름 (화면 폭 단위)
-export const HIT_PENALTY = 100;      // 충돌 감점
-export const FEVER_BONUS = 300;      // 20콤보마다 보너스
-// 점수: 터치(좌우 방향 전환)가 중심. 가만히 있으면 점수가 나지 않는다.
-export const TOUCH_POINTS = 10;      // 터치 1번
+// 점수: 터치(좌우 방향 전환)가 중심. 가만히 있으면 점수가 나지 않는다. 배율·피버 없이 작은 정수만 더한다.
+export const HIT_PENALTY = 10;       // 충돌 감점
+export const TOUCH_POINTS = 1;       // 터치 1번
 export const TOUCH_MIN_TRAVEL = 0.08; // 직전 터치에서 경기장 폭의 8% 이상 움직여야 터치로 인정 (제자리 흔들기 방지)
 const TOUCH_TURN = 0.012;            // 이만큼 되돌아와야 방향 전환으로 본다 (추적 떨림 무시, 화면 폭 단위)
 export const STREAK_GAP_S = 1.2;     // 터치 사이 간격이 이 안이면 연속 터치
 export const STREAK_EVERY = 10;      // 연속 터치 10번마다
-export const QUICK_HANDS = 100;      //   +100 "Quick hands"
-export const DODGE_POINTS = 50;      // 나를 겨냥한 퍽을 피함
+export const QUICK_HANDS = 5;        //   +5 "Quick hands"
+export const DODGE_POINTS = 3;       // 나를 겨냥한 퍽을 피함
+export const COIN_POINTS = 10;       // coin
+const LEVEL_EVERY_S = 15;            // 15초마다 레벨 +1 (퍽이 더 자주 나온다)
 const THREAT_S = 0.8;                // 이 시간 안에 내 퍽에 닿을 줄에 있던 퍽 = 나를 겨냥한 퍽
-const STILL_MS = 1500;               // 이만큼 멈춰 있으면 콤보 초기화
+const STILL_MS = 1500;               // 이만큼 멈춰 있으면 연속 터치 초기화
 const STILL_MOVE = 0.02;             // 이 거리 넘게 움직여야 '움직였다' (화면 폭 단위)
 const INVULN_MS = 1500;              // 피격 후 무적
 const COUNTDOWN_S = 3;               // 헤드업 카운트다운 (페이스오프 서클에 정지)
@@ -58,7 +59,6 @@ export class Arcade {
 
   reset() {
     this.score = 0;
-    this.combo = 0; this.maxCombo = 0;
     this.touches = 0; this.quickHands = 0; this.streak = 0; this.maxStreak = 0; this.lastTouchAt = 0;
     this.passed = 0; this.items = 0; this.hits = 0;
     this.elapsed = 0;
@@ -76,7 +76,6 @@ export class Arcade {
 
   get zoneTop() { return this.aspect * (1 - ZONE_RATIO); }
   get zoneH() { return this.aspect * ZONE_RATIO; }
-  get multiplier() { return this.combo >= 20 ? 3 : this.combo >= 10 ? 2 : this.combo >= 5 ? 1.5 : 1; }
   /** 세로 화면(aspect 큼)에서도 같은 시간에 떨어지도록 낙하 속도 보정 */
   get fallScale() { return clamp(this.aspect / 0.5625, 1, 2); }
   /** 낙하 속도: 한 판 내내 일정 (모든 퍽 동일) */
@@ -124,8 +123,8 @@ export class Arcade {
     // 터치(좌우 방향 전환)와 멈춤 판정
     if (this.avatar && tracked) { this._updateTouch(this.avatar.x, now); this._updateStill(this.avatar, now); }
 
-    // 난이도 진행: 1000점마다 레벨 +1 -> 퍽이 더 자주 나온다 (속도는 그대로)
-    this.level = Math.floor(this.score / 1000);
+    // 난이도 진행: 15초마다 레벨 +1 -> 퍽이 더 자주 나온다 (속도는 그대로)
+    this.level = Math.floor(this.elapsed / LEVEL_EVERY_S);
     const vy = this.speed;
 
     this.spawnTimer -= dt;
@@ -163,8 +162,7 @@ export class Arcade {
         o.passed = true;
         if (!o.hit && o.threat) {
           this.passed++;
-          this._combo(now);
-          this._addScore(DODGE_POINTS, o.x, o.y - o.r - 0.03, `회피 +${DODGE_POINTS}`);
+          this._addScore(DODGE_POINTS, o.x, a.y - PUCK_R * 2.5, `+${DODGE_POINTS}`);
         }
       }
     }
@@ -175,14 +173,13 @@ export class Arcade {
       p.y += p.vy * dt;
       if (a && tracked && !p.taken && Math.hypot(a.x - p.x, a.y - p.y) < p.r + PUCK_R) {
         p.taken = true; this.items++;
-        this._combo(now);
-        this._addScore(200, p.x, p.y - 0.04, '+200');
+        this._addScore(COIN_POINTS, p.x, p.y - PUCK_R * 2.5, `+${COIN_POINTS}`);
         this.sfx?.target?.();
       }
     }
     this.pickups = this.pickups.filter((p) => !p.taken && p.y - p.r < this.aspect + 0.05);
 
-    this.instruction = this.combo >= 20 ? 'FEVER ×3' : this.combo >= 5 ? `콤보 ${this.combo} ×${this.multiplier}` : 'coin은 먹고, 검정 퍽은 피하고, 좌우로 터치';
+    this.instruction = 'coin은 먹고, 검정 퍽은 피하고, 좌우로 터치';
   }
 
   _updateCountdown(dt, tracked) {
@@ -253,52 +250,37 @@ export class Arcade {
     this.streak = this.lastTouchAt && now - this.lastTouchAt <= STREAK_GAP_S * 1000 ? this.streak + 1 : 1;
     this.maxStreak = Math.max(this.maxStreak, this.streak);
     this.lastTouchAt = now;
-    this._combo(now);
-    this._addScore(TOUCH_POINTS, at, this.avatar.y - 0.05, `+${TOUCH_POINTS}`);
+    this._addScore(TOUCH_POINTS); // 터치는 글자 없이 점수판·연속 표시로만 (화면을 비워 둔다)
+    this.effects.push({ type: 'tick', x: at, y: this.avatar.y, t0: now, dur: 260, age: 0 });
     if (this.streak % STREAK_EVERY === 0) {
       this.quickHands++;
-      this._addScore(QUICK_HANDS, this.avatar.x, this.avatar.y - 0.1, `Quick hands +${QUICK_HANDS}`, C.red, 'script');
+      this._addScore(QUICK_HANDS, this.avatar.x, this.avatar.y - PUCK_R * 3.2, `Quick hands +${QUICK_HANDS}`, C.red, 'script');
       this.sfx?.deke?.();
     }
   }
 
-  /** 1.5초 넘게 멈춰 있으면 콤보와 연속 터치 초기화 */
+  /** 1.5초 넘게 멈춰 있으면 연속 터치 초기화 */
   _updateStill(a, now) {
     if (!this.moveRef || Math.hypot(a.x - this.moveRef.x, a.y - this.moveRef.y) > STILL_MOVE) { this.moveRef = { x: a.x, y: a.y }; this.lastMoveAt = now; return; }
-    if (now - this.lastMoveAt > STILL_MS && (this.combo > 0 || this.streak > 0)) {
-      if (this.combo >= 2) this._pop(a.x, a.y - 0.08, '멈춤 — 콤보 초기화', C.inkSoft, 900);
-      this.combo = 0; this.streak = 0;
-    }
+    if (now - this.lastMoveAt > STILL_MS) this.streak = 0;
   }
 
   /** 충돌: 목숨 대신 감점 + 콤보 초기화 + 1.5초 무적 */
   _onHit(o, now) {
     o.hit = true;
     this.hits++;
-    this.combo = 0; this.streak = 0;
+    this.streak = 0;
     this.score = Math.max(0, this.score - HIT_PENALTY);
     this.invulnUntil = now + INVULN_MS;
     this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
-    this._pop(this.avatar.x, this.avatar.y - 0.07, `충돌 −${HIT_PENALTY}`, C.red, 900);
+    this._pop(this.avatar.x, this.avatar.y - PUCK_R * 2.5, `충돌 −${HIT_PENALTY}`, C.red, 800, 'small');
     this.sfx?.hit?.();
     this.instruction = `충돌 −${HIT_PENALTY} · 1.5초 무적`;
   }
 
-  _combo() {
-    this.combo++;
-    this.maxCombo = Math.max(this.maxCombo, this.combo);
-    if (this.combo === 5 || this.combo === 10) { this._pop(this.avatar?.x ?? 0.5, (this.avatar?.y ?? this.zoneTop) - 0.12, `Combo ×${this.multiplier}`, C.red, 1000, 'script'); this.sfx?.combo?.(); }
-    if (this.combo >= 20 && this.combo % 20 === 0) {
-      this.score += FEVER_BONUS;
-      this._pop(0.5, this.zoneTop - 0.12, `Fever! +${FEVER_BONUS}`, C.red, 1300, 'script');
-      this.sfx?.heal?.();
-    }
-  }
-
-  _addScore(base, x, y, label, color = C.ink, style = 'display') {
-    const pts = Math.round(base * this.multiplier);
+  _addScore(pts, x, y, label, color = C.inkSoft, style = 'small') {
     this.score += pts;
-    if (label) this._pop(x, y, this.multiplier > 1 && base !== 10 ? `${label} ×${this.multiplier}` : label, color, 900, style);
+    if (label) this._pop(x, y, label, color, style === 'script' ? 1100 : 700, style);
   }
 
   _pop(x, y, str, color, dur = 900, style = 'display') { this.effects.push({ type: 'pop', x, y, text: str, color, style, t0: performance.now(), dur, age: 0 }); }
@@ -306,10 +288,10 @@ export class Arcade {
   result(puck) {
     const distM = Math.max(0, (puck?.distance || 0) - this.startDistance) * this.floorWidthM;
     return {
-      score: this.score, maxCombo: this.maxCombo, touches: this.touches, quickHands: this.quickHands, maxStreak: this.maxStreak, passed: this.passed, items: this.items, hits: this.hits,
+      score: this.score, touches: this.touches, quickHands: this.quickHands, maxStreak: this.maxStreak, passed: this.passed, items: this.items, hits: this.hits,
       elapsed: this.elapsed, distanceM: distM, level: this.level,
       items_: [
-        ['점수', this.score], ['최고 콤보', this.maxCombo], ['터치', this.touches], ['Quick hands', this.quickHands], ['최고 연속 터치', this.maxStreak],
+        ['점수', this.score], ['터치', this.touches], ['Quick hands', this.quickHands], ['최고 연속 터치', this.maxStreak],
         ['피한 퍽', this.passed], ['Coin', this.items], ['충돌', this.hits],
         ['퍽 이동 거리', `${distM.toFixed(1)} m`], ['레벨', this.level + 1],
       ],
@@ -389,11 +371,19 @@ export class Arcade {
         ctx.lineWidth = hair * 3; ctx.strokeStyle = rgba(C.red, 1 - e.age);
         ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(L, H); ctx.moveTo(Rr, 0); ctx.lineTo(Rr, H); ctx.stroke();
       } else if (e.type === 'pop') {
-        ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
-        const script = e.style === 'script';
-        const size = script ? W * 0.06 : W * 0.026;
-        text(ctx, e.text, clamp(e.x, 0.16, 0.84) * S, Math.max(size, e.y * S - e.age * W * 0.05), size,
-          { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color, halo: true });
+        // 작은 글자가 살짝 떠오르며 사라진다. 'Go!'·Quick hands 만 필기체, 나머지는 본문보다 작은 숫자
+        ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.8);
+        const script = e.style === 'script', big = e.style === 'display';
+        const size = script ? fs * 1.5 : big ? fs * 2.2 : fs * 0.82;
+        text(ctx, e.text, clamp(e.x, 0.12, 0.88) * S, Math.max(size, e.y * S - e.age * fs * 1.6), size,
+          { family: script ? F.script : big ? F.display : F.sans, weight: script ? 700 : big ? 800 : 600, color: e.color, halo: true });
+        ctx.globalAlpha = 1;
+      } else if (e.type === 'tick') {
+        // 터치: 방향을 바꾼 자리에 짧은 세로 헤어라인 하나 (글자 없이)
+        ctx.globalAlpha = 1 - e.age;
+        ctx.lineWidth = hair; ctx.strokeStyle = C.ink;
+        const tx = e.x * S, ty = e.y * S, h = PUCK_R * S * 1.6;
+        ctx.beginPath(); ctx.moveTo(tx, ty - h); ctx.lineTo(tx, ty + h); ctx.stroke();
         ctx.globalAlpha = 1;
       }
     }
@@ -452,11 +442,6 @@ export class Arcade {
     const invuln = now < this.invulnUntil;
     if (invuln && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
     const predicted = puck?.state === 'predicted';
-    // 콤보: 가는 방사형 선 (5+ 잉크, 10+ 레드, 20+ 이중)
-    if (this.combo >= 5 && !ghost) {
-      sparks(ctx, x, y, r * 2.0, r * (2.5 + 0.2 * Math.sin(now / 90)), this.combo >= 10 ? 12 : 8, this.combo >= 10 ? C.red : C.ink, hair, now / 500);
-      if (this.combo >= 20) sparks(ctx, x, y, r * 2.9, r * 3.3, 12, C.ink, hair, -now / 400);
-    }
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = ghost ? rgba(C.red, 0.3) : predicted ? rgba(C.red, 0.45) : C.red; ctx.fill();
     ctx.beginPath(); ctx.arc(x, y, r * 1.5, 0, Math.PI * 2);

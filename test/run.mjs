@@ -310,7 +310,7 @@ let failed = false;
   await page.click('#btn-start');
   await page.waitForSelector('#panel-result:not(.hidden)');
   const resultText = await page.textContent('#result-body');
-  console.log(`${resultText.includes('최고 콤보') && resultText.includes('Quick hands') ? 'PASS' : 'FAIL'} arcade result report`);
+  console.log(`${resultText.includes('터치') && resultText.includes('Quick hands') ? 'PASS' : 'FAIL'} arcade result report`);
   // 게임 종료 후 선택: 결과 창이 열린 채로 퍽을 왼쪽에 2초 두면 한 번 더, 오른쪽에 두면 모드 선택
   const forceU = (u) => page.evaluate((uu) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: 0.5 }, now); }; }, u);
   await forceU(0.5);

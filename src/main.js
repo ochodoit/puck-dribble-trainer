@@ -367,7 +367,14 @@ function startMouse() {
   app.startedAt = performance.now();
   app.lastFrameAt = performance.now();
   requestAnimationFrame(loop);
-  toast('마우스 모드 · 커서가 퍽입니다. 커서를 가운데 원에 3초 두거나 시작을 누르세요.', 6000);
+  openModeAfterStart();
+}
+
+/** 시작 직후: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다 */
+function openModeAfterStart() {
+  app.afterStart = true;
+  renderModeList();
+  open(els.panelMode);
 }
 
 // =============== 카메라 ===============
@@ -385,7 +392,7 @@ async function startCamera() {
     app.startedAt = performance.now();
     requestWakeLock();
     requestAnimationFrame(loop);
-    toast('퍽으로 쓸 물체(공·뚜껑·퍽)를 가운데 원 안에 놓고 3초 기다리세요. 인식되면 3초 더 두면 시작!', 6000);
+    openModeAfterStart();
     if (document.documentElement.requestFullscreen && !navigator.standalone) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -885,7 +892,7 @@ function updateHud(force) {
   }
   if (game.mode.id === 'arcade' && game.running) {
     const a = game.arcade;
-    els.hudCombo.textContent = a.combo >= 2 ? `combo ${a.combo}${a.multiplier > 1 ? ` ×${a.multiplier}` : ''}` : '';
+    els.hudCombo.textContent = a.streak >= 2 ? `연속 ${a.streak}` : '';
   } else els.hudCombo.textContent = '';
   els.btnStart.textContent = game.running ? '중지' : '시작';
   els.btnStart.classList.toggle('stop', game.running);
@@ -1139,7 +1146,10 @@ function renderModeList() {
       } else app.versus = null;
       close(els.panelMode);
       updateHud();
-      toast(`${m.name} 선택됨`);
+      if (app.afterStart) {
+        app.afterStart = false;
+        toast(app.mouseMode ? `${m.name} 선택됨 · 커서를 가운데 원에 3초 두거나 시작을 누르세요` : `${m.name} 선택됨 · 퍽을 가운데 원 안에 놓고 3초 기다리세요`, 5000);
+      } else toast(`${m.name} 선택됨`);
     });
     els.modeList.appendChild(card);
   });

@@ -105,18 +105,13 @@
     <div id="splash" class="panel splash">
       <div class="splash-inner">
         <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
-        <div class="masthead"><span>by camera</span><span>iPad · Phone · Laptop</span></div>
+        <div class="masthead"><span>iPad · Phone · Laptop</span></div>
         <h1 class="lockup">Puck Dribble<span class="lockup-script">Trainer</span></h1>
-        <svg class="hero-art" viewBox="0 0 420 150" role="img" aria-label="스틱과 퍽 일러스트" fill="none" stroke="#161616" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M318 8 L206 112 Q196 122 180 122 L128 122" />
-          <path d="M140 122 l6 -9 M154 122 l6 -9 M168 122 l6 -9" stroke-width="2.2" />
-          <ellipse cx="86" cy="116" rx="26" ry="11" fill="#E03C31" />
-          <path d="M60 116 v9 a26 11 0 0 0 52 0 v-9" />
-          <path d="M40 106 h-16 M36 118 h-22 M40 130 h-14" stroke-width="2.4" />
-          <path d="M214 86 l10 -8 M226 100 l13 -3 M196 78 l2 -12" stroke-width="2.2" />
-          <path d="M12 144 H150 M176 144 H408" stroke-width="1.6" />
-        </svg>
-        <p class="lead">카메라 하나로 퍽을 읽는 스틱핸들링 게임 — 1분, 점수로 겨룹니다.</p>
+        <picture>
+          <source srcset="icons/hero-art.webp" type="image/webp" />
+          <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="" role="img" aria-label="스틱과 퍽 일러스트" decoding="async" />
+        </picture>
+        <p class="lead">퍽을 읽는 스틱 핸들링 게임. 당신의 실력을 보여주세요</p>
         <form id="pin-form" class="pin-form hidden" autocomplete="off">
           <input id="pin-input" type="password" inputmode="numeric" placeholder="접속 코드" aria-label="접속 코드" />
           <button type="submit" class="btn btn-primary">확인</button>
@@ -150,6 +145,7 @@
           <p id="auth-store-note" class="muted"></p>
         </div>
         <button id="btn-camera" class="btn btn-primary btn-big">카메라 시작</button>
+        <button id="btn-mouse" class="btn btn-mouse hidden" title="테스트 관리자 전용">마우스로 시작 (카메라 없이)</button>
         <p id="splash-error" class="error hidden"></p>
         <div id="splash-diag" class="diag hidden">
           <label>카메라 선택 <select id="diag-camera"></select></label>

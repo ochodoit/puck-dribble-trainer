@@ -48,6 +48,9 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .view video, .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .view video { object-fit: fill; background: var(--ink); transition: filter 0.4s; }
 .view.mirror video { transform: scaleX(-1); }
+.view.mouse-mode video { visibility: hidden; }
+.view.mouse-mode { background: var(--paper); }
+.splash .btn.btn-mouse { display: block; margin: 12px auto 0; font-size: 15px; min-height: 48px; padding: 12px 28px; }
 .view.calibrating { cursor: crosshair; }
 /* 플레이 중에는 영상을 차분하게 눌러 잉크·레드 오버레이가 주인공이 되게 */
 #app.playing .view video { filter: saturate(0.4) contrast(0.96) brightness(1.04); }
@@ -165,11 +168,11 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 /* ---------- 시작 화면: 포스터 ---------- */
 .splash { background: var(--paper); display: flex; justify-content: center; padding: calc(var(--safe-top) + 22px) 24px calc(var(--safe-bottom) + 28px); overflow: auto; }
 .splash-inner { width: min(760px, 100%); text-align: center; margin: auto 0; }
-.masthead { display: flex; justify-content: space-between; font-size: 13px; font-weight: 500; letter-spacing: 0.02em; color: var(--ink); margin-bottom: clamp(10px, 3vh, 28px); }
+.masthead { display: flex; justify-content: flex-end; font-size: 13px; font-weight: 500; letter-spacing: 0.02em; color: var(--ink); margin-bottom: clamp(10px, 3vh, 28px); }
 .lockup { position: relative; display: inline-block; font-size: clamp(50px, min(13vw, 13vh), 112px); line-height: 0.92; letter-spacing: -0.03em; margin: 0 0 0.3em; }
 .lockup-script { position: absolute; right: -0.06em; bottom: -0.52em; font-family: var(--script); font-weight: 700; font-variation-settings: normal; color: var(--red);
   font-size: 0.62em; letter-spacing: 0; transform: rotate(-7deg); white-space: nowrap; }
-.hero-art { display: block; width: min(340px, 74%); margin: clamp(10px, 2.4vh, 28px) auto clamp(6px, 1.6vh, 14px); }
+.hero-art { display: block; width: min(360px, 74%); height: auto; max-height: 26vh; object-fit: contain; margin: clamp(10px, 2.4vh, 28px) auto clamp(6px, 1.6vh, 14px); }
 .lead { display: inline-block; border: var(--line) solid var(--ink); border-radius: 28px; padding: 9px 24px; font-size: clamp(13px, 2.2vw, 15.5px); margin: 0 0 18px; max-width: 100%; text-wrap: balance; }
 .howto { text-align: left; margin: 18px auto 0; max-width: 620px; border-top: 1px solid var(--ink); }
 .howto summary { cursor: pointer; list-style: none; padding: 12px 2px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }

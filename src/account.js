@@ -35,6 +35,9 @@ export function jerseyOf(v) {
   return /^\d{1,2}$/.test(s) ? Number(s) : NaN;
 }
 /** 화면 표시용: '#87' (등번호가 없으면 빈 문자열) */
+// 테스트 관리자: 이 별명으로 로그인하면 카메라 없이 마우스로 플레이할 수 있다 (별명은 가입 순서대로 한 사람만 가질 수 있음)
+export const ADMIN_NICKS = ['test123'];
+export const isAdmin = (user) => !!user && ADMIN_NICKS.includes(String(user.nickLower || user.nick || '').trim().toLowerCase());
 export const jerseyLabel = (n) => (Number.isInteger(n) ? `#${n}` : '');
 
 export function validateProfile({ nick, pin, country, team, age, number }) {

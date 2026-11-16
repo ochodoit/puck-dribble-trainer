@@ -7,7 +7,8 @@ import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin } from './account.js';
+import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
 import { decideIdle, stepChoice, stepDwell, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, TITLE_MAX } from './community.js';
@@ -40,6 +41,7 @@ const tracker = new Tracker();
 const sfx = new Sfx();
 const game = new Game(sfx);
 const renderer = new Renderer(els.overlay);
+const mouse = new MouseInput(); // 테스트 관리자: 카메라 없이 마우스로 플레이
 
 const app = {
   started: false,
@@ -60,7 +62,7 @@ let community = null;   // 커뮤니티 화면 (initCommunity 반환값)
 const autoCal = new AutoCalibrator(3);
 
 // 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등)
-window.__puckTrainer = { settings, vision, tracker, game, app, i18n: { tr, setLang, getLang, missing: i18nMissing } };
+window.__puckTrainer = { settings, vision, tracker, game, app, mouse, i18n: { tr, setLang, getLang, missing: i18nMissing } };
 
 // =============== 초기화 ===============
 init();
@@ -157,6 +159,7 @@ function refreshAuthUI() {
   if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)`;
   $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup})` : '로그인하지 않음 (랭킹 미등록)';
   $('#btn-settings-logout').classList.toggle('hidden', !u);
+  refreshMouseButton();
   if (!u) { setAuthTab(app.authTab); els.authForm.classList.remove('hidden'); }
 }
 
@@ -229,13 +232,14 @@ function setupAccessGate() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const ok = await tryUnlock(input.value);
-    if (ok) { form.classList.add('hidden'); els.btnCamera.classList.remove('hidden'); els.btnCamera.focus(); }
+    if (ok) { form.classList.add('hidden'); els.btnCamera.classList.remove('hidden'); els.btnCamera.focus(); refreshMouseButton(); }
     else { err.classList.remove('hidden'); input.value = ''; input.focus(); }
   });
 }
 
 function bindUI() {
   els.btnCamera.addEventListener('click', startCamera);
+  $('#btn-mouse').addEventListener('click', startMouse);
   els.btnStart.addEventListener('click', toggleRun);
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
   els.btnSettings.addEventListener('click', () => open(els.panelSettings));
@@ -339,6 +343,33 @@ function toggleFullscreen() {
   else if (doc.exitFullscreen) doc.exitFullscreen().catch(() => {});
 }
 
+// =============== 테스트 관리자: 마우스 모드 (카메라 없이) ===============
+function refreshMouseButton() {
+  const show = isAdmin(app.account?.current()) && !els.btnCamera.classList.contains('hidden') && !app.started;
+  $('#btn-mouse').classList.toggle('hidden', !show);
+}
+
+function startMouse() {
+  if (!isAdmin(app.account?.current())) { toast('관리자 계정으로 로그인해야 합니다'); return; }
+  sfx.unlock();
+  sfx.enabled = settings.sound;
+  app.mouseMode = true;
+  mouse.enabled = true;
+  vision.mirror = false;
+  els.view.classList.remove('mirror');
+  els.view.classList.add('mouse-mode');
+  vision.setSourceSize(MOUSE_SRC.width, MOUSE_SRC.height);
+  els.view.style.aspectRatio = `${MOUSE_SRC.width} / ${MOUSE_SRC.height}`;
+  layout();
+  els.splash.classList.add('hidden');
+  $('#splash-diag').classList.add('hidden');
+  app.started = true;
+  app.startedAt = performance.now();
+  app.lastFrameAt = performance.now();
+  requestAnimationFrame(loop);
+  toast('마우스 모드 · 커서가 퍽입니다. 커서를 가운데 원에 3초 두거나 시작을 누르세요.', 6000);
+}
+
 // =============== 카메라 ===============
 async function startCamera() {
   sfx.unlock();
@@ -395,6 +426,7 @@ async function showCameraDiagnostics(err) {
 }
 
 async function flipCamera() {
+  if (app.mouseMode) { toast('마우스 모드에서는 카메라를 쓰지 않습니다'); return; }
   if (game.running) game.stop('manual');
   settings.facing = settings.facing === 'user' ? 'environment' : 'user';
   settings.cameraId = '';
@@ -475,7 +507,8 @@ function loop(now) {
   if (!app.started) return;
   requestAnimationFrame(loop);
   const video = els.video;
-  if (video.readyState < 2) return;
+  if (app.mouseMode) stepMouse(now);
+  else if (video.readyState < 2) return;
 
   if (video.videoWidth && (video.videoWidth !== vision.srcW || video.videoHeight !== vision.srcH)) {
     // 휴대폰 회전 등으로 영상 크기가 바뀜
@@ -485,7 +518,7 @@ function loop(now) {
   }
 
   let result = app.lastVision;
-  if (video.currentTime !== app.lastVideoTime) {
+  if (!app.mouseMode && video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
     app.lastFrameAt = now;
     if (app.frozenWarned) { app.frozenWarned = false; toast('카메라 영상이 다시 들어옵니다'); }
@@ -507,7 +540,7 @@ function loop(now) {
   }
   if (!result) return;
   // 영상이 2초 넘게 멈추면 경고 (카메라 점유·절전 등)
-  if (!app.frozenWarned && !app.cameraLost && now - app.lastFrameAt > 2000) {
+  if (!app.mouseMode && !app.frozenWarned && !app.cameraLost && now - app.lastFrameAt > 2000) {
     app.frozenWarned = true;
     toast('카메라 영상이 멈췄습니다. 다른 앱이 카메라를 쓰고 있거나 화면이 가려졌을 수 있습니다.', 5000);
     if (game.running) game.stop('manual');
@@ -538,6 +571,30 @@ function loop(now) {
  * 게임 종료 후 선택 (결과 화면이 떠 있는 동안): 퍽을 왼쪽 영역에 2초 두면 한 번 더, 오른쪽 영역에 두면 모드 선택.
  * 결과 창이 카메라를 가리므로 창 안의 트랙에 퍽의 좌우 위치를 점으로 보여준다.
  */
+/** 마우스 모드 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이어도 마지막 자리를 유지) */
+function stepMouse(now) {
+  let meas = null;
+  if (mouse.has) {
+    meas = pointerToUV(mouse.x, mouse.y, {
+      view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, flipDepth: settings.flipDepth,
+      modeList: els.modeList, modeOpen: !els.panelMode.classList.contains('hidden'),
+      choiceTrack: $('#choice-track'), resultOpen: !els.panelResult.classList.contains('hidden'),
+    });
+  }
+  app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas);
+  app.lastFrameAt = now;
+  app.frames++;
+  if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
+  // 마우스는 튀지 않으므로 이상치 게이트를 거치지 않게 매 프레임 새로 획득한 것처럼 넣는다
+  if (meas && tracker.pos) {
+    const dt = tracker.lastTime ? Math.max(1e-3, Math.min(0.1, (now - tracker.lastTime) / 1000)) : 1 / 60;
+    const dx = meas.u - tracker.pos.x, dy = meas.v - tracker.pos.y;
+    tracker.vel = { x: dx / dt, y: dy / dt };
+    tracker.pos = { x: meas.u - tracker.vel.x * dt, y: meas.v - tracker.vel.y * dt };
+  }
+  tracker.update(meas, now);
+}
+
 function pauseIdle() {
   const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
   $('#btn-replace-puck').classList.add('hidden');
@@ -739,7 +796,7 @@ function updateIdleCircle(dt) {
   if (!idle) { c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset(); $('#btn-replace-puck').classList.add('hidden'); return; }
   c.active = true; c.manual = false; c.target = 'puck';
   c.circle = vision.calibCircle();
-  c.registered = settings.puckModel.area > 0 ? settings.puckModel : null;
+  c.registered = app.mouseMode ? { r: 224, g: 60, b: 49, area: 1 } : settings.puckModel.area > 0 ? settings.puckModel : null; // 마우스 모드: 커서가 곧 등록된 퍽
   const circle = c.circle;
   const mapping = app.lastVision?.floor?.mapping;
   let puckInCircle = false;
@@ -761,6 +818,7 @@ function updateIdleCircle(dt) {
     return;
   }
   app.idleHold = 0; app.idleTick = -1;
+  if (app.mouseMode) { autoCal.reset(); c.hold = 0; c.status = 'none'; c.sample = null; return; } // 마우스 모드: 물체 학습 없음
   const sample = vision.autoCalibSample();
   const registered = settings.puckModel.area > 0;
   const decision = decideIdle({ registered, puckInCircle: false, sample, model: settings.puckModel, tol: settings.puckTol });
@@ -838,6 +896,12 @@ function updateChips(result) {
   setChip(els.chipFloor, result.floor.mapping ? (result.floor.detected || result.floor.fallback || result.floor.mode === 'full' ? 'ok' : 'warn') : 'bad',
     result.floor.mode === 'manual' ? '영역(사다리꼴)' : result.floor.mode === 'full' || result.floor.fallback ? '영역(전체화면)' : vision.floorLocked ? '바닥(고정)' : '바닥(흰색)');
   const stickCtl = settings.controller === 'stick';
+  if (app.mouseMode) {
+    setChip(els.chipPuck, mouse.has ? 'ok' : 'warn', '마우스(조작)');
+    setChip(els.chipStick, '', '스틱(마우스 모드)');
+    els.chipFps.textContent = `${app.fps} fps`;
+    return;
+  }
   setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && tracker.state === 'predicted') ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
   if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', stickCtl ? '스틱(조작)' : '스틱');
   else setChip(els.chipStick, '', '스틱(미지정)');

@@ -7,7 +7,7 @@ import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { isLocked, tryUnlock } from './access.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel } from './account.js';
 import { decideIdle, stepChoice, stepDwell, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, TITLE_MAX } from './community.js';
@@ -130,7 +130,7 @@ async function onAuthSubmit(e) {
   els.authSubmit.disabled = true;
   try {
     if (app.authTab === 'register') {
-      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value });
+      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value });
       toast(`환영합니다, ${app.account.current().nick}!`);
     } else {
       await app.account.login(nick, pin);
@@ -154,8 +154,8 @@ function refreshAuthUI() {
   const u = app.account?.current();
   els.authLogged.classList.toggle('hidden', !u);
   els.authForm.classList.toggle('hidden', !!u);
-  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b> · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)`;
-  $('#settings-account').textContent = u ? `로그인: ${u.nick} (${u.team}, ${u.ageGroup})` : '로그인하지 않음 (랭킹 미등록)';
+  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)`;
+  $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup})` : '로그인하지 않음 (랭킹 미등록)';
   $('#btn-settings-logout').classList.toggle('hidden', !u);
   if (!u) { setAuthTab(app.authTab); els.authForm.classList.remove('hidden'); }
 }
@@ -187,7 +187,7 @@ async function renderRank() {
   try {
     const rows = await app.account.leaderboard(mode, rankFilters(), 100);
     els.rankBody.innerHTML = rows.length ? rows.map((r) => `<tr class="${u && r.uid === u.id ? 'me' : ''} ${r.rank <= 3 ? 'top' + r.rank : ''}">
-      <td>${r.rank}</td><td>${esc(r.nick)}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${r.score}</td></tr>`).join('')
+      <td>${r.rank}</td><td>${esc(r.nick)}${r.number != null ? ` <span class="jersey">${jerseyLabel(r.number)}</span>` : ''}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${r.score}</td></tr>`).join('')
       : '<tr><td colspan="6" class="muted">아직 기록이 없습니다. 게임을 끝까지 플레이하면 등록됩니다.</td></tr>';
     const me = u ? await app.account.myRank(mode, rankFilters()) : null;
     els.rankMe.textContent = u ? (me ? `내 순위: ${me.rank}위 / ${me.total}명 (최고 ${me.score}점)` : '이 조건에 내 기록이 없습니다') : '로그인하면 내 순위가 표시됩니다';

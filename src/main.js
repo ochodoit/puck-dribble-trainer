@@ -298,6 +298,7 @@ function bindUI() {
   $$('[data-calib]').forEach((b) => b.addEventListener('click', () => beginCalibration(b.dataset.calib)));
   $$('[data-autocalib]').forEach((b) => b.addEventListener('click', () => beginAutoCalibration(b.dataset.autocalib)));
   $('#btn-replace-puck').addEventListener('click', () => { beginAutoCalibration('puck'); toast('새 물체를 원 안에 3초 두면 퍽이 교체됩니다'); });
+  $('#setup-skip').addEventListener('click', () => cancelAutoCalibration());
   $$('[data-calib-reset]').forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.calibReset;
     if (t === 'puck') settings.puckModel = structuredClone(DEFAULT_SETTINGS.puckModel);
@@ -370,7 +371,30 @@ function startMouse() {
   openModeAfterStart();
 }
 
-/** 시작 직후: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다 */
+// =============== 시작 준비: 1/2 플레이 공간 → 2/2 퍽 등록 → 모드 선택 ===============
+function beginAreaSetup() {
+  app.setup = 'area';
+  toggleAreaEdit();
+  $('#area-step').classList.remove('hidden');
+}
+
+function beginPuckSetup() {
+  app.setup = 'puck';
+  $('#area-step').classList.add('hidden');
+  beginAutoCalibration('puck');
+  $('#setup-bar').classList.remove('hidden');
+  $('#setup-skip').classList.toggle('hidden', !(settings.puckModel.area > 0));
+  els.toast.classList.add('hidden'); // 안내는 위 막대가 맡는다 (토스트와 겹치지 않게)
+}
+
+function finishSetup() {
+  app.setup = null;
+  $('#setup-bar').classList.add('hidden');
+  $('#area-step').classList.add('hidden');
+  openModeAfterStart();
+}
+
+/** 시작 준비가 끝나면: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다 */
 function openModeAfterStart() {
   app.afterStart = true;
   renderModeList();
@@ -392,7 +416,7 @@ async function startCamera() {
     app.startedAt = performance.now();
     requestWakeLock();
     requestAnimationFrame(loop);
-    openModeAfterStart();
+    app.setup = 'area-wait'; // 첫 영상이 들어오면 1/2 영역 설정부터 (loop 에서 시작)
     if (document.documentElement.requestFullscreen && !navigator.standalone) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -546,6 +570,8 @@ function loop(now) {
 
   }
   if (!result) return;
+  // 시작 준비: 첫 영상 처리 뒤 잠깐(자동 바닥 감지가 잡힐 시간) 기다렸다가 영역 설정을 연다
+  if (app.setup === 'area-wait' && now - app.startedAt > 700) beginAreaSetup();
   // 영상이 2초 넘게 멈추면 경고 (카메라 점유·절전 등)
   if (!app.mouseMode && !app.frozenWarned && !app.cameraLost && now - app.lastFrameAt > 2000) {
     app.frozenWarned = true;
@@ -858,6 +884,7 @@ function commitLearnedModel(target, done, refresh = false) {
   autoCal.reset();
   persist(); refreshCalibUI();
   sfx.target();
+  if (app.setup === 'puck' && target === 'puck') { finishSetup(); toast(`퍽 등록 완료 · 크기 ${model.area}px · 게임을 고르세요`, 3500); return; }
   if (refresh) toast(`등록된 퍽을 다시 인식했습니다 (크기 ${model.area}px) · 원 안에 3초 더 두면 시작`, 3500);
   else toast(`${target === 'puck' ? '퍽' : '스틱'} 등록 완료 · rgb(${model.r},${model.g},${model.b}) · 크기 ${model.area}px${target === 'puck' ? ' · 원 안에 3초 더 두면 시작' : ''}`, 4000);
 }
@@ -1176,7 +1203,7 @@ function toggleAreaEdit() {
   applyFloorMode();
   $('#area-bar').classList.remove('hidden');
   els.btnFloorLock.classList.add('active');
-  toast('모서리를 드래그해 바닥에 맞추세요 (뒤쪽 좁게, 앞쪽 넓게)', 4000);
+  if (app.setup !== 'area') toast('모서리를 드래그해 바닥에 맞추세요 (뒤쪽 좁게, 앞쪽 넓게)', 4000); // 시작 준비 중에는 위 막대가 안내
 }
 
 function endAreaEdit(announce = true) {
@@ -1185,6 +1212,7 @@ function endAreaEdit(announce = true) {
   els.handles.classList.add('hidden');
   els.btnFloorLock.classList.remove('active');
   persist();
+  if (app.setup === 'area') { beginPuckSetup(); return; } // 시작 준비 중: 다음 단계 (퍽 등록)
   if (announce) toast('영역 저장됨. 퍽을 원 안에 두면 시작합니다');
 }
 
@@ -1243,6 +1271,7 @@ function beginAutoCalibration(target) {
 function cancelAutoCalibration(msg) {
   app.calib = { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null };
   autoCal.reset();
+  if (app.setup === 'puck') { finishSetup(); toast(settings.puckModel.area > 0 ? '등록된 퍽을 그대로 씁니다 · 게임을 고르세요' : '퍽 등록을 건너뛰었습니다 · 게임을 고른 뒤 원 안에 퍽을 두면 등록됩니다', 4000); return; }
   if (msg) toast(msg);
 }
 

@@ -82,6 +82,8 @@ export class Renderer {
     }
 
     if (!mapping) return;
+    // 영역 편집 중에는 게임 화면을 그리지 않는다 (바닥 영상과 격자만 보이게)
+    if (areaEditing) return;
 
     // ---- 아케이드: 화면 공간 렌더 ----
     if (game.mode.id === 'arcade') {

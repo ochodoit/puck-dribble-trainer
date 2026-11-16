@@ -73,13 +73,18 @@
 
       <!-- 영역 편집 바 -->
       <div id="area-bar" class="area-bar hidden">
-        <span class="area-hint">네 모서리를 실제 바닥 모서리에 맞추세요. 뒤쪽(멀리)은 좁게, 앞쪽(카메라)은 넓게 — 원근 격자가 바닥에 붙어 보이면 맞습니다.</span>
+        <span class="area-hint"><b id="area-step" class="setup-step hidden">1 / 2 플레이 공간</b>네 모서리를 실제 바닥 모서리에 맞추세요. 뒤쪽(멀리)은 좁게, 앞쪽(카메라)은 넓게 — 원근 격자가 바닥에 붙어 보이면 맞습니다.</span>
         <div class="area-actions">
           <button id="area-auto" class="btn btn-ghost">흰 바닥 자동</button>
           <button id="area-full" class="btn btn-ghost">화면 전체</button>
           <button id="area-reset" class="btn btn-ghost">사다리꼴 초기화</button>
           <button id="area-done" class="btn btn-primary">완료</button>
         </div>
+      </div>
+      <!-- 시작 준비 2단계: 퍽 등록 -->
+      <div id="setup-bar" class="area-bar hidden">
+        <span class="area-hint"><b class="setup-step">2 / 2 퍽 등록</b>퍽(공·뚜껑·퍽)을 화면 가운데 원 안에 놓고 3초 기다리세요. 등록되면 게임 선택으로 넘어갑니다.</span>
+        <div class="area-actions"><button id="setup-skip" class="btn btn-ghost hidden">건너뛰기 (등록된 퍽 사용)</button></div>
       </div>
 
       <!-- 인식 상태 -->

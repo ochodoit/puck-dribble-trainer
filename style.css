@@ -120,6 +120,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .area-bar { position: absolute; left: var(--safe-left); right: var(--safe-right); top: calc(var(--safe-top) + 76px); display: flex; flex-direction: column; gap: 8px; align-items: center;
   padding: 10px 14px; z-index: 5; pointer-events: none; }
 .area-bar .area-hint { background: var(--paper); border: var(--line) solid var(--ink); border-radius: 999px; padding: 8px 18px; font-size: 13px; max-width: 760px; text-align: center; }
+.area-bar .setup-step { color: var(--red); font-weight: 700; margin-right: 8px; white-space: nowrap; }
 .area-bar .area-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
 
 /* ---------- 상태 칩: 테두리 알약 + 점 ---------- */

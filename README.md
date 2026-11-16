@@ -258,6 +258,11 @@ python3 serve.py --http   # http://localhost:8080
 Firebase Studio 미리보기나 Firebase Hosting / GitHub Pages 등 HTTPS 호스팅에 올리면 바로 사용할 수 있습니다.
 iPadOS에서는 Safari 공유 메뉴 → **홈 화면에 추가**로 전체화면 앱처럼 실행하세요.
 
+## 문서
+
+- [`docs/firebase-setup.md`](docs/firebase-setup.md): Firebase(headsuppuck) 연결 순서와 붙여넣을 보안 규칙
+- [`docs/design-membership-team-season.md`](docs/design-membership-team-season.md): 정회원·추천코드, 팀(길드), 월간 시즌, 명예의 전당 설계 (확정안)
+
 ## 구조
 
 ```

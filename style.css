@@ -439,3 +439,8 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
   .post-board li .t { grid-column: 3; }
   .post-board li small { display: none; }
 }
+
+/* 등번호 (#87): 별명 옆 작은 세리프 숫자 */
+.jersey { font-family: var(--display); font-weight: 900; font-variant-numeric: tabular-nums; color: var(--red); margin-left: 4px; font-size: 0.95em; }
+.rank-table .jersey { font-size: 13px; }
+#btn-logout { white-space: nowrap; flex-shrink: 0; }

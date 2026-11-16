@@ -1,7 +1,7 @@
 // 온라인 계정·랭킹 (Firebase Auth + Firestore). firebase-config.js 가 채워졌을 때만 로드됨.
 // 별명 -> 가상 이메일(u-<hex>@puck-trainer.app), 6자리 비밀번호 -> Firebase Auth 비밀번호.
 // 컬렉션: users/{uid} 프로필, nicks/{nickLower} 별명 고유성, scores_{mode}/{uid} 모드별 최고 기록.
-import { validateProfile, ageGroupOf, matches } from './account.js';
+import { validateProfile, ageGroupOf, matches, jerseyOf } from './account.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
 const normNick = (n) => String(n).trim().toLowerCase();
@@ -30,8 +30,8 @@ export class FirebaseAccountStore {
     return this.user;
   }
 
-  async register({ nick, pin, country, team, age }) {
-    const err = validateProfile({ nick, pin, country, team, age });
+  async register({ nick, pin, country, team, age, number }) {
+    const err = validateProfile({ nick, pin, country, team, age, number });
     if (err) throw new Error(err);
     const key = normNick(nick);
     const nickRef = this.F.doc(this.db, 'nicks', key);
@@ -40,7 +40,7 @@ export class FirebaseAccountStore {
     try { cred = await this.A.createUserWithEmailAndPassword(this.auth, nickEmail(nick), pin); }
     catch (e) { throw new Error(e.code === 'auth/email-already-in-use' ? '이미 사용 중인 별명입니다' : `가입 실패 (${e.code || e.message})`); }
     const uid = cred.user.uid;
-    const profile = { nick: String(nick).trim(), nickLower: key, country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: Date.now() };
+    const profile = { nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: Date.now() };
     await this.F.setDoc(this.F.doc(this.db, 'users', uid), profile);
     await this.F.setDoc(nickRef, { uid });
     this.user = { id: uid, ...profile };
@@ -58,9 +58,11 @@ export class FirebaseAccountStore {
 
   logout() { this.user = null; this.A.signOut(this.auth); }
 
-  async updateProfile({ country, team, age }) {
+  async updateProfile({ country, team, age, number }) {
     if (!this.user) throw new Error('로그인이 필요합니다');
+    if (number !== undefined && Number.isNaN(jerseyOf(number))) throw new Error('등번호는 0~99 사이 숫자');
     const patch = {};
+    if (number !== undefined) patch.number = jerseyOf(number);
     if (country) patch.country = country;
     if (team) patch.team = String(team).trim();
     if (age !== undefined) { patch.age = Number(age); patch.ageGroup = ageGroupOf(age); }
@@ -74,7 +76,7 @@ export class FirebaseAccountStore {
     const ref = this.F.doc(this.db, `scores_${mode}`, this.user.id);
     const prev = await this.F.getDoc(ref);
     const u = this.user;
-    const entry = { uid: u.id, nick: u.nick, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1 };
+    const entry = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1 };
     let improved = true;
     if (prev.exists()) {
       const p = prev.data();

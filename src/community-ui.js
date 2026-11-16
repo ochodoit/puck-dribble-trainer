@@ -38,7 +38,8 @@ export function initCommunity(host) {
   const who = (p) => {
     if (p.official) return '<b>Puck Trainer</b><span class="tag">예시 코스</span>';
     const bits = [p.team ? `<span data-ugc>${esc(p.team)}</span>` : '', p.country ? `<span>${esc(host.countryLabel(p.country))}</span>` : '', p.ageGroup ? `<span>${esc(p.ageGroup)}</span>` : ''].filter(Boolean).join('<i>·</i>');
-    return `<b data-ugc>${esc(p.nick)}</b>${bits ? `<span class="who-more">${bits}</span>` : ''}<time>${timeAgo(p.at)}</time>`;
+    const no = Number.isInteger(p.number) ? `<span class="jersey">#${p.number}</span>` : '';
+    return `<b data-ugc>${esc(p.nick)}</b>${no}${bits ? `<span class="who-more">${bits}</span>` : ''}<time>${timeAgo(p.at)}</time>`;
   };
 
   function boardHtml(p) {

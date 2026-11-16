@@ -44,7 +44,7 @@ export function buildPost(user, data) {
   if (body.length > BODY_MAX) return { error: `내용은 ${BODY_MAX}자까지` };
   const post = {
     type, title, body, at: Date.now(),
-    uid: user.id, nick: user.nick, team: user.team, country: user.country, ageGroup: user.ageGroup,
+    uid: user.id, nick: user.nick, number: Number.isInteger(user.number) ? user.number : null, team: user.team, country: user.country, ageGroup: user.ageGroup,
     records: [], cheers: [],
   };
   if (type === 'record') {

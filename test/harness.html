@@ -13,7 +13,7 @@
   import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
   import { alphaLayer } from '../src/theme.js';
   import { rankKey, FLYER_R } from '../src/game.js';
-  import { LocalAccountStore, ageGroupOf, validateProfile } from '../src/account.js';
+  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf } from '../src/account.js';
   import { decideIdle, stepChoice, stepDwell, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
   import { LocalCommunityStore, buildPost, boardOf, courseSig, betterRecord, STARTER_POSTS } from '../src/community.js';
   import { timeAgo, courseSvg } from '../src/community-ui.js';
@@ -529,8 +529,10 @@
     check('C1 age groups', ageGroupOf(7) === 'U8' && ageGroupOf(9) === 'U10' && ageGroupOf(11) === 'U12' && ageGroupOf(13) === 'U14' && ageGroupOf(15) === 'U16' && ageGroupOf(17) === 'U18' && ageGroupOf(25) === '성인' && ageGroupOf(45) === '시니어');
     check('C1 validation: pin must be 6 digits', !!validateProfile({ nick: '번개손', pin: '12345', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: '번개손', pin: 'abcdef', country: 'KR', team: 'A', age: 11 }) && !validateProfile({ nick: '번개손', pin: '123456', country: 'KR', team: 'A', age: 11 }));
     check('C1 validation: nick length/age range', !!validateProfile({ nick: 'a', pin: '123456', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: 'ok', pin: '123456', country: 'KR', team: 'A', age: 150 }));
-    const u1 = await acc.register({ nick: '번개손', pin: '123456', country: 'KR', team: '서울 유스', age: 11 });
-    check('C2 register logs in with age group', u1.nick === '번개손' && u1.ageGroup === 'U12' && acc.current()?.id === '번개손');
+    const base = { nick: '번개손', pin: '123456', country: 'KR', team: 'A', age: 11 };
+    check('C1 jersey number optional, 0..99 integer', !validateProfile(base) && !validateProfile({ ...base, number: '' }) && !validateProfile({ ...base, number: '0' }) && !validateProfile({ ...base, number: 99 }) && !!validateProfile({ ...base, number: '100' }) && !!validateProfile({ ...base, number: '-1' }) && !!validateProfile({ ...base, number: '8.5' }) && jerseyOf('') === null && jerseyOf(' 07 ') === 7);
+    const u1 = await acc.register({ nick: '번개손', pin: '123456', country: 'KR', team: '서울 유스', age: 11, number: '87' });
+    check('C2 register logs in with age group and jersey number', u1.nick === '번개손' && u1.ageGroup === 'U12' && u1.number === 87 && acc.current()?.id === '번개손');
     let dup = null; try { await acc.register({ nick: ' 번개손 ', pin: '000000', country: 'US', team: 'X', age: 30 }); } catch (e) { dup = e.message; }
     check('C2 duplicate nick rejected (case/space-insensitive)', /사용 중/.test(dup || ''), dup);
     acc.logout();
@@ -542,7 +544,7 @@
     let r1 = await acc.submitScore('arcade', 500);
     let r2 = await acc.submitScore('arcade', 300);
     let r3 = await acc.submitScore('arcade', 900);
-    check('C3 best score kept, plays counted', r1.improved && !r2.improved && r2.best === 500 && r3.improved && r3.best === 900 && r3.entry.plays === 3, { r1, r2, r3 });
+    check('C3 best score kept, plays counted', r1.improved && !r2.improved && r2.best === 500 && r3.improved && r3.best === 900 && r3.entry.plays === 3 && r3.entry.number === 87, { r1, r2, r3 });
     // 다른 선수들 등록 (연령대/국가/팀 다양)
     const others = [['민준', 'KR', '서울 유스', 10, 1200], ['Ava', 'US', 'Boston Jr', 11, 700], ['Hana', 'KR', '부산 키즈', 14, 1500], ['Coach', 'KR', '서울 유스', 35, 2000], ['Liam', 'CA', 'Toronto', 9, 400]];
     for (const [nick, country, team, age, score] of others) { acc.logout(); await acc.register({ nick, pin: '111111', country, team, age }); await acc.submitScore('arcade', score); await acc.submitScore('wide', score / 100); }

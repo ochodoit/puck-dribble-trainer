@@ -5,7 +5,7 @@ import { C } from './theme.js';
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
   { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true,
-    desc: '색색의 퍽이 같은 속도로 내려옵니다. coin은 먹고 나머지는 피하세요. 제한 시간 동안의 점수로 겨룹니다.' },
+    desc: '검정 퍽이 내려옵니다. coin은 먹고 검정 퍽은 피하세요. 좌우로 퍽을 칠수록(터치) 점수가 쌓입니다.' },
   { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
     desc: '평면 경기장의 네 변에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
   { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 30,

@@ -777,8 +777,9 @@
       const sites = ['https://ochodoit.github.io/puck-dribble-trainer/', 'https://ochodoit.github.io/puck-dribble-trainer/index.html?c=AB', 'https://ochodoit.github.io/semple/',
         'http://127.0.0.1:8080/', 'http://localhost:5173/x', 'https://evil.example/puck-dribble-trainer/', 'http://ochodoit.github.io/puck-dribble-trainer/',
         'https://ochodoit.github.io/other/', 'https://ochodoit.github.io/puck-dribble-trainer-copy/',
-        'https://192.168.0.12:8443/', 'https://10.0.0.5:8443/', 'https://172.20.1.2:8443/', 'https://172.32.0.1/', 'https://192.169.0.1/'].map((u) => (siteAllowed(new URL(u)) ? 1 : 0)).join('');
-      check('S4 runs only on the official address, this computer or the same Wi-Fi', sites === '11111000011100' && OFFICIAL_URL.endsWith('/puck-dribble-trainer/')
+        'https://192.168.0.12:8443/', 'https://10.0.0.5:8443/', 'https://172.20.1.2:8443/', 'https://172.32.0.1/', 'https://192.169.0.1/',
+        'https://puck-trainer.com/', 'https://www.puck-trainer.com/?c=AB', 'http://puck-trainer.com/', 'https://puck-trainer.com.evil.example/', 'https://evilpuck-trainer.com/'].map((u) => (siteAllowed(new URL(u)) ? 1 : 0)).join('');
+      check('S4 runs only on the official address, this computer or the same Wi-Fi', sites === '1111100001110011000' && OFFICIAL_URL === 'https://puck-trainer.com/'
         && isDevHost(location) && !isDevHost(new URL('https://ochodoit.github.io/')), sites);
     }
 

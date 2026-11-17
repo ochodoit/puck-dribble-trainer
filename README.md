@@ -107,7 +107,7 @@
 ## 정회원 · 가입 코드 · 랭킹
 
 - **정회원 = 가입 코드로 가입한 계정.** 코드가 없으면 **게스트**로 자유롭게 플레이할 수 있지만 랭킹·글쓰기는 안 됩니다.
-- **가입 코드는 링크로 받습니다**: `https://ochodoit.github.io/puck-dribble-trainer/?c=K7MP-Q2XD`. 링크로 들어오면 첫 화면에 초대 카드("베타 초대 링크예요 · ○월 ○일까지 가입하면 바로 정회원")가 뜨고, 회원가입 칸이 열리며 코드가 채워져 있습니다. 코드는 헷갈리는 글자(0·O·1·I·L)를 뺀 8자리입니다.
+- **가입 코드는 링크로 받습니다**: `https://puck-trainer.com/?c=K7MP-Q2XD`. 링크로 들어오면 첫 화면에 초대 카드("베타 초대 링크예요 · ○월 ○일까지 가입하면 바로 정회원")가 뜨고, 회원가입 칸이 열리며 코드가 채워져 있습니다. 코드는 헷갈리는 글자(0·O·1·I·L)를 뺀 8자리입니다.
   - **베타 링크**: 여러 명이 같은 링크로 가입. 마감일이 지나면(서버 시간 기준) 자동으로 막힙니다. 인원 상한을 둘 수 있습니다.
   - **1회용 코드**: 한 사람만. 게스트가 플레이 영상을 인스타에 올리고 공식 계정으로 DM을 보내면, 운영자가 확인 후 DM으로 코드를 보냅니다. 받은 코드는 회원가입의 가입 코드 칸에 넣습니다.
 - **게스트 결과 화면**: "정회원이었다면 지금 전체 ○위 / ○명"과 함께, 플레이 영상을 인스타에 올리고(해시태그·공식 계정) DM을 보내면 정회원 가입 코드를 DM으로 보내 준다는 안내, **인스타 DM 보내기** 버튼(`https://ig.me/m/공식계정`)이 나옵니다. "보호자와 함께", "얼굴 없이 판과 퍽만 나와도 괜찮아요", "비공개 계정이면 영상이나 캡처를 DM에 함께" 안내 포함. 공식 인스타 계정이 비어 있으면 DM 버튼은 숨깁니다.
@@ -211,7 +211,10 @@
 
 ### 방법 B. GitHub Pages 링크로 바로 열기 (컴퓨터 없이, 추천)
 
-`main` 브랜치에 푸시하면 `.github/workflows/pages.yml` 이 **https://ochodoit.github.io/puck-dribble-trainer/** 에 자동 배포합니다(저장소 이름 `puck-dribble-trainer`, 예전 주소 `/semple/` 은 쓰지 않음). 워크플로가 Pages를 자동 활성화하지 못하면 저장소 **Settings > Pages > Source**를 `GitHub Actions`로 한 번만 바꿔 주세요. HTTPS라 휴대폰 카메라가 바로 허용되고 인증서 경고도 없습니다.
+`main` 브랜치에 푸시하면 `.github/workflows/pages.yml` 이 자동 배포하고, 공식 주소 **https://puck-trainer.com/** 으로 열립니다. GitHub 기본 주소 `https://ochodoit.github.io/puck-dribble-trainer/` 로 들어와도 새 주소로 넘어갑니다(예전 주소 `/semple/` 은 없어짐).
+
+- 도메인 `puck-trainer.com`: Hosting.kr에서 구입(만료일 전에 연장), 저장소 **Settings > Pages > Custom domain** 에 연결, GitHub 계정 **Settings > Pages > Verified domains** 에서 소유 확인(남의 저장소가 이 도메인을 못 씀)
+- Hosting.kr DNS 레코드: `A @` 185.199.108.153 / 185.199.109.153 / 185.199.110.153 / 185.199.111.153, `CNAME www` → `ochodoit.github.io`, `TXT _github-pages-challenge-ochodoit` (소유 확인 값, 지우지 말 것) 워크플로가 Pages를 자동 활성화하지 못하면 저장소 **Settings > Pages > Source**를 `GitHub Actions`로 한 번만 바꿔 주세요. HTTPS라 휴대폰 카메라가 바로 허용되고 인증서 경고도 없습니다.
 
 예전의 접속 코드(PIN) 화면은 없앴습니다. 누구나 게스트로 플레이할 수 있고, 랭킹·글쓰기는 가입 코드로 가입한 정회원만 합니다(위 "정회원 · 가입 코드 · 랭킹").
 
@@ -292,12 +295,12 @@ iPadOS에서는 Safari 공유 메뉴 → **홈 화면에 추가**로 전체화�
 - **예전 계정**(`u-…@puck-trainer.app`)은 그 도메인을 누가 사면 비밀번호 재설정 메일을 받아 계정을 뺏을 수 있습니다. 로그인할 때 새 주소로 옮겨 보지만 Firebase 설정상 안 될 수 있으니, **`puck-trainer.app` 도메인을 직접 사 두는 것**(연 2만 원 안팎)이 가장 확실합니다. 운영자 계정은 비밀번호를 12자 이상으로 바꾸세요.
 - 서버 없이 점수를 계산하므로, 마음먹고 조작하는 사람의 가짜 점수를 완전히 막을 수는 없습니다(범위·내림 금지·속도 제한으로 어렵게만 함). 이상한 기록은 운영자가 지웁니다.
 - 일반 회원은 숫자 6자리 비밀번호입니다. Firebase가 틀린 시도를 자동으로 늦추지만, 아래 App Check를 켜면 더 안전합니다.
-- 콘솔에서 더 켤 수 있는 겹(선택): **API 키 HTTP 리퍼러 제한**(Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 > 브라우저 키 > `https://ochodoit.github.io/*`, `http://localhost/*`, `http://127.0.0.1/*`), **App Check**(reCAPTCHA v3, 복사한 사이트·스크립트의 Firebase 접근 차단).
+- 콘솔에서 더 켤 수 있는 겹(선택): **API 키 HTTP 리퍼러 제한**(Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 > 브라우저 키 > `https://puck-trainer.com/*`, `https://ochodoit.github.io/*`, `http://localhost/*`, `http://127.0.0.1/*`), **App Check**(reCAPTCHA v3, 복사한 사이트·스크립트의 Firebase 접근 차단).
 
 ## 저작권 · 복제 방지
 
 - 저장소의 [`LICENSE`](LICENSE): **All rights reserved** — 허락 없이 복제·수정·배포·다른 사이트에 올리기 금지. 첫 화면 아래에도 저작권 표시가 있습니다.
-- 공식 주소(`https://ochodoit.github.io/puck-dribble-trainer/`), 내 컴퓨터(`localhost`), 같은 Wi-Fi의 컴퓨터(사설 IP, 위 "방법 A")가 아니면 앱이 멈추고 공식 주소 링크만 보입니다(`src/guard.js`). 다른 사이트의 틀 안에서도 열리지 않습니다.
+- 공식 주소(`https://puck-trainer.com/`, GitHub 기본 주소 포함), 내 컴퓨터(`localhost`), 같은 Wi-Fi의 컴퓨터(사설 IP, 위 "방법 A")가 아니면 앱이 멈추고 공식 주소 링크만 보입니다(`src/guard.js`). 다른 사이트의 틀 안에서도 열리지 않습니다.
 - 복사한 사이트는 온라인 가입·랭킹을 쓸 수 없게 Firebase 쪽에서 막을 수 있습니다(위 API 키 제한·App Check).
 - 무료 GitHub Pages는 공개 저장소라 소스를 볼 수는 있습니다. 소스까지 숨기려면 저장소를 비공개로 바꾸고(GitHub Pro 필요) 또는 소스는 비공개 저장소에 두고 공개 저장소에는 배포 파일만 올리는 방법이 있습니다.
 

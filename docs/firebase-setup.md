@@ -1,10 +1,10 @@
 # Firebase 연결 안내 — headsuppuck 프로젝트
 
-- 게임 주소: https://ochodoit.github.io/puck-dribble-trainer/ (예전 주소 `/semple/` 은 저장소 이름을 바꾸며 없어짐)
+- 게임 주소: https://puck-trainer.com/ (GitHub 기본 주소 https://ochodoit.github.io/puck-dribble-trainer/ 는 이리로 넘어감, 예전 주소 `/semple/` 은 없어짐)
 - Firebase 콘솔: https://console.firebase.google.com/project/headsuppuck/overview
 - 소스 저장소: https://github.com/ochodoit/puck-dribble-trainer
 
-사이트 주소를 새로 만들 필요는 없습니다. 지금 주소(ochodoit.github.io)를 그대로 연결합니다.
+사이트 주소는 Hosting.kr에서 산 `puck-trainer.com` 을 GitHub Pages에 연결한 것입니다.
 
 ## 콘솔에서 할 일 (순서대로)
 
@@ -14,7 +14,7 @@
 게임은 "별명 + 숫자 6자리"로 로그인하지만, 내부적으로 별명을 가상 이메일(`u-xxxx@headsuppuck.firebaseapp.com`)로 바꿔 이메일/비밀번호 방식을 씁니다. 이 도메인은 아무도 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없습니다. 예전 계정은 `u-xxxx@puck-trainer.app` (로그인할 때 자동으로 함께 시도).
 
 ### 2. 사이트 주소 등록
-Authentication > **설정** 탭 > **승인된 도메인** > 도메인 추가 > `ochodoit.github.io`
+Authentication > **설정** 탭 > **승인된 도메인** > 도메인 추가 > `puck-trainer.com`, `ochodoit.github.io`
 
 ### 3. 데이터베이스 만들기
 빌드 > **Firestore Database** > 데이터베이스 만들기
@@ -362,7 +362,7 @@ const firebaseConfig = {
 ### 8. 보안 겹 더하기 (권장)
 1. **운영자 비밀번호**: 운영자 화면 > **운영자 비밀번호**에서 12자 이상으로 바꾸기 (숫자만 써도 됨)
 2. **예전 로그인 도메인 사 두기**: 예전 계정은 `@puck-trainer.app` 가상 이메일이라, 그 도메인을 남이 사면 비밀번호 재설정 메일을 받을 수 있음. 도메인 등록 업체에서 `puck-trainer.app` 을 사 두면 막힘
-3. (선택) **API 키 제한**: Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 > Browser key > 애플리케이션 제한 = HTTP 리퍼러, 허용: `https://ochodoit.github.io/*`, `http://localhost/*`, `http://127.0.0.1/*` — 복사한 사이트는 로그인·가입을 못 함
+3. (선택) **API 키 제한**: Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 > Browser key > 애플리케이션 제한 = HTTP 리퍼러, 허용: `https://puck-trainer.com/*`, `https://ochodoit.github.io/*`, `http://localhost/*`, `http://127.0.0.1/*` — 복사한 사이트는 로그인·가입을 못 함
 4. (선택) **App Check**: Firebase 콘솔 > App Check > 웹 앱에 reCAPTCHA v3 등록 → 코드에 App Check 초기화를 넣은 뒤 Firestore·Authentication 적용(enforce). 스크립트·복사 사이트의 접근을 막음
 
 ## 설정값을 받은 뒤 Claude가 할 일

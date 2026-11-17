@@ -2,9 +2,11 @@
 // 다른 사이트의 틀(iframe) 안에 넣어 띄우는 것(클릭 가로채기)도 막는다.
 // main.js 가 맨 먼저 불러오므로, 여기서 멈추면 앱의 나머지는 실행되지 않는다.
 // 소스를 고쳐 이 검사를 지울 수는 있지만, 온라인 가입·랭킹은 Firebase 쪽(승인된 도메인, API 키 제한, 보안 규칙)에서 따로 막는다.
-export const OFFICIAL_URL = 'https://ochodoit.github.io/puck-dribble-trainer/';
-const OFFICIAL_HOST = 'ochodoit.github.io';
-const OFFICIAL_PATH = /^\/(puck-dribble-trainer|semple)(\/|$)/; // semple = 예전 주소
+export const OFFICIAL_URL = 'https://puck-trainer.com/';
+const OFFICIAL_HOSTS = ['puck-trainer.com', 'www.puck-trainer.com'];
+// GitHub Pages 기본 주소 (도메인을 연결하면 GitHub가 새 주소로 넘겨 준다), semple = 예전 저장소 이름
+const PAGES_HOST = 'ochodoit.github.io';
+const PAGES_PATH = /^\/(puck-dribble-trainer|semple)(\/|$)/;
 
 /** 내 컴퓨터에서 연 페이지인가 (개발 서버·테스트) */
 export function isDevHost(loc) {
@@ -21,7 +23,8 @@ export function isLanHost(loc) {
 /** 이 주소에서 앱을 실행해도 되는가 */
 export function siteAllowed(loc) {
   if (isDevHost(loc) || isLanHost(loc)) return true;
-  return loc?.protocol === 'https:' && loc.hostname === OFFICIAL_HOST && OFFICIAL_PATH.test(loc.pathname || '');
+  if (loc?.protocol !== 'https:') return false;
+  return OFFICIAL_HOSTS.includes(loc.hostname) || (loc.hostname === PAGES_HOST && PAGES_PATH.test(loc.pathname || ''));
 }
 
 function stop(text) {

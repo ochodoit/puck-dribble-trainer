@@ -44,8 +44,8 @@ export function pointerToUV(px, py, ctx) {
     const a = game.arcade, z0 = a.toZone(0, 0), z1 = a.toZone(1, 1);
     return { u: clamp01(inv(nx, z0.x, z1.x)), v: clamp01(inv(ny * a.aspect, z0.y, z1.y)) };
   }
-  if ((game.running && game.mode.id === 'obstacle') || game.mode.id === 'free') {
-    // 평면 경기장(퍽 피하기·자유 연습): 캔버스 안 경기장 사각형 기준
+  if ((game.running && (game.mode.id === 'obstacle' || game.mode.id === 'wide')) || game.mode.id === 'free') {
+    // 평면 경기장(퍽 피하기·와이드 드리블·자유 연습): 캔버스 안 경기장 사각형 기준
     const f = dodgeField(canvas.width, canvas.height, ctx.topInset);
     const fx = (f.x / canvas.width) * vr.width + vr.left, fy = (f.y / canvas.height) * vr.height + vr.top;
     const fw = (f.w / canvas.width) * vr.width, fh = (f.h / canvas.height) * vr.height;

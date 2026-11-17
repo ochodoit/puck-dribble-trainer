@@ -1,5 +1,5 @@
 // 오버레이 캔버스 렌더링 — 영상 위에 얇은 잉크 선(종이색 헤일로)과 알약 라벨, 포인트 레드
-import { PUCK_R, FLYER_R } from './game.js';
+import { PUCK_R, FLYER_R, WIDE_DRILLS, WIDE_BAND, WIDE_END, GATE_DRAW_R } from './game.js';
 import { C, F, rgba, inkStroke, text, pill, sparks, alphaLayer } from './theme.js';
 
 /** 퍽 피하기의 평면 경기장 사각형 (캔버스 px). topInset: 상단 HUD가 가리는 높이 비율 */
@@ -107,6 +107,13 @@ export class Renderer {
       return;
     }
 
+    // ---- 와이드 드리블: 평면 경기장에서 (판 왼쪽 끝 = 1번 칸, 오른쪽 끝 = 10번 칸) ----
+    if (game.mode.id === 'wide') {
+      this._drawWide(ctx, W, H, game, puck, now);
+      if (vision.puck && pa > 0.001) { const [cx, cy] = toC(vision.puck.x, vision.puck.y); ctx.beginPath(); ctx.arc(cx, cy, unit * 0.012, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.7 * pa); ctx.stroke(); }
+      return;
+    }
+
     const floorPxW = this._floorPx(uvToC);
     const R = (r) => r * floorPxW; // 정규화 반지름 -> 캔버스 px (가로 기준)
 
@@ -122,25 +129,44 @@ export class Renderer {
       else { ctx.fillStyle = rgba(C.paper, 0.22); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); inkStroke(ctx, hair, C.ink); ctx.setLineDash([]); }
     }
 
-    // ---- 8자 게이트: 종이 원반 + 세리프 숫자, 다음 게이트는 레드 ----
-    game.waypoints.forEach((wp, i) => {
-      const [cx, cy] = uvToC(wp.x, wp.y);
-      const isNext = i === game.wpIndex;
-      const r = R(0.075) * (isNext ? 1 + 0.06 * Math.sin(now / 180) : 0.82);
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.62, 0, 0, Math.PI * 2);
-      ctx.fillStyle = isNext ? C.red : rgba(C.paper, 0.85); ctx.fill();
-      ctx.lineWidth = hair * 1.2; ctx.strokeStyle = C.ink; ctx.stroke();
-      text(ctx, String(i + 1), cx, cy + fs * 0.05, fs * (isNext ? 1.25 : 1), { family: F.display, weight: 900, color: isNext ? C.paper : C.ink, halo: false });
-    });
+    // 목표 지점 공통: 숫자 없는 정원. 지금 가야 할 곳 = 진한 빨강(꽉 찬 원 + 맥박 고리)
+    const pulse = 0.5 + 0.5 * Math.sin(now / 180);
+    const nextDot = (cx, cy, r) => {
+      ctx.beginPath(); ctx.arc(cx, cy, r * (1.35 + 0.15 * pulse), 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.3 + 0.3 * pulse); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+    };
 
-    // ---- 타겟: 잉크 동심원 + 레드 중심 ----
+    // ---- 8자 게이트: 다음 = 진한 빨강, 다다음 = 옅은 빨강, 나머지 = 옅은 잉크 고리(코스 모양만) ----
+    const wps = game.waypoints;
+    if (wps.length) {
+      const i1 = game.wpIndex % wps.length, i2 = (game.wpIndex + 1) % wps.length;
+      const rg = R(GATE_DRAW_R);
+      wps.forEach((wp, i) => {
+        if (i === i1 || i === i2) return;
+        const [cx, cy] = uvToC(wp.x, wp.y);
+        ctx.beginPath(); ctx.arc(cx, cy, rg, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.3); ctx.stroke();
+      });
+      const [ax, ay] = uvToC(wps[i1].x, wps[i1].y), [bx, by] = uvToC(wps[i2].x, wps[i2].y);
+      // 다음 -> 다다음: 옅은 빨강 점선으로 방향만 (가운데에서 어느 쪽 고리로 도는지 알 수 있게)
+      const d = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / d, uy = (by - ay) / d;
+      if (d > rg * 3) {
+        ctx.beginPath(); ctx.moveTo(ax + ux * rg * 1.6, ay + uy * rg * 1.6); ctx.lineTo(bx - ux * rg * 1.3, by - uy * rg * 1.3);
+        ctx.setLineDash([rg * 0.3, rg * 0.3]); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.45); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.beginPath(); ctx.arc(bx, by, rg, 0, Math.PI * 2); ctx.fillStyle = rgba(C.red, 0.22); ctx.fill(); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.6); ctx.stroke();
+      nextDot(ax, ay, rg);
+    }
+
+    // ---- 반응 타겟: 진한 빨강 정원 하나. 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다 ----
     for (const t of game.targets) {
       const [cx, cy] = uvToC(t.x, t.y);
+      const r = R(t.r);
       const age = (now - t.born) / 1000;
-      const r = R(t.r) * (1 + 0.05 * Math.sin(age * 6));
-      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.62, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(C.paper, 0.45); ctx.fill(); inkStroke(ctx, hair * 1.4);
-      ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.62, r * 0.62 * 0.62, 0, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.22, r * 0.22 * 0.62, 0, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+      if (age >= 0 && age < 0.3) {
+        const k = 1 - age / 0.3;
+        ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 2.2 * k), 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.red, 0.15 + 0.7 * k); ctx.stroke();
+      }
+      nextDot(cx, cy, r);
     }
 
     // ---- 콘: 잉크 삼각형 + 종이 띠 ----
@@ -191,6 +217,11 @@ export class Renderer {
       } else if (e.type === 'flash') {
         const bw = unit * 0.016;
         ctx.lineWidth = bw; ctx.strokeStyle = rgba(C.red, 1 - e.age); ctx.strokeRect(bw / 2, bw / 2, W - bw, H - bw);
+      } else if (e.type === 'ring') {
+        // 지나간 목표 자리: 잉크 고리가 퍼지며 사라짐
+        const [cx, cy] = uvToC(clamp01(e.x), clamp01(e.y));
+        ctx.beginPath(); ctx.arc(cx, cy, R(e.r) * (1 + e.age * 1.4), 0, Math.PI * 2);
+        ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.ink, 0.7 * (1 - e.age)); ctx.stroke();
       }
     }
   }
@@ -207,7 +238,9 @@ export class Renderer {
     ctx.fillStyle = C.paper;
     ctx.fillRect(0, 0, W, f.y); ctx.fillRect(0, f.y + f.h, W, H - f.y - f.h); ctx.fillRect(0, f.y, f.x, f.h); ctx.fillRect(f.x + f.w, f.y, W - f.x - f.w, f.h);
     ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.strokeRect(f.x, f.y, f.w, f.h);
+    // 방향 안내 (아케이드·퍽 피하기와 같은 규칙). 위쪽은 대기 중 번호 띠가 덮으므로 플레이 중에만
     const flip = game.plane.flip;
+    if (game.running) text(ctx, flip ? '↑ 카메라쪽 · 밀기' : '↑ 몸쪽 · 당기기', f.x + f.w / 2, f.y + fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
     text(ctx, flip ? '↓ 몸쪽 · 당기기' : '↓ 카메라쪽 · 밀기', f.x + f.w / 2, f.y + f.h - fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
 
     const pts = game.course.points;
@@ -260,6 +293,81 @@ export class Renderer {
       ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
       const script = e.style === 'script';
       text(ctx, e.text, cx, cy - e.age * W * 0.04, script ? W * 0.05 : W * 0.026, { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color });
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /**
+   * 와이드 드리블 평면: 숫자·칸 없이 구역만. 지금 가야 할 구역 = 진한 빨강, 그다음 구역 = 옅은 빨강 (8자 드리블과 같은 규칙).
+   * 훈련 1은 좌우 끝 구역, 훈련 2·3은 판을 10칸으로 나눈 자리 순서 (칸은 그리지 않는다)
+   */
+  _drawWide(ctx, W, H, game, puck, now) {
+    const dpr = this.dpr, hair = Math.max(1, dpr), fs = Math.max(11 * dpr, W * 0.017);
+    const f = dodgeField(W, H, this.topInset), S = f.w, A = game.plane.A;
+    const P = (x, y) => [f.x + x * S, f.y + y * S];
+    ctx.save();
+    ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(f.x, f.y, f.w, f.h);
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(0, 0, W, f.y); ctx.fillRect(0, f.y + f.h, W, H - f.y - f.h); ctx.fillRect(0, f.y, f.x, f.h); ctx.fillRect(f.x + f.w, f.y, W - f.x - f.w, f.h);
+    ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.strokeRect(f.x, f.y, f.w, f.h);
+    const flip = game.plane.flip;
+    text(ctx, flip ? '↑ 카메라쪽 · 밀기' : '↑ 몸쪽 · 당기기', f.x + f.w / 2, f.y + fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
+    text(ctx, flip ? '↓ 몸쪽 · 당기기' : '↓ 카메라쪽 · 밀기', f.x + f.w / 2, f.y + f.h - fs * 0.95, fs * 0.7, { weight: 500, color: C.mute, halo: false });
+
+    const running = game.running && game.wide;
+    const stage = running ? game.wide.stage : 0;
+    const yc = A / 2, bh = WIDE_BAND * A;
+    text(ctx, `DRILL ${stage + 1}/${WIDE_DRILLS.length}`, f.x + W * 0.012, f.y + fs * 0.95, fs * 0.66, { weight: 600, color: C.mute, align: 'left', halo: false });
+
+    // 구역만 그린다: 지금 가야 할 곳 = 진한 빨강(맥박), 그다음 = 옅은 빨강. 대기 중에는 훈련 1의 끝 구역 미리보기
+    const zones = running ? game.zones : [
+      { x: WIDE_END.x, y: yc, w: WIDE_END.w, h: bh, active: true },
+      { x: 1 - WIDE_END.x, y: yc, w: WIDE_END.w, h: bh, active: false },
+    ];
+    const pulse = 0.5 + 0.5 * Math.sin(now / 200);
+    for (const z of [...zones].sort((a, b) => a.active - b.active)) { // 그다음 구역을 먼저, 지금 구역을 위에
+      const [x0, y0] = P(z.x - z.w / 2, z.y - z.h / 2), [x1, y1] = P(z.x + z.w / 2, z.y + z.h / 2);
+      if (z.active) {
+        ctx.fillStyle = rgba(C.red, 0.68 + 0.12 * pulse); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      } else {
+        ctx.fillStyle = rgba(C.red, 0.2); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.55); ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      }
+    }
+
+    // 나: 잉크 정원 + 고리, 궤적은 헤어라인 (플레이 중에는 설정한 농도로)
+    const me = puck.pos ? game.toPlane(puck.pos.x, puck.pos.y) : null;
+    alphaLayer(ctx, game.running ? this.puckAlpha : 1, (ctx) => {
+      if (puck.trail.length > 1) {
+        ctx.lineWidth = hair;
+        for (let i = 1; i < puck.trail.length; i++) {
+          const a = game.toPlane(puck.trail[i - 1].x, puck.trail[i - 1].y), b = game.toPlane(puck.trail[i].x, puck.trail[i].y);
+          const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.45;
+          if (alpha <= 0) continue;
+          const [ax, ay] = P(a.x, a.y), [bx, by] = P(b.x, b.y);
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.strokeStyle = rgba(C.ink, alpha); ctx.stroke();
+        }
+      }
+      if (me) {
+        const [cx, cy] = P(me.x, me.y), r = PUCK_R * S;
+        const predicted = puck.state === 'predicted';
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = predicted ? rgba(C.ink, 0.4) : C.ink; ctx.stroke();
+      }
+    });
+    if (!game.running) {
+      const min = Math.round(game.playSeconds / 60);
+      text(ctx, `시작하면 훈련 3가지를 ${min}분씩 이어서 합니다`, f.x + f.w / 2, f.y + f.h * 0.42, fs, { weight: 600, color: C.inkSoft, halo: true });
+      WIDE_DRILLS.forEach((d, i) => text(ctx, d.label, f.x + f.w / 2, f.y + f.h * 0.42 + fs * (1.9 + i * 1.45), fs * 0.85, { weight: 500, color: C.mute, halo: true }));
+    }
+    for (const e of game.effects) {
+      if (e.type !== 'pop') continue;
+      const [cx, cy] = P(Math.min(0.9, Math.max(0.1, e.x)), Math.min(A, Math.max(0.08, e.y)));
+      ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.6);
+      const script = e.style === 'script';
+      text(ctx, e.text, cx, cy - e.age * W * 0.04, script ? W * 0.045 : W * 0.026, { family: script ? F.script : F.display, weight: script ? 700 : 800, color: e.color });
       ctx.globalAlpha = 1;
     }
     ctx.restore();

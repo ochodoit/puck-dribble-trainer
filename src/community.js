@@ -3,12 +3,47 @@
 //
 // 글 종류
 //  - course : 자유 연습에서 만든 코스 + 무엇이 좋아지는지 설명 + 글쓴이의 사이클 기록. 다른 사람이 같은 코스로 도전해 기록 게시판에 오른다.
-//  - record : 게임(아케이드 등) 점수 자랑.
+//  - record : 게임(아케이드 등) 점수 자랑. 한 사람이 모드(모드·시간·투명)마다 하나만 — 다시 올리면 그 글이 새 기록으로 바뀐다.
+//             다른 사람이 '나도 연습하기'로 같은 모드를 플레이하면, 글쓴이와 나이가 같거나 어린 선수의 점수만 도전 기록에 오른다.
 //  - beat   : 다른 사람의 코스 기록을 갈아치웠다는 글 (원본 코스로 이어진다).
 
 export const TITLE_MAX = 30;
 export const BODY_MAX = 200;
 export const POST_TYPES = ['course', 'record', 'beat'];
+export const BOARD_TOP = 5;     // 글을 눌렀을 때 보여주는 상위 기록 수
+
+/** 기록 자랑의 비교 키: 모드 + 시간 + 투명 모드 (game.js 의 rankKey 와 같은 규칙: arcade@60, arcade@60-inv, wide) */
+export const bragKey = (p) => `${p.modeId}${p.seconds ? `@${p.seconds}` : ''}${p.invisible ? '-inv' : ''}`;
+
+/** 글이 속한 게임 모드: 코스·기록 갱신 글은 자유 연습 */
+export const postMode = (p) => (p.type === 'record' ? p.modeId : 'free');
+
+// 나이가 없는 예전 글은 연령대의 가장 많은 나이로 본다 (U8 = 7세 이하 …)
+const AGE_GROUP_MAX = { U8: 7, U10: 9, U12: 11, U14: 13, U16: 15, U18: 17, '성인': 39, '시니어': 99 };
+/** 기록 자랑 글쓴이의 나이 (이 나이 이하만 도전 기록이 오른다). 알 수 없으면 null = 제한 없음 */
+export function postAge(p) {
+  if (Number.isInteger(p?.age)) return p.age;
+  return AGE_GROUP_MAX[p?.ageGroup] ?? null;
+}
+/** 이 선수의 점수가 이 자랑 글의 도전 기록에 오를 수 있는가: 로그인 + 글쓴이와 나이가 같거나 어림 */
+export function canRecordOn(user, post) {
+  if (!user) return false;
+  const limit = postAge(post);
+  return limit === null || (Number.isFinite(user.age) && user.age <= limit);
+}
+
+/**
+ * 글 목록 거르기·정렬 (두 저장소 공통).
+ * opts: { type: 'all'|'course'|'record', mode: ''|모드 id, sort: 'recent'|'cheers' } (예전처럼 문자열이면 type)
+ */
+export function arrangePosts(posts, opts = {}) {
+  const o = typeof opts === 'string' ? { type: opts } : opts;
+  const type = o.type || 'all', mode = o.mode || '', sort = o.sort || 'recent';
+  const out = posts.filter((p) => (type === 'all' || (type === 'course' ? p.type === 'course' : p.type !== 'course'))
+    && (!mode || postMode(p) === mode));
+  const cheers = (p) => (p.cheers || []).length;
+  return out.sort(sort === 'cheers' ? (a, b) => cheers(b) - cheers(a) || b.at - a.at : (a, b) => b.at - a.at);
+}
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const cleanPoints = (pts) => (Array.isArray(pts) ? pts : [])
@@ -45,11 +80,13 @@ export function buildPost(user, data) {
   const post = {
     type, title, body, at: Date.now(),
     uid: user.id, nick: user.nick, number: Number.isInteger(user.number) ? user.number : null, team: user.team, country: user.country, ageGroup: user.ageGroup,
+    age: Number.isInteger(user.age) ? user.age : null,
     records: [], cheers: [],
   };
   if (type === 'record') {
     if (!data.modeId || !Number.isFinite(data.score)) return { error: '자랑할 기록이 없습니다' };
     post.modeId = String(data.modeId); post.seconds = Number(data.seconds) || 0; post.score = Math.round(data.score);
+    post.invisible = data.invisible === true;
     return { post };
   }
   const course = cleanPoints(data.course);
@@ -78,6 +115,48 @@ export function boardOf(post) {
   return rows.map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
+/** 기록 자랑의 도전 기록: 글쓴이 점수 + 도전자 점수(한 사람당 최고 하나)를 높은 순으로. 같은 점수는 먼저 세운 기록이 위 */
+export function scoreBoardOf(post) {
+  const rows = [{ uid: post.uid, nick: post.nick, number: post.number ?? null, team: post.team, country: post.country, age: post.age ?? null, score: post.score, at: post.at, author: true }];
+  for (const r of post.records || []) {
+    if (!Number.isFinite(r.score) || r.uid === post.uid) continue;
+    const i = rows.findIndex((x) => x.uid === r.uid);
+    if (i < 0) rows.push({ ...r });
+    else if (r.score > rows[i].score) rows[i] = { ...r };
+  }
+  rows.sort((a, b) => b.score - a.score || a.at - b.at);
+  return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+/** 글 종류에 맞는 기록 게시판 (코스 = 평균 사이클 순, 기록 자랑 = 점수 순). 기록 갱신 글은 원본 코스 글의 게시판을 쓴다 */
+export const boardFor = (post) => (post.type === 'record' ? scoreBoardOf(post) : boardOf(post));
+/** 도전한 사람 수 (글쓴이 제외) */
+export const challengerCount = (post) => boardFor(post).filter((r) => !r.author).length;
+
+/**
+ * 기록 자랑 도전 기록 등록 결과 (저장 후 게시판 기준).
+ * 반환: { eligible, limit, improved, rank, total, prevHolder, isHolder, beatAuthor, challengers }
+ */
+export function scoreOutcome(post, user, score, before, improved) {
+  const after = scoreBoardOf(post);
+  const me = after.find((r) => r.uid === user.id);
+  return {
+    eligible: true, limit: postAge(post), improved, rank: me ? me.rank : null, total: after.length, prevHolder: before[0] || null,
+    isHolder: !!me && me.rank === 1, beatAuthor: score > post.score, challengers: after.length - 1,
+  };
+}
+
+/** 등록할 수 없을 때(나이·글쓴이 본인)의 결과 */
+export function scoreRejected(post, user, reason) {
+  const board = scoreBoardOf(post);
+  return { eligible: false, reason, limit: postAge(post), improved: false, rank: null, total: board.length, prevHolder: board[0] || null, isHolder: false, beatAuthor: false, challengers: board.length - 1, myAge: user?.age ?? null };
+}
+
+export const scoreRow = (user, score) => ({
+  uid: user.id, nick: user.nick, number: Number.isInteger(user.number) ? user.number : null, team: user.team, country: user.country,
+  age: Number.isInteger(user.age) ? user.age : null, score: Math.round(score), at: Date.now(),
+});
+
 /** 처음부터 들어 있는 예시 코스 (누구나 바로 연습해 볼 수 있게). 기록은 비어 있어 첫 완주자가 기록 보유자가 된다 */
 export const STARTER_POSTS = [
   { id: 'starter-wide', title: '좌우 와이드', body: '몸 앞에서 좌우 끝까지 넓게 움직이는 기본 코스. 리치와 손목 롤이 좋아집니다.',
@@ -104,22 +183,63 @@ export class LocalCommunityStore {
   }
   _save(posts) { try { this.storage.setItem(this.KEY, JSON.stringify(posts)); } catch { /* ignore */ } }
 
-  /** 최신 글부터. filter: 'all' | 'course' | 'record'(기록 자랑 + 기록 갱신) */
-  async list(filter = 'all') {
-    const posts = this._load().filter((p) => filter === 'all' || (filter === 'course' ? p.type === 'course' : p.type !== 'course'));
-    return posts.sort((a, b) => b.at - a.at);
-  }
+  /**
+   * 글 목록. opts: { type: 'all'|'course'|'record'(기록 자랑 + 기록 갱신), mode: 모드 id, sort: 'recent'|'cheers' }
+   * (예전처럼 문자열 하나면 type)
+   */
+  async list(opts = 'all') { return arrangePosts(this._load(), opts); }
 
   async get(id) { return this._load().find((p) => p.id === id) || null; }
 
+  /** 내가 이 모드(모드·시간·투명)로 올린 기록 자랑 글 (모드마다 하나) */
+  async myBrag(user, key) {
+    if (!user) return null;
+    return this._load().filter((p) => p.type === 'record' && p.uid === user.id && bragKey(p) === key).sort((a, b) => b.at - a.at)[0] || null;
+  }
+
+  /** 글 올리기. 기록 자랑은 모드마다 하나: 이미 있으면 그 글을 새 기록으로 바꾼다 (응원·도전 기록은 유지) -> { ...post, replaced: true } */
   async create(user, data) {
     const { error, post } = buildPost(user, data);
     if (error) throw new Error(error);
-    post.id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     const posts = this._load();
+    if (post.type === 'record') {
+      const old = posts.filter((p) => p.type === 'record' && p.uid === user.id && bragKey(p) === bragKey(post)).sort((a, b) => b.at - a.at);
+      if (old.length) {
+        const keep = old[0];
+        const { records, cheers, ...fields } = post;
+        Object.assign(keep, fields);
+        const drop = new Set(old.slice(1).map((p) => p.id)); // 예전에 여러 개 올라가 있었다면 하나만 남긴다
+        this._save(posts.filter((p) => !drop.has(p.id)));
+        return { ...keep, replaced: true };
+      }
+    }
+    post.id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     posts.push(post);
     this._save(posts);
     return post;
+  }
+
+  /**
+   * 기록 자랑 도전 기록 등록 ('나도 연습하기' 후 같은 모드를 끝까지 플레이).
+   * 글쓴이와 나이가 같거나 어린 선수만, 한 사람당 최고 점수 하나. 글쓴이 본인은 등록하지 않는다(글을 다시 올리면 바뀜).
+   */
+  async submitScore(user, id, score) {
+    if (!user) throw new Error('로그인이 필요합니다');
+    if (!Number.isFinite(score) || score < 0) throw new Error('기록이 올바르지 않습니다');
+    const posts = this._load();
+    const p = posts.find((x) => x.id === id);
+    if (!p || p.type !== 'record') throw new Error('글을 찾을 수 없습니다');
+    if (p.uid === user.id) return scoreRejected(p, user, 'author');
+    if (!canRecordOn(user, p)) return scoreRejected(p, user, 'age');
+    const before = scoreBoardOf(p);
+    const mine = (p.records || []).find((r) => r.uid === user.id);
+    const improved = !mine || Math.round(score) > mine.score;
+    if (improved) {
+      p.records = (p.records || []).filter((r) => r.uid !== user.id);
+      p.records.push(scoreRow(user, score));
+      this._save(posts);
+    }
+    return scoreOutcome(p, user, Math.round(score), before, improved);
   }
 
   async remove(user, id) {

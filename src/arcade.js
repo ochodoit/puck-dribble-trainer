@@ -1,23 +1,21 @@
 // 아케이드: 웹캠으로 추적한 퍽의 (X, Y)를 화면 하단 플레이 존에 매핑하는 체감형 스틱핸들링 게임
 // 좌표계: 화면 폭 = 1 단위, 높이 = aspect (H/W). 좌우 테두리 안쪽이 경기장 레인, 플레이 존은 하단 30%.
 // 규칙: 검정 퍽들이 같은 속도로, 서로 겹치지 않게 내려온다. coin(노란 원)만 먹고, 검정 퍽은 피한다. 빨간 원 = 나.
-//       일부 퍽은 내 퍽이 있는 줄을 겨냥해 떨어지므로 가만히 있으면 맞는다.
-//       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점 + 콤보 초기화.
+//       일부 퍽은 내 퍽이 있는 줄을 겨냥해 떨어지므로 가만히 있으면 맞는다 (잦은 터치로 피한다).
+//       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점.
 import { C, F, rgba, text, sparks, font, alphaLayer } from './theme.js';
 
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
 export const PUCK_R = 0.022;         // 내 퍽 반지름 (화면 폭 단위)
-// 점수: 터치(좌우 방향 전환)가 중심. 가만히 있으면 점수가 나지 않는다. 배율·피버 없이 작은 정수만 더한다.
+// 점수: 더하기만 한다 (배율·보너스 없음). coin을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
+//       가만히 있으면 점수가 나지 않는다. 나를 겨냥한 퍽을 피한 것 자체에는 점수가 없다(피한 수는 기록만).
 export const HIT_PENALTY = 10;       // 충돌 감점
 export const TOUCH_POINTS = 1;       // 터치 1번
+export const COIN_POINTS = 10;       // coin 1개
 export const TOUCH_MIN_TRAVEL = 0.08; // 직전 터치에서 경기장 폭의 8% 이상 움직여야 터치로 인정 (제자리 흔들기 방지)
 const TOUCH_TURN = 0.012;            // 이만큼 되돌아와야 방향 전환으로 본다 (추적 떨림 무시, 화면 폭 단위)
-export const STREAK_GAP_S = 1.2;     // 터치 사이 간격이 이 안이면 연속 터치
-export const STREAK_EVERY = 10;      // 연속 터치 10번마다
-export const QUICK_HANDS = 5;        //   +5 "Quick hands"
-export const DODGE_POINTS = 3;       // 나를 겨냥한 퍽을 피함
-export const COIN_POINTS = 10;       // coin
+export const STREAK_GAP_S = 1.2;     // 터치 사이 간격이 이 안이면 연속 터치 (기록용, 점수와 무관)
 const LEVEL_EVERY_S = 15;            // 15초마다 레벨 +1 (퍽이 더 자주 나온다)
 const THREAT_S = 0.8;                // 이 시간 안에 내 퍽에 닿을 줄에 있던 퍽 = 나를 겨냥한 퍽
 const STILL_MS = 1500;               // 이만큼 멈춰 있으면 연속 터치 초기화
@@ -59,7 +57,7 @@ export class Arcade {
 
   reset() {
     this.score = 0;
-    this.touches = 0; this.quickHands = 0; this.streak = 0; this.maxStreak = 0; this.lastTouchAt = 0;
+    this.touches = 0; this.streak = 0; this.maxStreak = 0; this.lastTouchAt = 0;
     this.passed = 0; this.items = 0; this.hits = 0;
     this.elapsed = 0;
     this.tDir = 0; this.tExt = null; this.tAnchor = null; // 터치 판정: 현재 방향, 그 방향의 끝점, 직전 터치 지점
@@ -157,18 +155,15 @@ export class Arcade {
       // 나를 겨냥한 퍽: 0.8초 안에 닿을 거리 위에서, 내 퍽과 같은 줄(닿는 폭 안)에 있었던 적이 있음
       const ahead = a.y - o.y;
       if (!o.threat && ahead > 0 && ahead < o.vy * THREAT_S && Math.abs(a.x - o.x) < touch) o.threat = true;
-      // 통과: 퍽 전체가 내 퍽 아래로 지나감. 겨냥당했는데 맞지 않은 퍽만 '피했다'로 인정
+      // 통과: 퍽 전체가 내 퍽 아래로 지나감. 겨냥당했는데 맞지 않은 퍽은 '피한 퍽'으로 센다 (점수는 없음)
       if (!o.passed && o.y - o.r > a.y + PUCK_R) {
         o.passed = true;
-        if (!o.hit && o.threat) {
-          this.passed++;
-          this._addScore(DODGE_POINTS, o.x, a.y - PUCK_R * 2.5, `+${DODGE_POINTS}`);
-        }
+        if (!o.hit && o.threat) this.passed++;
       }
     }
     this.obstacles = this.obstacles.filter((o) => o.y - o.r < this.aspect + 0.05);
 
-    // 노란 퍽: 먹으면 +200
+    // coin: 먹으면 +10
     for (const p of this.pickups) {
       p.y += p.vy * dt;
       if (a && tracked && !p.taken && Math.hypot(a.x - p.x, a.y - p.y) < p.r + PUCK_R) {
@@ -179,7 +174,7 @@ export class Arcade {
     }
     this.pickups = this.pickups.filter((p) => !p.taken && p.y - p.r < this.aspect + 0.05);
 
-    this.instruction = 'coin은 먹고, 검정 퍽은 피하고, 좌우로 터치';
+    this.instruction = 'coin은 먹고, 검정 퍽은 좌우로 쳐서 피하기';
   }
 
   _updateCountdown(dt, tracked) {
@@ -230,8 +225,8 @@ export class Arcade {
   }
 
   /**
-   * 터치 판정: 좌우로 움직이다 방향을 바꾸는 순간이 터치. 직전 터치 지점에서 경기장 폭의 8% 넘게 움직였어야 인정.
-   * 연속 터치(간격 1.2초 이내) 10번마다 Quick hands 보너스.
+   * 터치 판정: 좌우로 움직이다 방향을 바꾸는 순간이 터치(+1). 직전 터치 지점에서 경기장 폭의 8% 넘게 움직였어야 인정.
+   * 연속 터치(간격 1.2초 이내)는 기록으로만 센다.
    */
   _updateTouch(x, now) {
     if (this.tAnchor === null) { this.tAnchor = x; this.tExt = x; this.tDir = 0; return; }
@@ -252,11 +247,6 @@ export class Arcade {
     this.lastTouchAt = now;
     this._addScore(TOUCH_POINTS); // 터치는 글자 없이 점수판·연속 표시로만 (화면을 비워 둔다)
     this.effects.push({ type: 'tick', x: at, y: this.avatar.y, t0: now, dur: 260, age: 0 });
-    if (this.streak % STREAK_EVERY === 0) {
-      this.quickHands++;
-      this._addScore(QUICK_HANDS, this.avatar.x, this.avatar.y - PUCK_R * 3.2, `Quick hands +${QUICK_HANDS}`, C.red, 'script');
-      this.sfx?.deke?.();
-    }
   }
 
   /** 1.5초 넘게 멈춰 있으면 연속 터치 초기화 */
@@ -265,7 +255,7 @@ export class Arcade {
     if (now - this.lastMoveAt > STILL_MS) this.streak = 0;
   }
 
-  /** 충돌: 목숨 대신 감점 + 콤보 초기화 + 1.5초 무적 */
+  /** 충돌: 목숨 대신 감점 + 연속 터치 초기화 + 1.5초 무적 */
   _onHit(o, now) {
     o.hit = true;
     this.hits++;
@@ -288,11 +278,11 @@ export class Arcade {
   result(puck) {
     const distM = Math.max(0, (puck?.distance || 0) - this.startDistance) * this.floorWidthM;
     return {
-      score: this.score, touches: this.touches, quickHands: this.quickHands, maxStreak: this.maxStreak, passed: this.passed, items: this.items, hits: this.hits,
+      score: this.score, touches: this.touches, maxStreak: this.maxStreak, passed: this.passed, items: this.items, hits: this.hits,
       elapsed: this.elapsed, distanceM: distM, level: this.level,
       items_: [
-        ['점수', this.score], ['터치', this.touches], ['Quick hands', this.quickHands], ['최고 연속 터치', this.maxStreak],
-        ['피한 퍽', this.passed], ['Coin', this.items], ['충돌', this.hits],
+        ['점수', this.score], ['Coin', this.items], ['터치', this.touches], ['충돌', this.hits],
+        ['최고 연속 터치', this.maxStreak], ['피한 퍽', this.passed],
         ['퍽 이동 거리', `${distM.toFixed(1)} m`], ['레벨', this.level + 1],
       ],
     };
@@ -371,7 +361,7 @@ export class Arcade {
         ctx.lineWidth = hair * 3; ctx.strokeStyle = rgba(C.red, 1 - e.age);
         ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(L, H); ctx.moveTo(Rr, 0); ctx.lineTo(Rr, H); ctx.stroke();
       } else if (e.type === 'pop') {
-        // 작은 글자가 살짝 떠오르며 사라진다. 'Go!'·Quick hands 만 필기체, 나머지는 본문보다 작은 숫자
+        // 작은 글자가 살짝 떠오르며 사라진다. 'Go!' 만 필기체, 나머지는 본문보다 작은 숫자
         ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.8);
         const script = e.style === 'script', big = e.style === 'display';
         const size = script ? fs * 1.5 : big ? fs * 2.2 : fs * 0.82;
@@ -379,8 +369,8 @@ export class Arcade {
           { family: script ? F.script : big ? F.display : F.sans, weight: script ? 700 : big ? 800 : 600, color: e.color, halo: true });
         ctx.globalAlpha = 1;
       } else if (e.type === 'tick') {
-        // 터치: 방향을 바꾼 자리에 짧은 세로 헤어라인 하나 (글자 없이)
-        ctx.globalAlpha = 1 - e.age;
+        // 터치: 방향을 바꾼 자리에 짧은 세로 헤어라인 하나 (글자 없이). 내 퍽 위치가 드러나므로 내 퍽 표시 농도를 따른다
+        ctx.globalAlpha = (1 - e.age) * this.puckAlpha;
         ctx.lineWidth = hair; ctx.strokeStyle = C.ink;
         const tx = e.x * S, ty = e.y * S, h = PUCK_R * S * 1.6;
         ctx.beginPath(); ctx.moveTo(tx, ty - h); ctx.lineTo(tx, ty + h); ctx.stroke();
@@ -401,7 +391,7 @@ export class Arcade {
     const W = S, y = zt - W * 0.2, r = fs * 0.55;
     let x = W / 2 - fs * 9.5;
     drawCoin(ctx, x, y, r * 1.5, Math.max(1, W / (ctx.canvas.clientWidth || W)));
-    text(ctx, '먹기 +200', x + r * 2.4, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
+    text(ctx, `먹기 +${COIN_POINTS}`, x + r * 2.4, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
     x = W / 2 + fs * 1.2;
     PUCK_COLORS.forEach((c, i) => { ctx.beginPath(); ctx.arc(x + i * r * 1.5, y, r, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill(); });
     text(ctx, '피하기', x + PUCK_COLORS.length * r * 1.5 + r * 0.6, y, fs * 0.9, { weight: 600, align: 'left', halo: false });

@@ -5,13 +5,13 @@ import { C } from './theme.js';
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
   { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true,
-    desc: '검정 퍽이 내려옵니다. coin은 먹고 검정 퍽은 피하세요. 좌우로 퍽을 칠수록(터치) 점수가 쌓입니다.' },
+    desc: '검정 퍽이 내려옵니다. 좌우로 자주 쳐서(터치) 피하고, coin을 많이 먹을수록 점수가 높아집니다.' },
   { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
     desc: '평면 경기장의 네 변에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
-  { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 30,
-    desc: '좌우 끝 구역을 번갈아 터치. 넓은 가동 범위 훈련.' },
+  { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 0, timed: true, stages: 3,
+    desc: '3가지 훈련을 고른 시간만큼 이어서: ① 좌우 끝 ② 양 끝 짧은 터치 (1-2-1-10-9-10) ③ 양 끝과 가운데 (1-2-1-5-6-5-10-9-10). 판 왼쪽 끝이 1, 오른쪽 끝이 10' },
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
-    desc: '두 콘 사이를 8자로 돌며 순서대로 게이트 통과. 콘을 치면 감점.' },
+    desc: '두 콘 사이를 8자로 돌며 게이트 통과. 진한 빨간 원이 다음, 옅은 원이 그다음. 콘을 치면 감점.' },
   { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 20,
     desc: '가운데 박스 안에서 최대한 빠르게 좌우로 퍽을 움직이세요.' },
   { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
@@ -22,13 +22,33 @@ export const MODES = [
 
 export const PLAY_MINUTES = [1, 3, 5];
 export const DODGE_HIT_PENALTY = 50;
-/** 랭킹 키: 시간제 모드는 시간별로 따로 집계 (예: arcade@60) */
-export const rankKey = (modeId, seconds) => { const m = MODES.find((x) => x.id === modeId); return m?.timed ? `${modeId}@${seconds}` : modeId; };
+/** 랭킹 키: 시간제 모드는 시간별로, 투명 모드는 일반과 따로 집계 (예: arcade@60, arcade@60-inv). community.js 의 bragKey 와 같은 규칙 */
+export const rankKey = (modeId, seconds, invisible = false) => {
+  const m = MODES.find((x) => x.id === modeId);
+  return (m?.timed ? `${modeId}@${seconds}` : modeId) + (invisible ? '-inv' : '');
+};
+
+/**
+ * 와이드 드리블의 3가지 훈련 (고른 시간만큼 하나씩 이어서).
+ * 판(평면 경기장) 가로를 10칸으로 나눠 왼쪽 끝 = 1번, 오른쪽 끝 = 10번. seq 가 없으면 좌우 끝 구역을 번갈아 터치.
+ */
+export const WIDE_DRILLS = [
+  { label: '좌우 끝', seq: null },
+  { label: '양 끝 짧은 터치', seq: [1, 2, 1, 10, 9, 10] },
+  { label: '양 끝과 가운데', seq: [1, 2, 1, 5, 6, 5, 10, 9, 10] },
+];
+export const WIDE_LANES = 10;
+export const WIDE_BAND = 0.6;   // 구역 높이 (경기장 세로 대비, 위아래 가운데)
+export const WIDE_END = { x: 0.105, w: 0.13 }; // 훈련 1의 끝 구역: 예전(폭 0.26)의 절반 두께, 바깥 끝은 그대로
+/** n번 칸의 가로 가운데 (1 ~ 10) */
+export const laneX = (n) => (n - 0.5) / WIDE_LANES;
 
 export const PUCK_R = 0.025;
 const CONE_R = 0.045;
-const TARGET_R = 0.085;
-const WAYPOINT_R = 0.09;
+// 목표 지점 크기 (바닥 폭 단위): 예전의 절반. 판정 반경은 그린 원보다 조금 넉넉하게
+const TARGET_R = 0.0425;          // 반응 타겟 (그린 원 = 판정 반경)
+const WAYPOINT_R = 0.045;         // 8자 게이트 판정 반경
+export const GATE_DRAW_R = 0.0375; // 8자 게이트 그린 원 반지름
 
 const DIFF = {
   // flyMin~flyMax: 날아오는 퍽의 속도 범위(평면 폭/초). 퍽마다 이 안에서 무작위로 정해지고 이후 일정
@@ -57,6 +77,7 @@ export class Game {
     this.mode = MODES[0];
     this.difficulty = 'normal';
     this.playSeconds = 60;   // 시간제 모드의 제한 시간 (60 | 180 | 300)
+    this.invisible = false;  // 투명 모드: 플레이 중 내 퍽을 숨김 (랭킹 키가 따로)
     // 퍽 피하기의 평면: 가로 1 × 세로 A (같은 단위). flip = 카메라 쪽으로 밀면 위로. main이 화면에 맞춰 설정
     this.plane = { A: 1, flip: false };
     this.me = null;          // 평면 위의 내 퍽 위치
@@ -68,8 +89,12 @@ export class Game {
     this.resetState();
   }
 
-  /** 이 판의 제한 시간(초). 0이면 무제한(자유 연습) */
-  get limit() { return this.mode.timed ? this.playSeconds : this.mode.duration; }
+  /** 이 판의 제한 시간(초). 0이면 무제한(자유 연습). 여러 훈련을 잇는 모드(와이드)는 훈련 수 × 고른 시간 */
+  get limit() { return this.mode.timed ? this.playSeconds * (this.mode.stages || 1) : this.mode.duration; }
+  /** 지금 몇 번째 훈련인지 (0부터) */
+  get stage() { return this.mode.stages ? Math.min(this.mode.stages - 1, Math.floor(this.elapsed / this.playSeconds)) : 0; }
+  /** 지금 훈련의 남은 시간(초) */
+  get stageLeft() { return this.mode.stages ? Math.max(0, Math.min(this.timeLeft, this.playSeconds * (this.stage + 1) - this.elapsed)) : this.timeLeft; }
 
   resetState() {
     this.timeLeft = this.limit;
@@ -85,6 +110,7 @@ export class Game {
     this.me = null;
     this.courseIdx = 0; this.lapStart = 0; this.courseLeft = true;
     this.wpIndex = 0;
+    this.wide = null;
     this.effects = [];
     this.stats = {};
     this.invulnUntil = 0;
@@ -117,12 +143,8 @@ export class Game {
         this.instruction = '사방에서 날아오는 빨간 퍽을 피하세요!';
         break;
       case 'wide':
-        this.zones = [
-          { id: 'L', x: 0.17, y: 0.5, w: 0.26, h: 0.9, active: true },
-          { id: 'R', x: 0.83, y: 0.5, w: 0.26, h: 0.9, active: false },
-        ];
-        this.stats = { reps: 0 };
-        this.instruction = '← 왼쪽 구역으로';
+        this.stats = { reps: 0, drills: WIDE_DRILLS.map(() => 0), sets: WIDE_DRILLS.map(() => 0) };
+        this._wideStage(0);
         break;
       case 'figure8':
         this.cones = [{ x: 0.3, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }, { x: 0.7, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }];
@@ -132,7 +154,7 @@ export class Game {
         ];
         this.wpIndex = 0;
         this.stats = { laps: 0, gates: 0, hits: 0 };
-        this.instruction = '가운데 게이트부터 순서대로';
+        this.instruction = '진한 빨간 원으로 · 옅은 원이 그다음';
         break;
       case 'quick':
         this.zones = [{ id: 'C', x: 0.5, y: 0.5, w: 0.34, h: 0.5, active: true }];
@@ -175,7 +197,8 @@ export class Game {
 
     if (this.limit > 0) {
       this.timeLeft = Math.max(0, this.limit - this.elapsed);
-      const sec = Math.ceil(this.timeLeft);
+      const left = this.mode.stages ? this.stageLeft : this.timeLeft; // 훈련마다 끝나기 3초 전부터 똑딱
+      const sec = Math.ceil(left);
       if (sec <= 3 && sec !== this.lastTickSec && sec > 0) { this.sfx?.tick(); this.lastTickSec = sec; }
       if (this.timeLeft <= 0) { this.stop('time'); return; }
     }
@@ -247,15 +270,25 @@ export class Game {
         break;
       }
       case 'wide': {
-        if (pp && tracked) {
-          const z = this.zones.find((z) => z.active);
-          if (z && this._inZone(pp, z)) {
-            this.stats.reps++; this.score = this.stats.reps;
+        // 평면 경기장에서 판정 (퍽 피하기·자유 연습과 같은 좌표·방향)
+        const me = pp ? this.toPlane(pp.x, pp.y) : null;
+        this.me = me;
+        if (this.stage !== this.wide.stage) this._wideStage(this.stage); // 고른 시간이 지나면 다음 훈련
+        else if (this.wide.A !== this.plane.A) this._wideZones();         // 화면 크기가 바뀌면 구역 높이도
+        const w = this.wide;
+        const z = this.zones.find((zz) => zz.active);
+        if (me && tracked && z && this._inZone(me, z)) {
+          this.stats.reps++; this.stats.drills[w.stage]++; this.score = this.stats.reps;
+          this.sfx?.rep();
+          if (w.seq) {
+            w.idx = (w.idx + 1) % w.seq.length;
+            if (w.idx === 0) { this.stats.sets[w.stage]++; this._pop(0.5, this.plane.A * 0.5, `${this.stats.sets[w.stage]}세트!`, C.red, 'script'); this.sfx?.target(); }
+            else this._pop(z.x, z.y, '+1', C.ink);
+          } else {
             this._pop(z.x, z.y, '+1', C.ink);
-            this.sfx?.rep();
-            this.zones.forEach((zz) => (zz.active = !zz.active));
-            this.instruction = this.zones[0].active ? '← 왼쪽 구역으로' : '오른쪽 구역으로 →';
+            w.idx = 1 - w.idx;
           }
+          this._wideZones();
         }
         break;
       }
@@ -264,6 +297,7 @@ export class Game {
           const wp = this.waypoints[this.wpIndex];
           if (dist(pp, wp) < WAYPOINT_R) {
             this.stats.gates++; this.score += 1;
+            this._ring(wp.x, wp.y, GATE_DRAW_R, now); // 숫자 대신 지나간 자리에 퍼지는 고리
             this.sfx?.rep();
             this.wpIndex = (this.wpIndex + 1) % this.waypoints.length;
             if (this.wpIndex === 0) { this.stats.laps++; this.score += 4; this._pop(0.5, 0.5, `${this.stats.laps}바퀴!`, C.red, 'script'); this.sfx?.target(); }
@@ -300,6 +334,7 @@ export class Game {
             const total = (now - t.spawnedAt) / 1000;
             const rt = ((t.movedAt || now) - t.spawnedAt) / 1000;
             this.stats.times.push(rt); this.stats.travel.push(total - rt); this.stats.hits++;
+            this._ring(t.x, t.y, t.r, now);
             this.score += Math.max(1, Math.round(10 - rt * 8));
             this._pop(t.x, t.y, `반응 ${rt.toFixed(2)}s`, C.ink);
             this.sfx?.target();
@@ -419,11 +454,48 @@ export class Game {
 
   _inZone(p, z) { return Math.abs(p.x - z.x) < z.w / 2 && Math.abs(p.y - z.y) < z.h / 2; }
 
+  /** 와이드 드리블: i번째 훈련 시작 (처음 또는 시간이 지나 다음 훈련으로) */
+  _wideStage(i) {
+    const first = !this.wide;
+    const d = WIDE_DRILLS[i];
+    this.wide = { stage: i, seq: d.seq, idx: 0 };
+    this._wideZones();
+    if (!first) {
+      this._pop(0.5, this.plane.A * 0.5, d.label, C.red, 'script'); // 바뀐 훈련 이름만 (숫자 없이)
+      this.sfx?.target();
+    }
+  }
+
+  /** 지금 목표 구역(빨강)과 그다음 구역(점선)을 평면 좌표로. 구역은 위아래 가운데, 높이 WIDE_BAND */
+  _wideZones() {
+    const w = this.wide, A = this.plane.A;
+    const y = A / 2, h = WIDE_BAND * A;
+    w.A = A;
+    if (!w.seq) {
+      // 훈련 1: 좌우 끝 구역을 번갈아 (idx 0 = 왼쪽부터)
+      this.zones = [
+        { id: 'L', x: WIDE_END.x, y, w: WIDE_END.w, h, active: w.idx === 0 },
+        { id: 'R', x: 1 - WIDE_END.x, y, w: WIDE_END.w, h, active: w.idx === 1 },
+      ];
+      this.instruction = w.idx === 0 ? '← 왼쪽 끝으로' : '오른쪽 끝으로 →';
+      return;
+    }
+    const n = w.seq[w.idx], next = w.seq[(w.idx + 1) % w.seq.length];
+    const prev = w.seq[(w.idx + w.seq.length - 1) % w.seq.length];
+    const lane = (k, active) => ({ id: k, n: k, x: laneX(k), y, w: 1 / WIDE_LANES, h, active, next: !active });
+    this.zones = [lane(n, true), lane(next, false)];
+    // 화면에 숫자를 쓰지 않으므로 안내도 방향으로 (직전 자리 기준)
+    this.instruction = n < prev ? '← 진한 빨간 영역으로' : '진한 빨간 영역으로 →';
+  }
+
+  /** 목표를 지나간 자리에 잠깐 퍼지며 사라지는 잉크 고리 */
+  _ring(x, y, r, now) { this.effects.push({ type: 'ring', x, y, r, t0: now, dur: 450, age: 0 }); }
+
   _pop(x, y, text, color = C.ink, style = 'display') { this.effects.push({ type: 'pop', x, y, text, color, style, t0: performance.now(), dur: 900, age: 0 }); }
 
   _buildResult(reason) {
-    const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, limit: this.limit, rankKey: rankKey(this.mode.id, this.playSeconds), items: [] };
-    const minutes = `${Math.round(this.limit / 60)}분`;
+    const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, limit: this.limit, seconds: this.mode.timed ? this.playSeconds : 0, invisible: this.invisible, rankKey: rankKey(this.mode.id, this.playSeconds, this.invisible), items: [] };
+    const minutes = `${Math.round(this.playSeconds / 60)}분`;
     const s = this.stats;
     switch (this.mode.id) {
       case 'arcade': {
@@ -435,7 +507,9 @@ export class Game {
         r.items = [['점수', this.score], ['피한 퍽', s.dodged], ['아슬아슬 회피', s.close], ['충돌', s.hits], ['최대 동시 퍽', s.maxFlyers], ['게임 시간', minutes]];
         break;
       case 'wide':
-        r.items = [['반복 횟수', s.reps], ['분당 반복', Math.round(s.reps / Math.max(1, this.elapsed) * 60)]];
+        r.items = [['점수', this.score],
+          ...WIDE_DRILLS.map((d, i) => [`훈련 ${i + 1} · ${d.label}`, d.seq ? `${s.drills[i]} · ${s.sets[i]}세트` : s.drills[i]]),
+          ['분당 터치', Math.round(s.reps / Math.max(1, this.elapsed) * 60)], ['게임 시간', `${minutes} × ${this.mode.stages}`]];
         break;
       case 'figure8':
         r.items = [['점수', this.score], ['완주 바퀴', s.laps], ['통과 게이트', s.gates], ['콘 충돌', s.hits]];

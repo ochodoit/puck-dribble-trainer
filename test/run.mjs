@@ -25,8 +25,24 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 // 테스트는 외부 웹폰트 없이 동작해야 함 (폴백 글꼴): 폰트 요청은 빈 응답으로 대체
 // 기본은 한국어 화면 (영어 화면 테스트는 locale 을 따로 준다)
-const newCtx = async (opts) => { const c = await browser.newContext({ locale: 'ko-KR', ...opts }); await c.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' })); return c; };
+// 테스트는 실제 Firebase(운영 데이터)에 절대 쓰지 않는다: firebase-config.js 를 null 로 바꿔 기기 내 저장소로 동작
+const newCtx = async (opts) => {
+  const c = await browser.newContext({ locale: 'ko-KR', ...opts });
+  await c.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await c.route(/\/src\/firebase-config\.js(\?|$)/, (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const firebaseConfig = null;\n' }));
+  await c.route(/gstatic\.com\/firebasejs/, (r) => r.abort());
+  return c;
+};
 let failed = false;
+/** 카메라 시작 직후의 준비 과정(1/2 플레이 공간 -> 2/2 퍽 등록 -> 모드 창)을 건너뛰어 대기 화면으로 */
+const skipSetup = async (page, touch = false) => {
+  await page.waitForSelector('#area-step:not(.hidden)', { timeout: 8000 });
+  if (touch) await page.tap('#area-done'); else await page.click('#area-done');
+  await page.waitForSelector('#setup-bar:not(.hidden)');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#panel-mode:not(.hidden)');
+  if (touch) await page.tap('[data-close="panel-mode"]'); else await page.click('[data-close="panel-mode"]');
+};
 
 // ---- 1) 영상처리/게임 로직 ----
 {
@@ -77,6 +93,16 @@ let failed = false;
   if (!(pinErr && who.includes('번개손') && who.includes('#87'))) failed = true;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
+  // 시작 준비: 1/2 플레이 공간(완료) -> 2/2 퍽 등록(Esc로 건너뛰기) -> 모드 창이 열림(닫기)
+  await page.waitForSelector('#area-step:not(.hidden)', { timeout: 5000 });
+  await page.click('#area-done');
+  await page.waitForSelector('#setup-bar:not(.hidden)');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#panel-mode:not(.hidden)');
+  const setupOk = await page.evaluate(() => window.__puckTrainer.app.setup === null && document.querySelector('#setup-bar').classList.contains('hidden'));
+  console.log(`${setupOk ? 'PASS' : 'FAIL'} start setup: play area -> puck registration -> mode window`);
+  if (!setupOk) failed = true;
+  await page.click('[data-close="panel-mode"]');
   await page.waitForTimeout(2300);
   // 대기 중에는 항상 가운데 원이 켜져 있고(물체 학습 + 핸즈프리 시작), 탭해도 꺼지지 않음
   const idleOn = await page.evaluate(() => { const c = window.__puckTrainer.app.calib; return c.active && !c.manual && c.target === 'puck'; });
@@ -262,7 +288,7 @@ let failed = false;
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
   console.log(`${saved.floorMode === 'full' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
   // 기록 등록 + 랭킹 패널: 게임이 끝까지 진행된 결과를 흉내내어 onEnd 호출
-  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 30, items: [['반복 횟수', 17]] }); });
+  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 17]] }); });
   await page.waitForSelector('#result-rank:not(.hidden)');
   const rankTxt = await page.textContent('#result-rank');
   console.log(`${rankTxt.includes('1위/1명') && rankTxt.includes('U12') ? 'PASS' : 'FAIL'} score submitted and rank shown (${rankTxt.trim().slice(0, 60)})`);
@@ -310,7 +336,9 @@ let failed = false;
   await page.click('#btn-start');
   await page.waitForSelector('#panel-result:not(.hidden)');
   const resultText = await page.textContent('#result-body');
-  console.log(`${resultText.includes('터치') && resultText.includes('Quick hands') ? 'PASS' : 'FAIL'} arcade result report`);
+  const reportOk = resultText.includes('터치') && resultText.includes('Coin') && resultText.includes('충돌') && !resultText.includes('Quick hands');
+  console.log(`${reportOk ? 'PASS' : 'FAIL'} arcade result report (touches, coins, hits; no bonus rows)`);
+  if (!reportOk) failed = true;
   // 게임 종료 후 선택: 결과 창이 열린 채로 퍽을 왼쪽에 2초 두면 한 번 더, 오른쪽에 두면 모드 선택
   const forceU = (u) => page.evaluate((uu) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: 0.5 }, now); }; }, u);
   await forceU(0.5);
@@ -368,7 +396,8 @@ let failed = false;
   await page.tap('#auth-guest');
   await page.tap('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
-  await page.waitForTimeout(1500);
+  await skipSetup(page, true);
+  await page.waitForTimeout(500);
   const noHScroll = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   const controlsVisible = await page.evaluate(() => { const r = document.querySelector('#btn-start').getBoundingClientRect(); return r.bottom <= window.innerHeight && r.width > 0; });
   console.log(`${noHScroll && controlsVisible ? 'PASS' : 'FAIL'} phone portrait layout (no overflow, controls visible)`);
@@ -443,7 +472,7 @@ let failed = false;
   ok(first.lang === 'en' && /stickhandling/.test(first.lead) && first.ph === 'Access code' && first.on === 'en' && first.visible, 'English browser opens in English with language buttons on the first screen', JSON.stringify(first));
   await page.click('.lang-row [data-lang="ko"]'); await tick();
   const ko = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, ph: document.querySelector('#pin-input').placeholder, btn: document.querySelector('#pin-form button').textContent }));
-  ok(ko.lang === 'ko' && /스틱핸들링/.test(ko.lead) && ko.ph === '접속 코드' && ko.btn === '확인', '한국어 button restores the Korean screen', JSON.stringify(ko));
+  ok(ko.lang === 'ko' && /스틱 ?핸들링/.test(ko.lead) && ko.ph === '접속 코드' && ko.btn === '확인', '한국어 button restores the Korean screen', JSON.stringify(ko));
   await page.click('.lang-row [data-lang="en"]'); await tick();
   await page.reload(); await tick();
   ok(await page.evaluate(() => document.documentElement.lang === 'en' && document.querySelector('#pin-form button').textContent === 'OK'), 'language choice is remembered after reload');
@@ -460,6 +489,14 @@ let failed = false;
   ok((await leftover()).length === 0, 'no Korean left on the English first screen', JSON.stringify(await leftover()));
   await page.click('#btn-camera');
   await page.waitForFunction(() => window.__puckTrainer.app.started && window.__puckTrainer.app.lastVision, null, { timeout: 15000 });
+  // 시작 준비(플레이 공간 -> 퍽 등록) 화면도 영어
+  await page.waitForSelector('#area-step:not(.hidden)', { timeout: 8000 }); await tick(150);
+  const setupLeft = await leftover();
+  await page.click('#area-done'); await page.waitForSelector('#setup-bar:not(.hidden)'); await tick(150);
+  setupLeft.push(...(await leftover()));
+  await page.keyboard.press('Escape'); await page.waitForSelector('#panel-mode:not(.hidden)');
+  await page.click('[data-close="panel-mode"]');
+  ok(setupLeft.length === 0, 'start setup screens are in English', JSON.stringify(setupLeft));
   await page.evaluate(() => { window.__puckTrainer.settings.autoStart = false; });
   await tick(300);
   // 모든 패널을 열어 남은 한국어가 없는지 확인
@@ -501,8 +538,14 @@ let failed = false;
   ok(/First record!/.test(run1.msg) && /first record holder/.test(run1.msg) && run1.btn === 'View record board', 'finishing a challenge puts the first record on the board', JSON.stringify(run1));
   await page.click('#btn-share');
   await page.waitForSelector('#panel-community:not(.hidden)'); await tick(200);
-  const board1 = await page.evaluate(() => ({ resultHidden: document.querySelector('#panel-result').classList.contains('hidden'), rows: [...document.querySelectorAll('.post[data-id="starter-wide"] .post-board li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()) }));
-  ok(board1.resultHidden && board1.rows.length === 1 && /^1\s*Ace\s*avg \d\.\ds\s*best \d\.\ds$/.test(board1.rows[0]), 'record board lists the holder', JSON.stringify(board1.rows));
+  const board1 = await page.evaluate(() => ({ resultHidden: document.querySelector('#panel-result').classList.contains('hidden'), selected: document.querySelector('#comm-list .post.selected')?.dataset.id, count: document.querySelector('#comm-detail .detail-count')?.textContent.replace(/\s+/g, ' ').trim(), rows: [...document.querySelectorAll('#comm-detail .detail-board li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()) }));
+  ok(board1.resultHidden && board1.selected === 'starter-wide' && /^1\s*challenged$/.test(board1.count) && board1.rows.length === 1 && /^1\s*Ace\s*avg \d\.\ds\s*best \d\.\ds$/.test(board1.rows[0]), 'record board opens on the right with the holder', JSON.stringify(board1));
+  // 글을 다시 누르면 선택 해제, 또 누르면 다시 상위 5위
+  await page.click('#comm-list .post[data-id="starter-wide"] h3'); await tick(100);
+  const unsel = await page.evaluate(() => ({ sel: document.querySelectorAll('#comm-list .post.selected').length, empty: document.querySelector('#comm-detail .detail-empty')?.textContent }));
+  await page.click('#comm-list .post[data-id="starter-wide"] h3'); await tick(100);
+  const resel = await page.evaluate(() => document.querySelectorAll('#comm-detail .detail-board li').length);
+  ok(unsel.sel === 0 && /Tap a post to see/.test(unsel.empty || '') && resel === 1, 'tapping a post toggles its top 5 panel', JSON.stringify({ unsel, resel }));
   // 다른 선수가 같은 코스로 기록을 갈아치움
   await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Bee', pin: '654321', country: 'CA', team: 'Hive', age: 12 }); });
   await page.click('#comm-list .post[data-id="starter-wide"] [data-act="practice"]'); await tick(200);
@@ -514,7 +557,7 @@ let failed = false;
   const draft = await page.evaluate(() => ({ title: document.querySelector('#comm-title').value, typeHidden: document.querySelector('#comm-type').classList.contains('hidden'), pv: document.querySelector('#comm-preview').textContent.replace(/\s+/g, ' ').trim(), off: document.querySelector('#comm-submit').disabled }));
   await page.fill('#comm-body', 'Who is next?');
   await page.click('#comm-submit'); await tick(250);
-  const beat = await page.evaluate(() => { const p = document.querySelector('#comm-list .post'); return { cls: p.className, tag: p.querySelector('.post-tag').textContent, head: p.querySelector('.post-head').textContent.replace(/\s+/g, ' '), beat: p.querySelector('.beat-line').textContent.replace(/\s+/g, ' ').trim(), formHidden: document.querySelector('#comm-form').classList.contains('hidden'), n: document.querySelectorAll('#comm-list .post').length, board: [...document.querySelectorAll('.post[data-id="starter-wide"] .post-board li b')].map((b) => b.textContent).join('>') }; });
+  const beat = await page.evaluate(() => { const p = document.querySelector('#comm-list .post'); return { cls: p.className, tag: p.querySelector('.post-tag').textContent, head: p.querySelector('.post-head').textContent.replace(/\s+/g, ' '), beat: p.querySelector('.beat-line').textContent.replace(/\s+/g, ' ').trim(), formHidden: document.querySelector('#comm-form').classList.contains('hidden'), n: document.querySelectorAll('#comm-list .post').length, board: [...document.querySelectorAll('#comm-detail .detail-board li b')].map((b) => b.textContent).join('>') }; });
   ok(draft.title === 'Side-to-side wide: new record!' && draft.typeHidden && !draft.off && /Record beaten:\s*Ace/.test(draft.pv) && /post-beat/.test(beat.cls) && beat.tag === 'New record' && /Bee/.test(beat.head) && /Record beaten:\s*Ace\s*avg \d\.\ds → \d\.\ds/.test(beat.beat) && beat.formHidden && beat.n === 4 && beat.board === 'Bee>Ace',
     'record-beating post is published and the board order changes', JSON.stringify({ draft, beat }));
   // 내 코스 공유 (현재 코스 + 내 기록)
@@ -523,7 +566,7 @@ let failed = false;
   await page.fill('#comm-title', 'My wide course'); await page.click('#comm-submit'); await tick(150);
   const needBody = await page.evaluate(() => ({ err: document.querySelector('#comm-error').textContent, hidden: document.querySelector('#comm-error').classList.contains('hidden') }));
   await page.fill('#comm-body', 'Builds reach on the backhand side.'); await page.click('#comm-submit'); await tick(250);
-  const mine = await page.evaluate(() => { const p = document.querySelector('#comm-list .post'); return { title: p.querySelector('h3').textContent, body: p.querySelector('.post-body').textContent, row: p.querySelector('.post-board li')?.textContent.replace(/\s+/g, ' ').trim(), del: !!p.querySelector('[data-act="delete"]'), stored: JSON.parse(localStorage.getItem('puck-trainer.community.v1')).length }; });
+  const mine = await page.evaluate(() => { const p = document.querySelector('#comm-list .post'); return { title: p.querySelector('h3').textContent, body: p.querySelector('.post-body').textContent, row: document.querySelector('#comm-detail .detail-board li')?.textContent.replace(/\s+/g, ' ').trim(), del: !!p.querySelector('[data-act="delete"]'), stored: JSON.parse(localStorage.getItem('puck-trainer.community.v1')).length }; });
   ok(pv.active === 'course' && /2 points · 10 cycles/.test(pv.pv) && /My record · avg \d\.\ds · best/.test(pv.pv) && !needBody.hidden && /Describe what practicing/.test(needBody.err) && mine.title === 'My wide course' && /backhand/.test(mine.body) && /^1\s*Bee\s*Author\s*avg/.test(mine.row) && mine.del && mine.stored === 5,
     'sharing my course posts the note and my cycle record', JSON.stringify({ pv, needBody, mine }));
   // 응원 + 삭제(두 번 눌러야 삭제)
@@ -539,26 +582,87 @@ let failed = false;
   await page.click('#cycles-inc'); await tick(100);
   const cancelled = await page.evaluate(() => ({ ch: window.__puckTrainer.app.challenge, toast: document.querySelector('#toast').textContent }));
   ok(cancelled.ch === null && /challenge cancelled/.test(cancelled.toast), 'changing the course cancels the challenge', cancelled.toast);
-  // 기록 자랑: 아케이드를 끝까지 -> 결과 화면에서 공유 -> '나도 도전'
+  // 기록 자랑: 아케이드를 끝까지 -> 결과 화면에서 공유 -> '나도 연습하기'
+  const playArcade = async (score) => {
+    await page.click('#btn-start'); await tick(300);
+    await page.evaluate((s) => { const g = window.__puckTrainer.game; g.score = s; if (g.arcade) g.arcade.score = s; g.stop('time'); }, score);
+    await page.waitForSelector('#result-share:not(.hidden)');
+    await tick(200); // 도전 기록 등록(비동기) 결과까지
+    return page.evaluate(() => ({ msg: document.querySelector('#result-share .share-msg').textContent.replace(/\s+/g, ' ').trim(), btn: document.querySelector('#btn-share')?.textContent, btn2: document.querySelector('#btn-share-2')?.textContent }));
+  };
+  const bragPosts = () => page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.community.v1')).filter((p) => p.type === 'record').map((p) => ({ id: p.id, uid: p.uid, score: p.score, age: p.age, cheers: (p.cheers || []).length, records: (p.records || []).map((r) => `${r.nick}:${r.score}`) })));
   await page.click('#btn-mode'); await page.waitForSelector('#panel-mode:not(.hidden)');
   await page.click('#mode-list .mode-card:nth-child(1)'); await tick(100);
-  await page.click('#btn-start'); await tick(300);
-  await page.evaluate(() => { const g = window.__puckTrainer.game; g.score = 1230; if (g.arcade) g.arcade.score = 1230; g.stop('time'); });
-  await page.waitForSelector('#result-share:not(.hidden)');
-  const shareBtn = await page.textContent('#btn-share');
-  await page.click('#btn-share'); await page.waitForSelector('#comm-form:not(.hidden)');
-  const recPv = await page.evaluate(() => ({ active: document.querySelector('#comm-type .active')?.dataset.type, pv: document.querySelector('#comm-preview').textContent.replace(/\s+/g, ' ').trim() }));
+  const shareBtn = (await playArcade(1230)).btn;
+  await page.click('#btn-share'); await page.waitForSelector('#comm-form:not(.hidden)'); await tick(150);
+  const recPv = await page.evaluate(() => ({ active: document.querySelector('#comm-type .active')?.dataset.type, pv: document.querySelector('#comm-preview').textContent.replace(/\s+/g, ' ').trim(), replace: !!document.querySelector('#comm-preview .replace-note'), submit: document.querySelector('#comm-submit').textContent }));
   await page.fill('#comm-title', 'Finally!'); await page.click('#comm-submit'); await tick(250);
-  const rec = await page.evaluate(() => { const p = document.querySelector('#comm-list .post'); return { cls: p.className, score: p.querySelector('.post-score b').textContent, sub: p.querySelector('.post-score span').textContent, act: p.querySelector('[data-act="mode"]').textContent }; });
+  const rec = await page.evaluate(() => { const p = document.querySelector('#comm-list .post'); return { cls: p.className, score: p.querySelector('.post-score b').textContent, sub: p.querySelector('.post-score span').textContent, act: p.querySelector('.post-foot [data-act="mode"]').textContent, sum: p.querySelector('.post-sum').textContent.replace(/\s+/g, ' ').trim(), detail: document.querySelector('#comm-detail .detail-rule')?.textContent.replace(/\s+/g, ' ').trim() }; });
+  ok(shareBtn === 'Share record' && recPv.active === 'record' && /Arcade · 1 min/.test(recPv.pv) && !recPv.replace && recPv.submit === 'Post' && /post-record/.test(rec.cls) && rec.score === '1230' && rec.sub === 'Arcade · 1 min' && rec.act === 'Try it too'
+    && /^0 challenged\s*#1\s*Bee\s*1230 pts\s*Age 12 & under\s*Top 5 ›$/.test(rec.sum) && /^Only age 12 and under get on the board/.test(rec.detail || ''),
+  'record brag from the result screen shows challengers, leader and age limit', JSON.stringify({ shareBtn, recPv, rec }));
+  // 종류 거르기
   await page.click('#comm-filter [data-filter="course"]'); await tick(200);
   const onlyCourses = await page.evaluate(() => [...document.querySelectorAll('#comm-list .post')].every((p) => p.classList.contains('post-course')) && document.querySelectorAll('#comm-list .post').length === 3);
   await page.click('#comm-filter [data-filter="record"]'); await tick(200);
   const onlyRecords = await page.evaluate(() => document.querySelectorAll('#comm-list .post').length === 2 && !document.querySelector('#comm-list .post.post-course'));
+  await page.click('#comm-filter [data-filter="all"]'); await tick(200);
+  // 모드 거르기: 아케이드만 / 자유 연습(코스) / 다시 모든 모드
+  const modeOpts = await page.evaluate(() => [...document.querySelectorAll('#comm-mode option')].map((o) => o.textContent));
+  await page.selectOption('#comm-mode', 'arcade'); await tick(200);
+  const arcadeOnly = await page.evaluate(() => [...document.querySelectorAll('#comm-list .post h3')].map((h) => h.textContent));
+  await page.selectOption('#comm-mode', 'obstacle'); await tick(200);
+  const dodgeEmpty = await page.evaluate(() => document.querySelectorAll('#comm-list .post').length === 0 && !!document.querySelector('#comm-list .comm-empty'));
+  await page.selectOption('#comm-mode', 'free'); await tick(200);
+  const freeN = await page.evaluate(() => [...document.querySelectorAll('#comm-list .post')].filter((p) => !p.classList.contains('post-record')).length + document.querySelectorAll('#comm-list .post-record').length * 100);
+  await page.selectOption('#comm-mode', ''); await tick(200);
+  ok(onlyCourses && onlyRecords && modeOpts[0] === 'All modes' && modeOpts.includes('Arcade') && arcadeOnly.join() === 'Finally!' && dodgeEmpty && freeN === 4,
+    'community filters by kind and by game mode', JSON.stringify({ onlyCourses, onlyRecords, modeOpts, arcadeOnly, dodgeEmpty, freeN }));
+  // 응원 많은 순
+  await page.click('#comm-list .post[data-id="starter-wide"] [data-act="cheer"]'); await tick(200);
+  await page.click('#comm-sort [data-sort="cheers"]'); await tick(200);
+  const byCheers = await page.evaluate(() => ({ first: document.querySelector('#comm-list .post')?.dataset.id, active: document.querySelector('#comm-sort .active')?.dataset.sort }));
+  await page.click('#comm-sort [data-sort="recent"]'); await tick(200);
+  const byRecent = await page.evaluate(() => document.querySelector('#comm-list .post h3')?.textContent);
+  ok(byCheers.first === 'starter-wide' && byCheers.active === 'cheers' && byRecent === 'Finally!', 'community sorts by most cheers and back to newest', JSON.stringify({ byCheers, byRecent }));
+  // 내 자랑 글로 '나도 연습하기' -> 같은 모드로 바뀌고, 내 글이라 도전 기록에는 오르지 않음
   await page.evaluate(() => { window.__puckTrainer.game.setMode('wide'); });
-  await page.click('#comm-list .post-record [data-act="mode"]'); await tick(150);
-  const took = await page.evaluate(() => ({ mode: window.__puckTrainer.game.mode.id, closed: document.querySelector('#panel-community').classList.contains('hidden'), toast: document.querySelector('#toast').textContent }));
-  ok(shareBtn === 'Share record' && recPv.active === 'record' && /Arcade · 1 min/.test(recPv.pv) && /post-record/.test(rec.cls) && Number(rec.score) > 0 && rec.sub === 'Arcade · 1 min' && rec.act === 'Take it on' && onlyCourses && onlyRecords && took.mode === 'arcade' && took.closed && /Arcade — beat \d+ points!/.test(took.toast),
-    'record brag from the result screen, filters, and "Take it on"', JSON.stringify({ shareBtn, recPv, rec, onlyCourses, onlyRecords, took }));
+  const bragId = (await bragPosts())[0].id;
+  await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
+  const took = await page.evaluate(() => ({ mode: window.__puckTrainer.game.mode.id, closed: document.querySelector('#panel-community').classList.contains('hidden'), toast: document.querySelector('#toast').textContent, hud: document.querySelector('#hud-instruction').textContent }));
+  ok(took.mode === 'arcade' && took.closed && /^Arcade · 1 min — beat 1230 points! · your own post/.test(took.toast) && /Challenge · Bee · 1230 pts/.test(took.hud), '"Try it too" switches to the same mode and time', JSON.stringify(took));
+  // 기록 자랑은 모드마다 하나: 더 높은 점수로 다시 자랑하면 그 글이 바뀐다 (응원은 그대로)
+  const own = await playArcade(1500);
+  await page.click('#btn-share'); await page.waitForSelector('#comm-form:not(.hidden)'); await tick(300);
+  const replPv = await page.evaluate(() => ({ note: document.querySelector('#comm-preview .replace-note')?.textContent.replace(/\s+/g, ' ').trim(), submit: document.querySelector('#comm-submit').textContent }));
+  await page.fill('#comm-title', 'Even better'); await page.click('#comm-submit'); await tick(300);
+  const replaced = { toast: await page.textContent('#toast'), posts: await bragPosts(), first: await page.evaluate(() => document.querySelector('#comm-list .post h3').textContent) };
+  ok(/your own brag/.test(own.msg) && own.btn === 'Share record' && /^You already have a brag for this mode Finally! 1230 pts/.test(replPv.note || '') && replPv.submit === 'Replace my brag'
+    && /Brag updated with the new record/.test(replaced.toast) && replaced.posts.length === 1 && replaced.posts[0].id === bragId && replaced.posts[0].score === 1500 && replaced.posts[0].cheers === 0 && replaced.first === 'Even better',
+  'only one brag per mode: posting again replaces it', JSON.stringify({ own, replPv, replaced }));
+  // 나이 규칙: 글쓴이(12세)보다 많은 선수는 플레이만, 같거나 어린 선수만 도전 기록에 오른다
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Old', pin: '111111', country: 'US', team: 'Elders', age: 30 }); });
+  await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
+  const oldToast = await page.textContent('#toast');
+  const oldRun = await playArcade(2000);
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Kid', pin: '222222', country: 'KR', team: 'Cubs', age: 10 }); });
+  await page.click('#btn-share-2'); await page.waitForSelector('#panel-community:not(.hidden)'); await tick(200);
+  await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
+  const kidRun = await playArcade(900);
+  await page.click('#btn-share-2'); await page.waitForSelector('#panel-community:not(.hidden)'); await tick(250);
+  const board = await page.evaluate((id) => ({
+    selected: document.querySelector('#comm-list .post.selected')?.dataset.id,
+    count: document.querySelector('#comm-detail .detail-count')?.textContent.replace(/\s+/g, ' ').trim(),
+    rows: [...document.querySelectorAll('#comm-detail .detail-board li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()),
+    me: document.querySelector('#comm-detail .detail-board li.me b')?.textContent,
+    sum: document.querySelector(`#comm-list .post[data-id="${id}"] .post-sum .cnt`)?.textContent,
+  }), bragId);
+  const stored = (await bragPosts())[0];
+  ok(/records only for age 12 and under/.test(oldToast) && /only players aged 12 and under get on this board \(you: 30\)/.test(oldRun.msg) && oldRun.btn2 === 'View challenge board'
+    && /Challenge board #2 of 2/.test(kidRun.msg) && board.selected === bragId && /^1\s*challenged$/.test(board.count) && board.rows.length === 2
+    && /^1\s*Bee\s*Author\s*1500 pts$/.test(board.rows[0]) && /^2\s*Kid\s*900 pts$/.test(board.rows[1]) && board.me === 'Kid' && board.sum === '1 challenged' && stored.records.join() === 'Kid:900',
+  'age rule: older players only practice, younger players get on the top 5', JSON.stringify({ oldToast, oldRun, kidRun, board, stored }));
+  await page.click('[data-close="panel-community"]');
   // 글쓰기는 로그인 필요
   await page.evaluate(() => window.__puckTrainer.account.logout());
   await page.click('#btn-mode'); await page.click('#mode-list .mode-community'); await page.waitForSelector('#panel-community:not(.hidden)'); await tick(150);

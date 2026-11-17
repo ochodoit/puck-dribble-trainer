@@ -11,7 +11,7 @@ import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, i
 import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
 import { decideIdle, stepChoice, stepDwell, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
-import { createCommunityStore, courseSig, betterRecord, boardOf, TITLE_MAX } from './community.js';
+import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAge, canRecordOn, TITLE_MAX } from './community.js';
 import { initCommunity } from './community-ui.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -26,7 +26,7 @@ const els = {
   authCard: $('#auth-card'), authForm: $('#auth-form'), authLogged: $('#auth-logged'), authWho: $('#auth-who'), authError: $('#auth-error'), authSubmit: $('#auth-submit'), authNote: $('#auth-store-note'),
   panelRank: $('#panel-rank'), rankMode: $('#rank-mode'), rankAge: $('#rank-age'), rankScope: $('#rank-scope'), rankBody: $('#rank-body'), rankMe: $('#rank-me'), resultRank: $('#result-rank'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
   splash: $('#splash'), btnCamera: $('#btn-camera'), splashError: $('#splash-error'),
-  panelMode: $('#panel-mode'), modeList: $('#mode-list'), versusToggle: $('#versus-toggle'), versusNames: $('#versus-names'), p1: $('#p1-name'), p2: $('#p2-name'),
+  panelMode: $('#panel-mode'), modeList: $('#mode-list'), versusToggle: $('#versus-toggle'), invisibleToggle: $('#invisible-toggle'), versusNames: $('#versus-names'), p1: $('#p1-name'), p2: $('#p2-name'),
   panelSettings: $('#panel-settings'), selCamera: $('#sel-camera'),
   panelCalib: $('#panel-calib'), swatchPuck: $('#swatch-puck'), swatchStick: $('#swatch-stick'), calibPuckDesc: $('#calib-puck-desc'), calibStickDesc: $('#calib-stick-desc'),
   panelCommunity: $('#panel-community'),
@@ -56,6 +56,7 @@ const app = {
   calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
   choice: { side: null, hold: 0, tick: -1, armAt: 0 }, // 게임 종료 후 선택 (왼쪽 = 한 번 더, 오른쪽 = 모드 선택)
   challenge: null,    // 커뮤니티 코스 도전 중: { id, title, sig, holder: {uid, nick, avg, best}|null }
+  scoreChallenge: null, // 기록 자랑 글의 '나도 연습하기' 중: { id, title, key, score, nick, author, limit }
   communityStore: null, // Promise<커뮤니티 저장소>
 };
 let community = null;   // 커뮤니티 화면 (initCommunity 반환값)
@@ -79,6 +80,7 @@ function init() {
   setupCommunity();
   game.difficulty = settings.difficulty;
   game.playSeconds = settings.playMinutes * 60;
+  game.invisible = settings.invisible;
   game.resetState();
   renderModeList();
   initCourse();
@@ -104,7 +106,7 @@ async function setupAuth() {
   $('#btn-logout').addEventListener('click', doLogout);
   $('#btn-settings-logout').addEventListener('click', doLogout);
   els.btnRank.addEventListener('click', () => openRank());
-  [els.rankMode, els.rankAge, els.rankScope, $('#rank-time')].forEach((e) => e.addEventListener('change', () => renderRank()));
+  [els.rankMode, els.rankAge, els.rankScope, $('#rank-time'), $('#rank-variant')].forEach((e) => e.addEventListener('change', () => renderRank()));
   MODES.filter((m) => m.id !== 'free').forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name; els.rankMode.appendChild(o); });
   PLAY_MINUTES.forEach((min) => { const o = document.createElement('option'); o.value = String(min * 60); o.textContent = `${min}분`; $('#rank-time').appendChild(o); });
   AGE_GROUPS.forEach((g) => { const o = document.createElement('option'); o.value = g; o.textContent = g; els.rankAge.appendChild(o); });
@@ -176,6 +178,7 @@ async function openRank(modeId) {
   if (modeId) els.rankMode.value = modeId;
   else if (game.mode.id !== 'free') els.rankMode.value = game.mode.id;
   $('#rank-time').value = String(game.playSeconds);
+  $('#rank-variant').value = settings.invisible ? 'inv' : '';
   open(els.panelRank);
   await renderRank();
 }
@@ -184,7 +187,7 @@ async function renderRank() {
   if (!app.account) return;
   const timed = MODES.find((m) => m.id === els.rankMode.value)?.timed;
   $('#rank-time').classList.toggle('hidden', !timed);
-  const mode = rankKey(els.rankMode.value, Number($('#rank-time').value) || 60); // 시간제 모드는 시간별 랭킹
+  const mode = rankKey(els.rankMode.value, Number($('#rank-time').value) || 60, $('#rank-variant').value === 'inv'); // 시간제 모드는 시간별, 투명 모드는 따로
   const u = app.account.current();
   els.rankBody.innerHTML = '<tr><td colspan="6" class="muted">불러오는 중…</td></tr>';
   try {
@@ -254,10 +257,17 @@ function bindUI() {
     if (game.running) game.stop('manual');
     settings.playMinutes = Number(b.dataset.min); persist();
     game.playSeconds = settings.playMinutes * 60; game.resetState();
-    renderModeList(); updateHud();
+    renderModeList(); updateHud(); syncScoreChallenge();
   }));
+  els.invisibleToggle.addEventListener('change', () => {
+    if (game.running) game.stop('manual');
+    settings.invisible = els.invisibleToggle.checked; persist();
+    game.invisible = settings.invisible; applyWash();
+    renderModeList(); updateHud(); syncScoreChallenge();
+    toast(settings.invisible ? '투명 모드 — 플레이 중 내 퍽이 보이지 않습니다. 손의 감각으로만 피하세요' : '투명 모드 끔');
+  });
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
-  $('#set-flipDepth').addEventListener('change', (e) => { settings.flipDepth = e.target.checked; game.arcade.flipY = settings.flipDepth; game.plane.flip = settings.flipDepth; persist(); });
+  $('#set-flipDepth').addEventListener('change', (e) => { settings.flipDepth = e.target.checked; applyDepthDirection(); persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
   $$('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) close(m); }));
 
@@ -892,13 +902,16 @@ function commitLearnedModel(target, done, refresh = false) {
 // =============== HUD ===============
 function updateHud(force) {
   const who = app.account?.current();
-  els.hudMode.textContent = game.mode.name + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
+  els.hudMode.textContent = game.mode.name + (settings.invisible ? ' · 투명' : '') + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
   const ch = game.mode.id === 'free' ? app.challenge : null;
+  const sc = game.mode.id !== 'free' ? app.scoreChallenge : null;
   els.hudInstruction.textContent = game.running ? game.instruction
-    : !app.started ? '' : ch ? `도전 · ${ch.title}${ch.holder ? ` · 1위 평균 ${ch.holder.avg.toFixed(1)}s` : ''}` : '시작을 누르세요';
+    : !app.started ? '' : ch ? `도전 · ${ch.title}${ch.holder ? ` · 1위 평균 ${ch.holder.avg.toFixed(1)}s` : ''}`
+      : sc ? `도전 · ${sc.nick} · ${sc.score}점` : '시작을 누르세요';
   $('#app').classList.toggle('playing', game.running);
   if (game.limit > 0) {
-    const t = Math.ceil(game.running ? game.timeLeft : game.limit);
+    // 여러 훈련을 잇는 모드(와이드)는 지금 훈련의 남은 시간
+    const t = Math.ceil(game.mode.stages ? (game.running ? game.stageLeft : game.playSeconds) : game.running ? game.timeLeft : game.limit);
     els.hudTimer.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
     els.hudTimer.classList.toggle('urgent', game.running && t <= 5);
   } else {
@@ -908,10 +921,11 @@ function updateHud(force) {
   }
   els.hudScore.textContent = String(game.score);
   els.hudLives.textContent = game.running && game.mode.timed && game.hits > 0 ? `충돌 ${game.hits}` : '';
+  if (game.mode.stages) els.hudLives.textContent = `훈련 ${game.stage + 1}/${game.mode.stages}`;
   // 자유 연습 코스: 사이클 진행(완료/목표)과 평균·가장 빠른 사이클 시간
   const courseOn = game.mode.id === 'free' && game.course.points.length > 0;
   $('.hud-right .hud-label').textContent = courseOn ? 'Cycle' : 'Score';
-  els.hudLives.classList.toggle('info', courseOn);
+  els.hudLives.classList.toggle('info', courseOn || !!game.mode.stages);
   if (courseOn) {
     const lt = (game.running && game.stats.lapTimes) || [];
     els.hudScore.textContent = `${game.running ? game.stats.laps || 0 : 0}/${game.course.cycles}`;
@@ -963,7 +977,8 @@ function startRun(opts = {}) {
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(마름모 표시)된 뒤 시작하세요.' : '퍽이 인식(빨간 점 표시)된 뒤 시작하세요.'); }
   tracker.resetStats();
   game.start(tracker, opts);
-  if (settings.puckOpacity < 100) toast(settings.puckOpacity === 0 ? '내 퍽 표시 0% — 화면에 퍽이 보이지 않습니다. 감각으로!' : `내 퍽 표시 ${settings.puckOpacity}%`, 2600);
+  if (settings.invisible) toast('투명 모드 — 화면에 내 퍽이 보이지 않습니다. 손의 감각으로!', 2600);
+  else if (settings.puckOpacity < 100) toast(settings.puckOpacity === 0 ? '내 퍽 표시 0% — 화면에 퍽이 보이지 않습니다. 감각으로!' : `내 퍽 표시 ${settings.puckOpacity}%`, 2600);
   updateHud();
 }
 
@@ -978,7 +993,8 @@ game.onEnd = (result) => {
 };
 
 function showResult(result, isBest) {
-  let title = result.mode.timed ? `${result.mode.name} · ${Math.round(result.limit / 60)}분` : result.mode.name;
+  let title = result.mode.timed ? `${result.mode.name} · ${timeLabel(result.mode, result.seconds || result.limit)}` : result.mode.name;
+  if (result.invisible) title += ' · 투명';
   if (result.reason === 'time') title += ' — Time up';
   if (result.reason === 'done') title += ' — Complete';
   const body = [];
@@ -1022,6 +1038,7 @@ function setupCommunity() {
     getStore: () => app.communityStore,
     toast,
     modeName: (id) => MODES.find((m) => m.id === id)?.name || id,
+    modes: MODES.map(({ id, name, stages }) => ({ id, name, stages })),
     countryLabel,
     shareDraft,
     onPractice: practicePost,
@@ -1038,7 +1055,7 @@ function shareDraft() {
   const ranked = r && r.mode.id !== 'free' && (r.reason === 'time' || r.reason === 'done') && !r.versus;
   return {
     course: settings.course.length >= 2 ? { points: settings.course.map((p) => ({ n: p.n, x: p.x, y: p.y })), cycles: settings.courseCycles, record: cr } : null,
-    result: ranked ? { modeId: r.mode.id, seconds: r.mode.timed ? r.limit : 0, score: r.score } : null,
+    result: ranked ? { modeId: r.mode.id, seconds: r.mode.timed ? r.seconds || r.limit : 0, score: r.score, invisible: !!r.invisible } : null,
   };
 }
 
@@ -1046,6 +1063,7 @@ function shareDraft() {
 function practicePost(post) {
   if (game.running) game.stop('manual');
   app.challenge = null;
+  app.scoreChallenge = null;
   app.versus = null;
   settings.course = post.course.map((p) => ({ n: p.n, x: p.x, y: p.y }));
   game.setMode('free');
@@ -1058,18 +1076,43 @@ function practicePost(post) {
   toast(`'${post.title}' 도전 — ${game.course.points[0].n}번에 퍽을 2초 두면 시작`, 4000);
 }
 
-/** 기록 자랑 글의 '나도 도전': 같은 모드·같은 시간으로 맞춘다 */
+/**
+ * 기록 자랑 글의 '나도 연습하기': 같은 모드·같은 시간·같은 투명 여부로 맞춘다.
+ * 끝까지 플레이하면 글쓴이와 나이가 같거나 어린 선수의 점수만 그 글의 도전 기록에 오른다 (나이가 많아도 플레이는 가능)
+ */
 function challengeMode(post) {
   const m = MODES.find((x) => x.id === post.modeId);
   if (!m) return;
   if (game.running) game.stop('manual');
-  if (m.timed && PLAY_MINUTES.includes(post.seconds / 60)) { settings.playMinutes = post.seconds / 60; game.playSeconds = post.seconds; persist(); }
+  if (m.timed && PLAY_MINUTES.includes(post.seconds / 60)) { settings.playMinutes = post.seconds / 60; game.playSeconds = post.seconds; }
+  settings.invisible = post.invisible === true; game.invisible = settings.invisible; applyWash();
+  persist();
   app.versus = null;
+  app.challenge = null;
   game.setMode(m.id);
   game.resetState();
+  const u = app.account?.current();
+  app.scoreChallenge = { id: post.id, title: post.title, key: bragKey(post), score: post.score, nick: post.nick, author: post.uid, limit: postAge(post) };
   closeAllPanels();
+  renderModeList();
   updateHud();
-  toast(`${m.name} — ${post.score}점에 도전!`, 4000);
+  const label = `${m.name}${m.timed ? ` · ${timeLabel(m, game.playSeconds)}` : ''}${settings.invisible ? ' · 투명' : ''}`;
+  const rule = u && u.id === post.uid ? '내 글이라 도전 기록에는 오르지 않습니다'
+    : u && !canRecordOn(u, post) ? `기록 등록은 ${postAge(post)}세 이하만 (연습만 가능)`
+      : !u ? '로그인하면 도전 기록에 오릅니다' : '';
+  const head = `${label} — ${post.score}점에 도전!`;
+  toast(rule ? `${head} · ${rule}` : head, 4500);
+}
+
+/** 모드·시간·투명 여부를 바꿔서 도전 중인 기록 자랑 글과 달라지면 도전을 해제한다 */
+function syncScoreChallenge() {
+  const sc = app.scoreChallenge;
+  if (!sc) return;
+  if (rankKey(game.mode.id, game.playSeconds, settings.invisible) !== sc.key) {
+    app.scoreChallenge = null;
+    toast('모드를 바꿔서 기록 자랑 도전이 해제되었습니다');
+    updateHud();
+  }
 }
 
 /** 결과 화면 아래: 커뮤니티에 공유하기 / 코스 도전 결과(기록 게시판 등록) */
@@ -1077,12 +1120,16 @@ async function renderShare(result) {
   const box = $('#result-share');
   box.classList.add('hidden'); box.innerHTML = '';
   if (result.versus || (result.reason !== 'time' && result.reason !== 'done')) return;
-  const show = (html, btnLabel, onClick) => {
-    box.innerHTML = `<div class="share-msg">${html}</div>${btnLabel ? `<button type="button" class="btn" id="btn-share">${btnLabel}</button>` : ''}`;
+  // 버튼 하나 또는 둘 (둘째: [라벨, 동작])
+  const show = (html, btnLabel, onClick, second) => {
+    box.innerHTML = `<div class="share-msg">${html}</div><div class="share-btns">${second ? `<button type="button" class="btn btn-ghost" id="btn-share-2">${second[0]}</button>` : ''}${btnLabel ? `<button type="button" class="btn" id="btn-share">${btnLabel}</button>` : ''}</div>`;
     if (btnLabel) $('#btn-share').addEventListener('click', onClick);
+    if (second) $('#btn-share-2').addEventListener('click', second[1]);
     box.classList.remove('hidden');
   };
   if (result.mode.id !== 'free') {
+    const sc = app.scoreChallenge && app.scoreChallenge.key === result.rankKey ? app.scoreChallenge : null;
+    if (sc) { await renderScoreChallenge(result, sc, show); return; }
     show('<span>이 기록을 커뮤니티에 자랑해 보세요</span>', '기록 자랑하기', () => community.compose({ type: 'record' }));
     return;
   }
@@ -1100,7 +1147,7 @@ async function renderShare(result) {
   // ---- 코스 도전 결과 ----
   const s1 = (v) => `${v.toFixed(1)}s`;
   const u = app.account?.current();
-  const openBoard = () => community.open('course');
+  const openBoard = () => community.open({ filter: 'course', select: ch.id });
   if (!u) {
     const h = ch.holder ? ` <span>1위</span> <b data-ugc>${esc(ch.holder.nick)}</b> <strong>평균 ${s1(ch.holder.avg)}</strong>` : '';
     show(`<span>이번 기록 평균 ${s1(rec.avg)}</span>${h} <span>로그인하면 기록 게시판에 올라갑니다</span>`, '기록 게시판 보기', openBoard);
@@ -1139,10 +1186,54 @@ async function renderShare(result) {
   }
 }
 
+/**
+ * 기록 자랑 글 도전 결과: 글쓴이와 나이가 같거나 어린 선수면 그 글의 도전 기록에 등록하고 순위를 보여준다.
+ * 나이가 많거나 글쓴이 본인이면 플레이만 하고 등록하지 않는다.
+ */
+async function renderScoreChallenge(result, sc, show) {
+  const u = app.account?.current();
+  const brag = () => community.compose({ type: 'record' });
+  const openBoard = () => community.open({ filter: 'record', select: sc.id });
+  const target = `<span>도전</span> <b data-ugc>${esc(sc.nick)}</b> <strong>${sc.score}점</strong>`;
+  if (!u) {
+    show(`${target} <span>로그인하면 도전 기록에 올라갑니다</span>`, '도전 기록 보기', openBoard);
+    return;
+  }
+  try {
+    const store = await app.communityStore;
+    const r = await store.submitScore(u, sc.id, result.score);
+    if (!r.eligible) {
+      const why = r.reason === 'author'
+        ? '<span>내 자랑 글이라 도전 기록에는 오르지 않습니다 — 더 높은 점수는 기록 자랑하기로 글을 바꾸세요</span>'
+        : `<span>이 글의 도전 기록은 ${r.limit}세 이하만 올라갑니다 (나: ${u.age}세) — 연습으로만 남습니다</span>`;
+      show(`${target} ${why}`, '기록 자랑하기', brag, ['도전 기록 보기', openBoard]);
+      return;
+    }
+    const ph = r.prevHolder;
+    let html;
+    if (r.isHolder && r.improved && ph && ph.uid !== u.id) {
+      sfx.target?.();
+      html = `<span class="script">New record!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${ph.score}점 → ${result.score}점</strong>`;
+    } else {
+      html = `${target} <span>도전 기록 ${r.rank}위 / ${r.total}명</span>${r.improved ? ' <span>내 최고 기록 갱신</span>' : ''}`;
+    }
+    show(html, '기록 자랑하기', brag, ['도전 기록 보기', openBoard]);
+  } catch (err) {
+    show(`<span>도전 기록 등록 실패: ${esc(err.message || err)}</span>`, '기록 자랑하기', brag);
+  }
+}
+
+/** 시간제 모드의 시간 표시: '1분', 여러 훈련을 잇는 모드는 '1분 × 3' */
+function timeLabel(m, seconds) {
+  const min = `${Math.round(seconds / 60)}분`;
+  return m?.stages ? `${min} × ${m.stages}` : min;
+}
+
 function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
+  els.invisibleToggle.checked = settings.invisible;
   // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(커뮤니티)
   const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'community'];
   CELLS.forEach((cell, pos) => {
@@ -1160,9 +1251,9 @@ function renderModeList() {
     const m = MODES[cell], i = pos;
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
-    const key = rankKey(m.id, game.playSeconds);
+    const key = rankKey(m.id, game.playSeconds, settings.invisible);
     const best = scores[key] !== undefined ? `<span class="best">best ${scores[key]}</span>` : '';
-    const time = m.timed ? `${settings.playMinutes}분` : m.duration ? `${m.duration}초` : '자유';
+    const time = m.timed ? timeLabel(m, settings.playMinutes * 60) : m.duration ? `${m.duration}초` : '자유';
     card.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span><span class="time">${time}</span><b>${m.name}</b><em>${m.en}</em><small>${m.desc}</small>${best}`;
     card.addEventListener('click', () => {
       if (game.running) game.stop('manual');
@@ -1173,6 +1264,7 @@ function renderModeList() {
       } else app.versus = null;
       close(els.panelMode);
       updateHud();
+      syncScoreChallenge();
       if (app.afterStart) {
         app.afterStart = false;
         toast(app.mouseMode ? `${m.name} 선택됨 · 커서를 가운데 원에 3초 두거나 시작을 누르세요` : `${m.name} 선택됨 · 퍽을 가운데 원 안에 놓고 3초 기다리세요`, 5000);
@@ -1345,7 +1437,9 @@ function applySettingsToUI() {
   $('#set-sound').checked = settings.sound;
   $('#set-autoStart').checked = settings.autoStart;
   $('#set-flipDepth').checked = settings.flipDepth;
-  game.arcade.flipY = settings.flipDepth;
+  applyDepthDirection();
+  els.invisibleToggle.checked = settings.invisible;
+  game.invisible = settings.invisible;
   els.debug.classList.toggle('hidden', !settings.debug);
   for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckOpacity']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
@@ -1367,10 +1461,19 @@ function applyWash() {
   const alpha = clamp(1 - settings.bgTransparency / 100, 0, 1);
   game.arcade.wash = alpha;
   renderer.wash = alpha;
-  // 내 퍽 표시 농도: 플레이 중 화면의 내 퍽을 흐리게/안 보이게 (감각으로 플레이하는 헤드업 훈련)
-  const pa = clamp(settings.puckOpacity / 100, 0, 1);
+  // 내 퍽 표시 농도: 플레이 중 화면의 내 퍽을 흐리게/안 보이게 (감각으로 플레이하는 헤드업 훈련). 투명 모드는 항상 0
+  const pa = settings.invisible ? 0 : clamp(settings.puckOpacity / 100, 0, 1);
   game.arcade.puckAlpha = pa;
   renderer.puckAlpha = pa;
+}
+
+/**
+ * 앞뒤 방향 (아케이드·퍽 피하기·자유 연습 공통): true = 퍽을 카메라 쪽으로 밀면 화면 위로, 몸쪽으로 당기면 아래로.
+ * 세 모드가 같은 값을 쓰도록 한 곳에서 맞춘다 (설정 초기화 때 평면 모드만 예전 값으로 남던 문제 방지)
+ */
+function applyDepthDirection() {
+  game.arcade.flipY = settings.flipDepth;
+  game.plane.flip = settings.flipDepth;
 }
 
 function persist() { saveSettings(settings); }

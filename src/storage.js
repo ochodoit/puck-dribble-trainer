@@ -18,8 +18,9 @@ export const DEFAULT_SETTINGS = {
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
-  flipDepth: true,                            // 아케이드 앞뒤 방향: true = 카메라 쪽으로 밀면 화면 위로
+  flipDepth: true,                            // 앞뒤 방향(아케이드·퍽 피하기·자유 연습 공통): true = 카메라 쪽으로 밀면 화면 위로
   puckOpacity: 100,                           // 플레이 중 내 퍽 표시 농도(%): 100 = 또렷이, 0 = 안 보임 (10 단위, 헤드업 훈련)
+  invisible: false,                           // 투명 모드: 플레이 중 내 퍽을 아예 숨김 (손의 감각으로만). 랭킹·자랑은 일반과 따로
   courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
   course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (평면 경기장 비율)
   courseRecord: null,                         // 현재 코스로 세운 내 최고 기록: {sig, avg, best, at} (커뮤니티 공유용)
@@ -68,6 +69,7 @@ export function sanitizeSettings(s) {
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
   s.flipDepth = typeof s.flipDepth === 'boolean' ? s.flipDepth : d.flipDepth;
   s.bgTransparency = num(s.bgTransparency, 0, 100, d.bgTransparency);
+  s.invisible = s.invisible === true;
   s.puckOpacity = Number.isInteger(s.puckOpacity) && s.puckOpacity >= 0 && s.puckOpacity <= 100 && s.puckOpacity % 10 === 0 ? s.puckOpacity : d.puckOpacity;
   s.courseCycles = Number.isInteger(s.courseCycles) && s.courseCycles >= 10 && s.courseCycles <= 100 && s.courseCycles % 10 === 0 ? s.courseCycles : d.courseCycles;
   s.course = Array.isArray(s.course)

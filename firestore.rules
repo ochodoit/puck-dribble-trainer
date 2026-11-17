@@ -6,6 +6,18 @@ service cloud.firestore {
     function validNumber(d) {
       return !('number' in d) || d.number == null || (d.number is int && d.number >= 0 && d.number <= 99);
     }
+    // 코스 도전 기록: 평균·가장 빠른 사이클 시간(초)
+    function courseRecord(d) {
+      return d.avg is number && d.avg > 0 && d.avg < 3600 && d.best is number && d.best > 0;
+    }
+    // 기록 자랑 도전 기록: 점수 + 나이 조건 (글쓴이와 같거나 어린 선수만, 글쓴이 본인 제외)
+    function scoreRecord(postId, uid, d) {
+      let post = get(/databases/$(database)/documents/posts/$(postId)).data;
+      let me = get(/databases/$(database)/documents/users/$(uid)).data;
+      return post.type == 'record' && post.uid != uid
+        && d.score is int && d.score >= 0 && d.score <= 1000000
+        && (!('age' in post) || post.age == null || me.age <= post.age);
+    }
     match /users/{uid} {
       allow read: if true;
       allow create, update: if request.auth != null && request.auth.uid == uid
@@ -25,13 +37,19 @@ service cloud.firestore {
         && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 30
         && request.resource.data.body is string && request.resource.data.body.size() <= 200
         && request.resource.data.type in ['course', 'record', 'beat'];
-      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
-      // 코스 도전 기록: 한 사람당 문서 하나 (자기 것만 쓸 수 있음)
+      // 고치기(기록 자랑을 새 기록으로 바꾸기 포함)는 본인만, 글쓴이(uid)는 바꿀 수 없음
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 30
+        && request.resource.data.body is string && request.resource.data.body.size() <= 200;
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+      // 도전 기록: 한 사람당 문서 하나 (자기 것만 쓸 수 있음)
+      //  - 코스 글: 평균·가장 빠른 사이클 시간
+      //  - 기록 자랑 글: 점수. 글쓴이 본인은 안 되고, 글쓴이와 나이가 같거나 어린 선수만 (글에 나이가 없는 예전 글은 제한 없음)
       match /records/{uid} {
         allow read: if true;
         allow write: if request.auth != null && request.auth.uid == uid && request.resource.data.uid == uid
-          && request.resource.data.avg is number && request.resource.data.avg > 0 && request.resource.data.avg < 3600
-          && request.resource.data.best is number && request.resource.data.best > 0;
+          && (courseRecord(request.resource.data) || scoreRecord(id, uid, request.resource.data));
       }
       match /cheers/{uid} {
         allow read: if true;

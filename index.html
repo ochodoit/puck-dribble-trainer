@@ -183,12 +183,13 @@
             <button type="button" data-min="3">3분</button>
             <button type="button" data-min="5">5분</button>
           </div>
-          <p class="muted">게임 시간 — 아케이드·퍽 피하기에 적용. 랭킹은 시간별로 따로 집계됩니다.</p>
+          <p class="muted">게임 시간 — 아케이드·퍽 피하기에 적용(와이드 드리블은 훈련 3가지를 이 시간씩). 랭킹은 시간별로 따로 집계됩니다.</p>
         </div>
         <p id="mode-pick-hint" class="muted pick-hint">퍽을 움직여 고르세요 — 빨간 점이 카드 위에 2초 머물면 선택됩니다.</p>
         <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
         <div id="mode-list" class="mode-list"></div>
         <div class="versus-row">
+          <label class="switch invisible-switch"><input type="checkbox" id="invisible-toggle" /><span>투명 모드 — 플레이 중 내 퍽이 화면에 보이지 않아 손의 감각으로만 피합니다 (기록은 따로 집계)</span></label>
           <label class="switch"><input type="checkbox" id="versus-toggle" /><span>2인 대결 (번갈아 플레이)</span></label>
           <div id="versus-names" class="versus-names hidden">
             <input id="p1-name" type="text" maxlength="10" placeholder="플레이어 1" value="플레이어 1" />
@@ -213,7 +214,7 @@
           <label class="switch"><input type="checkbox" id="set-debug" /><span>인식 마스크 표시(디버그)</span></label>
           <label class="switch"><input type="checkbox" id="set-sound" checked /><span>효과음</span></label>
           <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>핸즈프리 시작 (퍽을 원 안에 3초)</span></label>
-          <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>카메라 쪽으로 밀면 화면 위로 (아케이드·퍽 피하기)</span></label>
+          <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>카메라 쪽으로 밀면 화면 위로 (아케이드·퍽 피하기·와이드 드리블·자유 연습)</span></label>
 
           <label>바닥 밝기 기준 <output id="out-whiteV"></output>
             <input type="range" id="set-whiteV" min="80" max="240" step="1" />
@@ -307,6 +308,10 @@
         <div class="rank-filters">
           <select id="rank-mode"></select>
           <select id="rank-time" aria-label="게임 시간"></select>
+          <select id="rank-variant" aria-label="일반 · 투명 모드">
+            <option value="">일반</option>
+            <option value="inv">투명 모드</option>
+          </select>
           <select id="rank-age"><option value="">전체 연령</option></select>
           <select id="rank-scope">
             <option value="all">전 세계</option>
@@ -349,6 +354,11 @@
             <button type="button" data-filter="course">코스</button>
             <button type="button" data-filter="record">기록 자랑</button>
           </div>
+          <select id="comm-mode" class="comm-mode" aria-label="모드별 보기"></select>
+          <div id="comm-sort" class="seg" role="group" aria-label="정렬">
+            <button type="button" data-sort="recent" class="active">최신순</button>
+            <button type="button" data-sort="cheers">응원순</button>
+          </div>
           <button type="button" id="comm-write" class="btn btn-primary">글쓰기</button>
         </div>
         <p id="comm-note" class="muted"></p>
@@ -366,7 +376,10 @@
             <button type="button" id="comm-cancel" class="btn btn-ghost">취소</button>
           </div>
         </form>
-        <div id="comm-list" class="comm-list"></div>
+        <div class="comm-main">
+          <div id="comm-list" class="comm-list"></div>
+          <aside id="comm-detail" class="comm-detail" aria-live="polite"></aside>
+        </div>
       </div>
     </div>
 

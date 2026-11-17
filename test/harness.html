@@ -10,9 +10,10 @@
   import { Tracker } from '../src/tracker.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
-  import { Arcade, PUCK_R, HIT_PENALTY, FEVER_BONUS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
+  import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
+  import { C } from '../src/theme.js';
   import { alphaLayer } from '../src/theme.js';
-  import { rankKey, FLYER_R } from '../src/game.js';
+  import { rankKey, FLYER_R, WIDE_DRILLS, laneX } from '../src/game.js';
   import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf } from '../src/account.js';
   import { decideIdle, stepChoice, stepDwell, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
   import { LocalCommunityStore, buildPost, boardOf, courseSig, betterRecord, STARTER_POSTS } from '../src/community.js';
@@ -54,12 +55,12 @@
     ctx.fillStyle = '#6b7280'; ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.fillStyle = '#e5e7eb'; ctx.fillRect(120, 300, 1040, 420);
     const ar = new Arcade(null); ar.aspect = cv.height / cv.width; ar.start({ distance: 0 }, 'normal'); ar.phase = 'play';
-    ar.score = 1830; ar.combo = 12; ar.maxCombo = 12; ar.level = 1;
+    ar.score = 183; ar.streak = 12; ar.maxStreak = 12; ar.level = 1;
     ar.avatar = ar.toZone(0.42, 0.55);
     const P = (x, y, r, c) => ar.obstacles.push({ x, y, r, vy: 0.26, color: PUCK_COLORS[c], minDist: 1, passed: false, hit: false, nearMiss: false });
     P(0.22, 0.10, 0.020, 0); P(0.58, 0.05, 0.015, 1); P(0.82, 0.19, 0.018, 2); P(0.36, 0.27, 0.014, 3); P(0.68, 0.33, 0.021, 0); P(0.14, 0.36, 0.016, 1); P(0.50, 0.40, 0.017, 2); P(0.30, 0.46, 0.019, 3); P(0.88, 0.42, 0.015, 0); P(0.46, 0.16, 0.02, 2);
     ar.pickups.push({ x: 0.75, y: 0.44, r: 0.013, vy: 0.3, born: 0 }); ar.pickups.push({ x: 0.2, y: 0.22, r: 0.013, vy: 0.3, born: 0 });
-    ar.effects.push({ type: 'pop', x: 0.42, y: ar.avatar.y - 0.09, text: 'Deke! +100 ×2', color: '#E03C31', style: 'script', t0: performance.now(), dur: 900, age: 0.2 });
+    ar.effects.push({ type: 'pop', x: 0.42, y: ar.avatar.y - 0.09, text: '+10', color: '#5A564E', style: 'small', t0: performance.now(), dur: 900, age: 0.2 });
     ar.draw(ctx, cv.width, cv.height, 1234, { trail: [], state: 'tracked' });
     return true;
   };
@@ -109,7 +110,7 @@
     const ws = vision.sampleObject(320 * 0.375, 200 * 0.375, 70);
     check('white sample flagged floor-like', ws && vision.isFloorLike(ws, settings), ws);
 
-    // 6) 트래커 + 게임: 퍽이 좌우로 움직이면 터치 카운트 증가, 와이드 모드 반복 증가
+    // 6) 트래커 + 게임: 퍽이 좌우로 움직이면 터치 카운트 증가, 와이드 모드는 평면 위에서 내 퍽을 따라감
     const tracker = new Tracker();
     const game = new Game(null);
     game.setMode('wide');
@@ -128,8 +129,8 @@
       now += 33;
     }
     check('tracker counts touches', tracker.touches >= 6, { touches: tracker.touches, lastU });
-    check('wide drill counts reps', game.stats.reps >= 6, game.stats);
-    check('timer runs down', game.timeLeft < 30 && game.timeLeft > 20, game.timeLeft);
+    check('wide drill follows my puck on the flat field', game.me && game.me.x > 0 && game.me.x < 1 && game.wide.stage === 0, game.me);
+    check('timer runs down (3 drills x 1 min)', game.limit === 180 && game.timeLeft < 180 && game.timeLeft > 170 && Math.abs(game.stageLeft - (game.timeLeft - 120)) < 1e-6, { left: game.timeLeft, stageLeft: game.stageLeft });
     const result = game.stop('manual');
     check('result built', result && result.items.length >= 2, result && result.items);
 
@@ -321,46 +322,43 @@
     t = toPlay(ar, t);
     check('A1 play starts after 3s hold', ar.phase === 'play');
 
-    const fall = (x, y, r = 0.035, vy = 0.5, color = PUCK_COLORS[0]) => ({ x, y, r, vy, color, minDist: Infinity, passed: false, hit: false, nearMiss: false });
-    // A2) 내려오는 퍽과 충돌 -> 감점, 1.5초 무적 동안 추가 피격 없음, 콤보 초기화
-    ar = mk(); t = toPlay(ar, 20000); ar.combo = 7;
+    const fall = (x, y, r = 0.035, vy = 0.5, color = PUCK_COLORS[0]) => ({ x, y, r, vy, color, minDist: Infinity, passed: false, hit: false, threat: false });
+    // A2) 내려오는 퍽과 충돌 -> −10, 1.5초 무적 동안 추가 피격 없음, 연속 터치 초기화
+    ar = mk(); t = toPlay(ar, 20000); ar.streak = 7; ar.score = 50;
     ar.obstacles.push(fall(0.5, 0.1));
     t = stepTo(ar, 0.5, 0.5, t, 40); // 1.3초: 퍽이 내 퍽(y≈0.478)을 통과
-    check('A2 falling puck hit = penalty and combo reset (no lives)', ar.hits === 1 && ar.combo === 0 && ar.lives === undefined, { hits: ar.hits });
+    check('A2 falling puck hit = −10 and streak reset (no lives)', ar.hits === 1 && ar.streak === 0 && ar.score === 50 - HIT_PENALTY && ar.lives === undefined, { hits: ar.hits, score: ar.score });
     ar.obstacles.push(fall(0.5, zoneY(ar, 0.5) - 0.05));
     t = stepTo(ar, 0.5, 0.5, t, 6); // 무적 중
     check('A2 invulnerable right after hit', ar.hits === 1);
 
-    // A3) 가까이 스쳐 피한 퍽만 +50·콤보 / 멀리 지나간 퍽은 점수 없음 / A4) 아슬아슬 회피 DEKE +100
+    // A3) 나를 겨냥한 퍽을 피해도 점수는 없다 (피한 수만 기록)
     ar = mk(); t = toPlay(ar, 30000); const s0 = ar.score;
-    ar.obstacles.push(fall(0.15, 0.1));
-    t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A3 far puck passing gives no dodge credit', ar.passed === 0 && ar.combo === 0 && ar.score - s0 < 50, { passed: ar.passed, d: ar.score - s0 });
-    const s0b = ar.score;
-    ar.obstacles.push(fall(0.5 + 0.035 + PUCK_R + 0.05, 0.1)); // 레인 안(0.08)이지만 DEKE 범위 밖
-    t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A3 dodging a nearby puck gives +50 and combo', ar.passed === 1 && ar.combo === 1 && ar.score - s0b >= 50 && ar.dekes === 0, { score: ar.score - s0b, combo: ar.combo });
-    const s1 = ar.score;
-    ar.obstacles.push(fall(0.5 - (0.035 + PUCK_R + 0.006), 0.1)); // 히트박스 바깥 15% 안쪽으로 스침
-    t = stepTo(ar, 0.5, 0.5, t, 45);
-    check('A4 near miss awards DEKE +100', ar.dekes === 1 && ar.passed === 2 && ar.hits === 0 && ar.score - s1 >= 150, { dekes: ar.dekes, score: ar.score - s1 });
+    ar.obstacles.push(fall(0.5, 0.1));          // 내 퍽 줄로 떨어지는 퍽
+    t = stepTo(ar, 0.5, 0.5, t, 2);              // 겨냥당함
+    t = stepTo(ar, 0.85, 0.5, t, 45);            // 한쪽으로 비켜 피함 (방향 전환 없음 = 터치 아님)
+    check('A3 dodging an aimed puck is counted but gives no points', ar.passed === 1 && ar.hits === 0 && ar.score === s0, { passed: ar.passed, d: ar.score - s0 });
 
-    // A5) 황금 퍽 +200
+    // A4) coin +10
     ar = mk(); t = toPlay(ar, 40000); const s2 = ar.score;
-    ar.pickups.push({ x: 0.5, y: zoneY(ar, 0.5) - 0.01, r: 0.028, vy: 0.001, born: t });
+    ar.pickups.push({ x: 0.5, y: zoneY(ar, 0.5) - 0.01, r: COIN_R, vy: 0.001, born: t });
     t = stepTo(ar, 0.5, 0.5, t, 2);
-    check('A5 gold puck +200 and combo', ar.items === 1 && ar.combo === 1 && ar.score - s2 >= 200, { items: ar.items, score: ar.score - s2 });
+    check('A4 coin +10', ar.items === 1 && ar.score - s2 === COIN_POINTS && COIN_POINTS === 10, { items: ar.items, d: ar.score - s2 });
 
-    // A6) 콤보 배율 & FEVER 회복
-    ar = mk(); t = toPlay(ar, 50000);
-    ar.combo = 4; ar._combo(t); check('A6 5 combo = x1.5', ar.multiplier === 1.5);
-    ar.combo = 9; ar._combo(t); check('A6 10 combo = x2', ar.multiplier === 2);
-    const sF = ar.score; ar.combo = 19; ar._combo(t);
-    check('A6 20 combo = FEVER x3 and bonus points', ar.multiplier === 3 && ar.score - sF === FEVER_BONUS, { d: ar.score - sF });
-    ar.score = 500; ar.avatar = { x: 0.5, y: 0.5 }; ar._onHit({}, t);
-    check('A6 hit subtracts penalty, never below zero', ar.score === 500 - HIT_PENALTY && (ar.score = 30, ar._onHit({}, t), ar.score === 0), ar.score);
-    ar.combo = 20;
-    const s3 = ar.score; ar._addScore(50); check('A6 multiplier applies to points', ar.score - s3 === 150);
+    // A5) 좌우 터치마다 +1, 연속 터치가 길어도 보너스·배율 없음. 가만히 있으면 0점
+    ar = mk(); t = toPlay(ar, 45000); const s3 = ar.score;
+    t = stepTo(ar, 0.5, 0.5, t, 60);
+    check('A5 standing still scores nothing', ar.score === s3 && ar.touches === 0, ar.score - s3);
+    for (let k = 0; k < 26; k++) t = stepTo(ar, k % 2 ? 0.3 : 0.7, 0.5, t, 5);
+    check('A5 every side-to-side touch +1, no streak bonus or multiplier', ar.touches >= 20 && ar.score - s3 === ar.touches * TOUCH_POINTS && TOUCH_POINTS === 1 && ar.maxStreak >= 10 && ar.multiplier === undefined, { touches: ar.touches, d: ar.score - s3, maxStreak: ar.maxStreak });
+    t = stepTo(ar, 0.33, 0.5, t, 2); t = stepTo(ar, 0.3, 0.5, t, 4); // 긴 스윙 뒤 첫 반전은 정상 터치일 수 있으니 먼저 정리
+    const s4 = ar.score;
+    t = stepTo(ar, 0.33, 0.5, t, 2); t = stepTo(ar, 0.3, 0.5, t, 2); t = stepTo(ar, 0.33, 0.5, t, 2); t = stepTo(ar, 0.3, 0.5, t, 2);
+    check('A5 tiny wiggles in place are not touches', ar.score === s4, ar.score - s4);
+
+    // A6) 충돌 감점은 0점 아래로 내려가지 않는다
+    ar.avatar = { x: 0.5, y: 0.5 }; ar.score = 30; ar._onHit({}, t);
+    check('A6 hit subtracts penalty, never below zero', ar.score === 30 - HIT_PENALTY && (ar.score = 5, ar._onHit({}, t), ar.score === 0), ar.score);
 
     // A7) 스폰: 막대 없이 정원 퍽만, 색은 여러 가지, 속도는 모두 같고 테두리 안쪽 무작위 위치
     ar = mk(); t = toPlay(ar, 60000); ar.spawnTimer = 0; ar.pickupTimer = 0.3;
@@ -379,7 +377,7 @@
     const vys = new Set(seen.map((o) => o.vy.toFixed(6))), cols = new Set(seen.map((o) => o.color));
     check('A7 only round pucks spawn (no bars)', seen.length > 40 && seen.every((o) => o.type === undefined && o.r > 0 && o.w === undefined), seen.length);
     check('A7 all pucks fall at the same constant speed', vys.size === 1 && Math.abs(seen[0].vy - 0.26) < 1e-9, [...vys]);
-    check('A7 several colors, never red or yellow', cols.size >= 3 && [...cols].every((c) => PUCK_COLORS.includes(c)) && !PUCK_COLORS.includes('#E03C31') && !PUCK_COLORS.includes('#FFC72C'), [...cols]);
+    check('A7 falling pucks are all ink black (never red or yellow)', cols.size === 1 && [...cols][0] === C.ink && !PUCK_COLORS.includes(C.red) && !PUCK_COLORS.includes(C.yellow), [...cols]);
     check('A7 random x inside the side borders', seen.every((o) => o.x - o.r >= FIELD_MARGIN - 1e-9 && o.x + o.r <= 1 - FIELD_MARGIN + 1e-9) && Math.max(...seen.map((o) => o.x)) - Math.min(...seen.map((o) => o.x)) > 0.6, { min: Math.min(...seen.map((o) => o.x)), max: Math.max(...seen.map((o) => o.x)) });
     // 앞뒤 방향: 기본은 카메라 쪽(v 큼)으로 밀면 화면 위로, 몸쪽(v 작음)으로 당기면 아래로. 설정으로 반전 가능
     check('A8 push toward camera moves the puck up (default)', ar.flipY === true && Math.abs(ar.toZone(0.5, 1).y - ar.zoneTop) < 1e-9 && Math.abs(ar.toZone(0.5, 0).y - ar.aspect) < 1e-9);
@@ -391,7 +389,7 @@
       const count = (diff) => { const a = new Arcade(null); a.aspect = 0.5625; a.start(fakePuck(0.5, 0.5), diff, true); a.pickupTimer = 1e9; let n = 0, tt = 900000; const seenO = new Set(); for (let i = 0; i < 606; i++) { a.update(0.033, fakePuck(0.02, 0.98, 'predicted'), tt); tt += 33; a.score = 0; a.obstacles.forEach((o) => seenO.add(o)); } return { n: seenO.size, speed: a.speed, iv: a.interval() }; };
       const e = count('easy'), n = count('normal'), h = count('hard');
       check('A7 difficulty changes speed (easy < normal < hard)', e.speed < n.speed && n.speed < h.speed && Math.abs(h.speed - 0.36) < 1e-9, { e: e.speed, n: n.speed, h: h.speed });
-      check('A7 difficulty changes puck count; hard is about 2x the old hard rate', e.n < n.n && n.n < h.n && h.iv === 0.4 && h.n >= 42 && h.n <= 58, { easy: e.n, normal: n.n, hard: h.n });
+      check('A7 difficulty changes puck count (easy < normal < hard)', e.n < n.n && n.n < h.n && Math.abs(h.iv - 0.2 / 1.16) < 1e-9, { easy: e.n, normal: n.n, hard: h.n, hardIv: h.iv });
     }
     // A8) 내 퍽은 테두리 안쪽에 매핑됨
     check('A8 player mapped inside the borders', Math.abs(ar.toZone(0, 0.5).x - FIELD_MARGIN) < 1e-9 && Math.abs(ar.toZone(1, 0.5).x - (1 - FIELD_MARGIN)) < 1e-9 && ar.toZone(0.5, 0.5).x === 0.5);
@@ -407,22 +405,21 @@
     ar.update(0.033, { pos: { x: 0.5, y: 0.5 }, state: 'predicted', trail: [], distance: 0, speed: 0 }, t); t += 33;
     check('A9 no hit while position is predicted (occlusion buffer)', ar.hits === 0);
 
-    // A10) 생존 점수, 레벨 진행, 결과 리포트
+    // A10) 레벨 진행(15초마다 더 자주, 속도는 그대로), 결과 리포트
     ar = mk(); t = toPlay(ar, 90000);
-    t = stepTo(ar, 0.5, 0.5, t, 92); // ≈3초
-    check('A10 survival +10/s', ar.score >= 30 && ar.score < 50, ar.score);
     const iv0 = ar.interval(), sp0a = ar.speed;
-    ar.score = 2050; ar.update(0.033, fakePuck(0.5, 0.5), t); t += 33;
+    ar.elapsed = 31; ar.update(0.033, fakePuck(0.5, 0.5), t); t += 33;
     check('A10 level raises density, not speed', ar.level === 2 && ar.interval() < iv0 * 0.8 && ar.speed === sp0a, { level: ar.level, iv0, iv: ar.interval() });
     ar.floorWidthM = 2; const res = ar.result({ distance: 3.5 });
-    check('A10 result report fields', res.items_.length === 8 && res.distanceM === 7 && res.items_.some(([k]) => k === '최고 콤보'), res.items_);
+    const keys = res.items_.map(([k]) => k);
+    check('A10 result report: score, coins, touches, hits (no bonus rows)', res.items_.length === 8 && res.distanceM === 7 && keys.slice(0, 4).join() === '점수,Coin,터치,충돌' && !keys.some((k) => /Quick|콤보|배율/.test(k)), keys);
 
     // ===== 시간제 규칙: 1·3·5분, 시간이 끝나면 종료, 시간별 랭킹 키 =====
     {
       const g = new Game(null); g.setMode('arcade');
       check('G1 default limit is 1 minute', g.limit === 60 && g.timeLeft === 60);
       g.playSeconds = 180; g.resetState();
-      check('G1 3-minute setting applies to timed modes only', g.limit === 180 && (g.setMode('wide'), g.limit === 30) && (g.setMode('free'), g.limit === 0));
+      check('G1 3-minute setting applies to timed modes only (wide = 3 drills)', g.limit === 180 && (g.setMode('wide'), g.limit === 540) && (g.setMode('quick'), g.limit === 20) && (g.setMode('free'), g.limit === 0));
       g.setMode('arcade'); g.playSeconds = 60;
       let ended = null; g.onEnd = (res) => { ended = res; };
       const tp = { pos: { x: 0.02, y: 0.02 }, state: 'tracked', trail: [], distance: 0, speed: 0, touches: 0, frames: 10, trackedFrames: 10, trackRate: 1 };
@@ -430,8 +427,40 @@
       let guard = 0;
       while (!ended && guard++ < 3000) { g.update(0.033, tp, tg); tg += 33; }
       check('G1 arcade ends on time (not on hits) at ~60s', ended && ended.reason === 'time' && Math.abs(ended.elapsed - 60) < 0.2, ended && { reason: ended.reason, elapsed: ended.elapsed, hits: g.hits });
-      check('G1 rank key separates durations', ended.rankKey === 'arcade@60' && rankKey('arcade', 300) === 'arcade@300' && rankKey('wide', 300) === 'wide', ended.rankKey);
+      check('G1 rank key separates durations', ended.rankKey === 'arcade@60' && rankKey('arcade', 300) === 'arcade@300' && rankKey('wide', 300) === 'wide@300' && rankKey('quick', 300) === 'quick', ended.rankKey);
       check('G1 result lists hits and game time', ended.items.some(([k]) => k === '충돌') && ended.items.some(([k, v]) => k === '게임 시간' && v === '1분'), ended.items.map(([k]) => k));
+      // 와이드 드리블: 3가지 훈련을 고른 시간만큼 이어서. 판 왼쪽 끝 = 1번 칸, 오른쪽 끝 = 10번 칸
+      {
+        const w = new Game(null); w.setMode('wide'); w.playSeconds = 60; w.resetState();
+        let wEnd = null; w.onEnd = (res) => { wEnd = res; };
+        const fp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
+        let tw = 900000;
+        const go = (x, y = 0.5, n = 3) => { fp.pos = { x, y }; for (let i = 0; i < n && w.running; i++) { w.update(0.033, fp, tw); tw += 33; } };
+        const toStage = (k) => { go(0.5, 0.5, 1); w.elapsed = 60 * k - 0.01; go(0.5, 0.5, 1); };
+        w.start(fp);
+        const z = w.zones;
+        check('W1 wide: 3 drills x chosen time, ranked per time', w.limit === 180 && w.mode.timed && rankKey('wide', 60) === 'wide@60' && WIDE_DRILLS.length === 3, w.limit);
+        check('W2 drill 1 end boxes: half the old width, centered top-to-bottom', z.length === 2 && Math.abs(z[0].w - 0.13) < 1e-9 && Math.abs(z[0].x - 0.105) < 1e-9 && Math.abs(z[1].x - 0.895) < 1e-9
+          && Math.abs(z[0].y - w.plane.A / 2) < 1e-9 && Math.abs(z[0].h - 0.6 * w.plane.A) < 1e-9 && z[0].active && !z[1].active, z);
+        go(0.1); go(0.5); go(0.9); go(0.1); go(0.9, 0.05);
+        check('W2 drill 1 alternates left/right ends (outside the band does not count)', w.stats.drills[0] === 3 && w.score === 3, w.stats);
+        toStage(1);
+        const z2 = w.zones.map((q) => [q.n, q.active]);
+        const order2 = [];
+        go(laneX(10)); // 틀린 칸: 세지 않음
+        const wrong = w.stats.drills[1];
+        for (const n of [1, 2, 1, 10, 9, 10]) { order2.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
+        check('W3 drill 2 sequence 1,2,1,10,9,10 (lanes 1..10 across the board)', w.wide.stage === 1 && z2.join('|') === '1,true|2,false' && wrong === 0 && order2.join() === '1,2,1,10,9,10'
+          && w.stats.drills[1] === 6 && w.stats.sets[1] === 1 && Math.abs(laneX(1) - 0.05) < 1e-9 && Math.abs(laneX(10) - 0.95) < 1e-9 && Math.abs(w.stageLeft - 60) < 1, { z2, order2, stats: w.stats, stageLeft: w.stageLeft });
+        toStage(2);
+        const order3 = [];
+        for (const n of [1, 2, 1, 5, 6, 5, 10, 9, 10, 1]) { order3.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
+        check('W4 drill 3 sequence 1,2,1,5,6,5,10,9,10 repeats', w.wide.stage === 2 && order3.join() === '1,2,1,5,6,5,10,9,10,1' && w.stats.drills[2] === 10 && w.stats.sets[2] === 1, { order3, stats: w.stats });
+        go(0.5, 0.5, 1); w.elapsed = 180 - 0.01; go(0.5, 0.5, 2);
+        const rows = wEnd ? Object.fromEntries(wEnd.items) : {};
+        check('W5 ends after all 3 drills; result per drill', wEnd && wEnd.reason === 'time' && wEnd.score === 19 && wEnd.seconds === 60 && wEnd.rankKey === 'wide@60'
+          && rows['훈련 1 · 좌우 끝'] === 3 && rows['훈련 2 · 양 끝 짧은 터치'] === '6 · 1세트' && rows['훈련 3 · 양 끝과 가운데'] === '10 · 1세트' && !WIDE_DRILLS.some((d) => /\d/.test(d.label)) && rows['게임 시간'] === '1분 × 3', wEnd && wEnd.items);
+      }
       // 추적을 잃으면 시계도 멈춤
       const g2b = new Game(null); g2b.setMode('arcade'); g2b.start(tp, { handsFree: true });
       for (let i = 0; i < 60; i++) { g2b.update(0.033, tp, tg); tg += 33; }

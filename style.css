@@ -629,3 +629,11 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .adm-line-h { font-size: 11.5px; letter-spacing: 0.04em; color: var(--ink-soft); min-width: 74px; }
 .adm-chip { border: 1px solid rgba(22, 22, 22, 0.25); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 .analytics-note { font-size: 11px; color: var(--mute); margin: 18px auto 0; max-width: 520px; text-align: center; }
+
+/* ---------- 첫 화면: 소개 한 줄 · 안내 페이지 링크 · 다른 언어 안내 ---------- */
+.about { font-size: 13.5px; color: var(--ink-soft); max-width: 600px; margin: 18px auto 0; text-wrap: balance; word-break: keep-all; }
+.site-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 10px; margin: 12px auto 0; font-size: 13.5px; font-weight: 500; }
+.site-links a { color: var(--ink); text-decoration: none; border: 1px solid rgba(22, 22, 22, 0.35); border-radius: 999px; padding: 4px 14px; }
+.site-links a:hover { border-color: var(--red); color: var(--red); }
+.lang-hint { margin: -4px 0 8px; text-align: right; font-size: 13px; }
+.lang-hint a { color: var(--red); font-weight: 600; }

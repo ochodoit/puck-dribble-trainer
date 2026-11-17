@@ -17,7 +17,25 @@ export function detectLang(saved, navLang) {
 }
 
 function readSaved() { try { return localStorage.getItem(KEY); } catch { return null; } }
-let lang = detectLang(readSaved(), globalThis.navigator?.language);
+
+// ---- 언어별 주소: 한국어 = /, 영어 = /en/ (검색엔진이 언어마다 따로 색인하도록 화면 언어는 주소로 정한다) ----
+/** 주소 경로 -> 화면 언어 */
+export const pageLang = (path) => (/^\/en(\/|$)/.test(String(path || '')) ? 'en' : 'ko');
+/** 그 언어의 첫 화면 주소 (초대 코드 같은 ?c=… 와 #… 는 그대로) */
+export const langUrl = (l, loc = globalThis.location) => (l === 'en' ? '/en/' : '/') + (loc?.search || '') + (loc?.hash || '');
+/** 직접 고른 언어 (없으면 null) */
+export const savedLang = () => { const s = readSaved(); return LANGS.includes(s) ? s : null; };
+/** 고른 언어를 기억만 한다 (다른 주소로 옮겨 가기 전에) */
+export function rememberLang(l) { if (LANGS.includes(l)) try { localStorage.setItem(KEY, l); } catch { /* 사생활 보호 모드 */ } }
+
+const here = typeof document !== 'undefined' ? globalThis.location : null;
+let lang = here ? pageLang(here.pathname) : detectLang(readSaved(), globalThis.navigator?.language);
+/**
+ * 예전에 다른 언어를 직접 골랐으면 그 언어 주소로 옮긴다 (첫 화면 두 주소에서만. 검색 크롤러는 고른 기록이 없어 그대로)
+ * true 면 main.js 가 앱을 시작하지 않는다
+ */
+export const redirecting = !!(here && savedLang() && savedLang() !== lang && /^\/(index\.html)?$|^\/en\/?(index\.html)?$/.test(here.pathname));
+if (redirecting) here.replace(langUrl(savedLang(), here));
 
 // ---- 사전 준비: {0} 자리표시자가 있는 키는 패턴으로 컴파일 (고정 글자가 많은 것부터 시도) ----
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -163,9 +181,9 @@ const listeners = new Set();
 /** 언어가 바뀔 때 다시 그려야 하는 화면(입력값 등 DOM 텍스트가 아닌 곳)을 위한 알림 */
 export function onLangChange(fn) { listeners.add(fn); }
 
-/** [data-lang] 버튼: 누르면 언어 전환, 현재 언어에 active 표시 */
-export function bindLangButtons(root = document) {
-  root.querySelectorAll('[data-lang]').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.lang)));
+/** [data-lang] 버튼·링크: 누르면 pick(언어) (기본은 그 자리에서 전환), 현재 언어에 active 표시 */
+export function bindLangButtons(root = document, pick = setLang) {
+  root.querySelectorAll('[data-lang]').forEach((b) => b.addEventListener('click', (e) => { if (b.tagName === 'A') e.preventDefault(); pick(b.dataset.lang); }));
   paintButtons();
 }
 

@@ -14,7 +14,33 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
-  <title>퍽 드리블 트레이너</title>
+  <!-- 검색 정보: tools/build-site.mjs 가 tools/site-content.mjs 로 채운다 (직접 고치지 말 것) -->
+  <!-- seo:start -->
+  <title>퍽 드리블 트레이너 — 카메라로 하는 하키 스틱핸들링 훈련 게임</title>
+  <meta name="description" content="휴대폰·아이패드·노트북 카메라가 퍽과 스틱을 인식하는 무료 하키 스틱핸들링 훈련 게임. 앱 설치 없이 브라우저에서 아케이드·8자 드리블·와이드 드리블 등 7가지 게임으로 집에서 연습하세요." />
+  <link rel="canonical" href="https://puck-trainer.com/" />
+  <link rel="alternate" hreflang="ko" href="https://puck-trainer.com/" />
+  <link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/" />
+  <link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="퍽 드리블 트레이너" />
+  <meta property="og:title" content="퍽 드리블 트레이너 — 집에서 하는 하키 스틱핸들링 게임" />
+  <meta property="og:description" content="휴대폰·아이패드·노트북 카메라가 퍽과 스틱을 인식하는 무료 하키 스틱핸들링 훈련 게임. 앱 설치 없이 브라우저에서 아케이드·8자 드리블·와이드 드리블 등 7가지 게임으로 집에서 연습하세요." />
+  <meta property="og:url" content="https://puck-trainer.com/" />
+  <meta property="og:image" content="https://puck-trainer.com/icons/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="퍽 드리블 트레이너" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:locale:alternate" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="퍽 드리블 트레이너 — 집에서 하는 하키 스틱핸들링 게임" />
+  <meta name="twitter:description" content="휴대폰·아이패드·노트북 카메라가 퍽과 스틱을 인식하는 무료 하키 스틱핸들링 훈련 게임. 앱 설치 없이 브라우저에서 아케이드·8자 드리블·와이드 드리블 등 7가지 게임으로 집에서 연습하세요." />
+  <meta name="twitter:image" content="https://puck-trainer.com/icons/og-image.png" />
+  <meta name="google-site-verification" content="YQj_GaA3rFU0ha0gGZaFWCM3gz7MWWwLLTVLIjkQLMc" />
+  <meta name="msvalidate.01" content="5A21EE30137A77A9FB261F99EBCD09D8" />
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://puck-trainer.com/#org","name":"Puck Dribble Trainer","alternateName":"퍽 드리블 트레이너","url":"https://puck-trainer.com/","logo":"https://puck-trainer.com/icons/icon-512.png","sameAs":["https://www.instagram.com/puck_trainer/"]},{"@type":"WebSite","@id":"https://puck-trainer.com/#website","url":"https://puck-trainer.com/","name":"퍽 드리블 트레이너","alternateName":["Puck Dribble Trainer","Puck Trainer"],"inLanguage":"ko","publisher":{"@id":"https://puck-trainer.com/#org"}},{"@type":"WebApplication","@id":"https://puck-trainer.com/#app","name":"퍽 드리블 트레이너","alternateName":["Puck Dribble Trainer","Puck Trainer"],"url":"https://puck-trainer.com/","description":"퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.","inLanguage":"ko","availableLanguage":["ko","en"],"applicationCategory":"SportsApplication","applicationSubCategory":"아이스하키 스틱핸들링 훈련 게임","operatingSystem":"Web browser (iPadOS, iOS, Android, Windows, macOS)","browserRequirements":"카메라와 최신 웹 브라우저","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"KRW"},"image":"https://puck-trainer.com/icons/og-image.png","screenshot":"https://puck-trainer.com/icons/og-image.png","featureList":["아케이드","퍽 피하기","와이드 드리블","8자 드리블","퀵 핸즈","반응 타겟","자유 연습"],"publisher":{"@id":"https://puck-trainer.com/#org"},"copyrightHolder":{"@type":"Organization","name":"ochodoit"}}]}</script>
+  <!-- seo:end -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght,SOFT@9..144,600..900,0..100&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@700;900&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -125,8 +151,9 @@
     <div id="splash" class="panel splash">
       <div class="splash-inner">
         <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
+        <p id="lang-hint" class="lang-hint hidden" data-ugc><a href="/en/" data-lang="en" lang="en">English version →</a></p>
         <div class="masthead"><span>iPad · Phone · Laptop</span></div>
-        <h1 class="lockup">Puck Dribble<span class="lockup-script">Trainer</span></h1>
+        <h1 class="lockup">Puck Dribble<span class="lockup-script"> Trainer</span></h1>
         <picture>
           <source srcset="icons/hero-art.webp" type="image/webp" />
           <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="" role="img" aria-label="스틱과 퍽 일러스트" decoding="async" />
@@ -195,6 +222,8 @@
             <li><span><b>주의</b> — 같은 색 물체를 바닥에 두지 마세요. 화면이 가려지면 추적이 멈춥니다.</span></li>
           </ol>
         </details>
+        <p class="about">퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.</p>
+        <nav class="site-links" aria-label="안내 페이지"><a href="/guide/">사용 가이드</a><a href="/games/">7가지 게임</a><a href="/faq/">자주 묻는 질문</a></nav>
         <p class="analytics-note">방문·플레이 통계를 위해 Google 애널리틱스를 씁니다. 별명·나이 같은 개인정보는 보내지 않습니다.</p>
         <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>무단 복제·배포 금지</span></p>
       </div>

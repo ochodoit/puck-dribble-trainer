@@ -11,7 +11,7 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
 
 const server = http.createServer(async (req, res) => {
   const path = decodeURIComponent(req.url.split('?')[0]);
-  const file = join(ROOT, path === '/' ? 'index.html' : path);
+  const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path); // /en/, /guide/ 처럼 폴더 주소는 그 안의 index.html
   if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
   try {
     const data = await readFile(file);
@@ -583,16 +583,24 @@ const skipSetup = async (page, touch = false) => {
     }
     return out;
   });
+  // 언어별 주소: 첫 주소(/)는 영어 브라우저에서도 한국어 (검색엔진이 한국어 페이지를 보도록) + 'English version' 안내
   await page.goto(`${base}/index.html`);
   await tick();
-  const first = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, cam: document.querySelector('#btn-camera').textContent, ph: document.querySelector('#auth-code').placeholder, on: document.querySelector('.lang-row [data-lang].active')?.dataset.lang, visible: !!document.querySelector('.lang-row [data-lang="ko"]').offsetParent }));
-  ok(first.lang === 'en' && /stickhandling/.test(first.lead) && first.cam === 'Start camera' && first.ph === 'e.g. K7MP-Q2XD' && first.on === 'en' && first.visible, 'English browser opens in English with language buttons on the first screen', JSON.stringify(first));
-  await page.click('.lang-row [data-lang="ko"]'); await tick();
-  const ko = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, cam: document.querySelector('#btn-camera').textContent, tab: document.querySelector('.auth-tabs .tab[data-tab="register"]').textContent }));
-  ok(ko.lang === 'ko' && /스틱 ?핸들링/.test(ko.lead) && ko.cam === '카메라 시작' && ko.tab === '회원가입', '한국어 button restores the Korean screen', JSON.stringify(ko));
-  await page.click('.lang-row [data-lang="en"]'); await tick();
+  const root = await page.evaluate(() => ({ lang: document.documentElement.lang, cam: document.querySelector('#btn-camera').textContent, hint: !document.querySelector('#lang-hint').classList.contains('hidden'), href: document.querySelector('#lang-hint a').getAttribute('href') }));
+  ok(root.lang === 'ko' && root.cam === '카메라 시작' && root.hint && root.href === '/en/', 'the first address stays Korean for an English browser and shows an English version link', JSON.stringify(root));
+  await page.goto(`${base}/en/`);
+  await tick();
+  const first = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, cam: document.querySelector('#btn-camera').textContent, ph: document.querySelector('#auth-code').placeholder, on: document.querySelector('.lang-row [data-lang].active')?.dataset.lang, visible: !!document.querySelector('.lang-row [data-lang="ko"]').offsetParent, title: document.title, hint: !document.querySelector('#lang-hint').classList.contains('hidden') }));
+  ok(first.lang === 'en' && /stickhandling/.test(first.lead) && first.cam === 'Start camera' && first.ph === 'e.g. K7MP-Q2XD' && first.on === 'en' && first.visible && /^Puck Dribble Trainer/.test(first.title) && !first.hint, 'the English address /en/ opens in English with language buttons on the first screen', JSON.stringify(first));
+  await Promise.all([page.waitForURL((u) => new URL(u).pathname === '/'), page.click('.lang-row [data-lang="ko"]')]); await tick();
+  const ko = await page.evaluate(() => ({ path: location.pathname, lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, cam: document.querySelector('#btn-camera').textContent, tab: document.querySelector('.auth-tabs .tab[data-tab="register"]').textContent, hint: !document.querySelector('#lang-hint').classList.contains('hidden') }));
+  ok(ko.lang === 'ko' && /스틱 ?핸들링/.test(ko.lead) && ko.cam === '카메라 시작' && ko.tab === '회원가입' && !ko.hint, '한국어 button goes to the Korean address (no hint once chosen)', JSON.stringify(ko));
+  await Promise.all([page.waitForURL((u) => new URL(u).pathname === '/en/'), page.click('.lang-row [data-lang="en"]')]); await tick();
   await page.reload(); await tick();
-  ok(await page.evaluate(() => document.documentElement.lang === 'en' && document.querySelector('#btn-camera').textContent === 'Start camera'), 'language choice is remembered after reload');
+  ok(await page.evaluate(() => location.pathname === '/en/' && document.documentElement.lang === 'en' && document.querySelector('#btn-camera').textContent === 'Start camera'), 'English address stays English after reload');
+  await page.goto(`${base}/index.html?c=ace1-2345`);
+  await page.waitForURL((u) => new URL(u).pathname === '/en/'); await tick();
+  ok(await page.evaluate(() => document.documentElement.lang === 'en' && window.__puckTrainer.app.invite === 'ACE12345'), 'a remembered English choice opens the English address (invite code kept)');
   await page.waitForFunction(() => window.__puckTrainer?.account);
   await page.evaluate(() => { const a = window.__puckTrainer.account; a._putCode('ACE12345', { type: 'one' }); a._putCode('TEAMBETA', { type: 'beta', maxUses: 0 }); });
   await page.click('.auth-tabs .tab[data-tab="register"]');
@@ -793,7 +801,31 @@ const skipSetup = async (page, touch = false) => {
   await context.close();
 }
 
-// ---- 6) 번역 누락 검사: 소스의 모든 한국어 문구가 영어 사전에 있어야 함 ----
+// ---- 6) 검색엔진·AI 검색용 파일: 최신인지, 페이지마다 검색 정보, 안내 페이지가 오류 없이 열리는지 ----
+{
+  const { checkSite } = await import('./site-check.mjs');
+  const r = await checkSite();
+  r.logs.forEach((l) => console.log(l));
+  if (!r.ok) failed = true;
+  const ctx = await newCtx({ viewport: { width: 1100, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const seen = [], broken = [];
+  for (const p of ['/guide/', '/games/', '/faq/', '/en/guide/', '/en/games/', '/en/faq/', '/404.html']) {
+    const res = await page.goto(`${base}${p}`);
+    const info = await page.evaluate(() => ({ h1: document.querySelector('h1')?.textContent || '', links: [...document.querySelectorAll('a[href^="/"]')].map((a) => a.getAttribute('href')), font: getComputedStyle(document.body).fontFamily }));
+    seen.push(`${p}:${res.status()}:${info.h1.slice(0, 18)}`);
+    for (const l of new Set(info.links)) { const r2 = await page.request.get(`${base}${l}`); if (r2.status() !== 200) broken.push(`${p} -> ${l} ${r2.status()}`); }
+    if (res.status() !== 200 || !info.h1 || !/Poppins|Noto Sans KR/.test(info.font)) broken.push(`${p} ${res.status()} ${info.h1}`);
+  }
+  console.log(`${broken.length || errors.length ? 'FAIL' : 'PASS'} guide pages open without errors and every internal link works (${seen.join(' · ')})${broken.length ? ' ' + JSON.stringify(broken) : ''}${errors.length ? ' errors: ' + JSON.stringify(errors) : ''}`);
+  if (broken.length || errors.length) failed = true;
+  await ctx.close();
+}
+
+// ---- 7) 번역 누락 검사: 소스의 모든 한국어 문구가 영어 사전에 있어야 함 ----
 {
   const { checkCoverage } = await import('./i18n-coverage.mjs');
   const { total, missing } = await checkCoverage();

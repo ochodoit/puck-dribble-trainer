@@ -14,7 +14,7 @@ import { clock, clockNow } from './clock.js';
 import { initMe } from './me-ui.js';
 import { dayKey } from './activity.js';
 import { decideIdle, stepChoice, stepDwell, inCardCore, CHOICE_HOLD_S } from './idle-logic.js';
-import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
+import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing, redirecting, langUrl, savedLang, rememberLang } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAge, canRecordOn, TITLE_MAX } from './community.js';
 import { initCommunity } from './community-ui.js';
 import { memberStats } from './stats.js';
@@ -80,12 +80,13 @@ const INVITE_KEY = 'puck-trainer.invite.v1';
 if (isDevHost(location)) window.__puckTrainer = { settings, vision, tracker, game, app, mouse, i18n: { tr, setLang, getLang, missing: i18nMissing } };
 
 // =============== 초기화 ===============
-init();
+if (!redirecting) init(); // 예전에 고른 다른 언어 주소로 옮겨 가는 중이면 시작하지 않음
 
 function init() {
   initAnalytics(); // 방문·플레이 통계 (공식 주소에서만, 개인정보 없이)
   initI18n();
-  bindLangButtons();
+  bindLangButtons(document, pickLang);
+  showLangHint();
   onLangChange(() => { renderModeList(); updateHud(true); refreshCalibUI(); if (!els.panelCommunity.classList.contains('hidden')) community?.refresh(); });
   applySettingsToUI();
   bindUI();
@@ -162,6 +163,25 @@ function readInvite() {
     } else code = localStorage.getItem(INVITE_KEY);
   } catch { /* 저장 불가 */ }
   return code || null;
+}
+
+/**
+ * 언어 버튼: 첫 화면에서는 그 언어의 주소(/ 또는 /en/)로 옮겨 간다 (검색엔진이 언어마다 따로 본다).
+ * 게임을 시작한 뒤(설정 창)에는 그 자리에서 바꾼다 — 카메라·진행 중인 판이 끊기지 않게
+ */
+function pickLang(l) {
+  if (app.started) { setLang(l); return; }
+  if (l === getLang()) return;
+  rememberLang(l);
+  location.assign(langUrl(l));
+}
+
+/** 처음 온 사람의 브라우저 언어가 이 페이지와 다르면 다른 언어 주소를 한 줄로 알려 준다 (직접 고른 적이 있으면 숨김) */
+function showLangHint() {
+  const hint = $('#lang-hint');
+  if (!hint) return;
+  const nav = /^ko\b/i.test(navigator.language || '') ? 'ko' : 'en';
+  hint.classList.toggle('hidden', !!savedLang() || nav === getLang());
 }
 
 function forgetInvite() {

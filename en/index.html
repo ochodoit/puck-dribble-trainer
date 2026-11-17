@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <base href="/" />
+  <!-- 보안: 이 사이트와 Firebase·글꼴 주소의 스크립트만 실행 (글에 HTML이 끼어들어도 스크립트는 못 돈다) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; frame-src https://headsuppuck.firebaseapp.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#F4F1EA" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="퍽 드리블" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <!-- 검색 정보: tools/build-site.mjs 가 tools/site-content.mjs 로 채운다 (직접 고치지 말 것) -->
+  <!-- seo:start -->
+  <title>Puck Dribble Trainer — Hockey Stickhandling Game With Your Camera</title>
+  <meta name="description" content="A free hockey stickhandling game that tracks your puck and stick with your phone, iPad or laptop camera. No app needed: practice at home with 7 games." />
+  <link rel="canonical" href="https://puck-trainer.com/en/" />
+  <link rel="alternate" hreflang="ko" href="https://puck-trainer.com/" />
+  <link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/" />
+  <link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Puck Dribble Trainer" />
+  <meta property="og:title" content="Puck Dribble Trainer — stickhandling practice at home" />
+  <meta property="og:description" content="A free hockey stickhandling game that tracks your puck and stick with your phone, iPad or laptop camera. No app needed: practice at home with 7 games." />
+  <meta property="og:url" content="https://puck-trainer.com/en/" />
+  <meta property="og:image" content="https://puck-trainer.com/icons/og-image-en.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Puck Dribble Trainer" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:locale:alternate" content="ko_KR" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Puck Dribble Trainer — stickhandling practice at home" />
+  <meta name="twitter:description" content="A free hockey stickhandling game that tracks your puck and stick with your phone, iPad or laptop camera. No app needed: practice at home with 7 games." />
+  <meta name="twitter:image" content="https://puck-trainer.com/icons/og-image-en.png" />
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://puck-trainer.com/#org","name":"Puck Dribble Trainer","alternateName":"퍽 드리블 트레이너","url":"https://puck-trainer.com/","logo":"https://puck-trainer.com/icons/icon-512.png","sameAs":["https://www.instagram.com/puck_trainer/"]},{"@type":"WebApplication","@id":"https://puck-trainer.com/en/#app","name":"Puck Dribble Trainer","alternateName":["퍽 드리블 트레이너","Puck Trainer"],"url":"https://puck-trainer.com/en/","description":"Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.","inLanguage":"en","availableLanguage":["ko","en"],"applicationCategory":"SportsApplication","applicationSubCategory":"Ice hockey stickhandling training game","operatingSystem":"Web browser (iPadOS, iOS, Android, Windows, macOS)","browserRequirements":"A camera and a modern web browser","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"KRW"},"image":"https://puck-trainer.com/icons/og-image-en.png","screenshot":"https://puck-trainer.com/icons/og-image-en.png","featureList":["Arcade","Dodge","Wide Dribble","Figure 8","Quick Hands","Reaction Target","Free Practice"],"publisher":{"@id":"https://puck-trainer.com/#org"},"copyrightHolder":{"@type":"Organization","name":"ochodoit"}}]}</script>
+  <!-- seo:end -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght,SOFT@9..144,600..900,0..100&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@700;900&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="style.css" rel="stylesheet" />
+</head>
+<body>
+  <main id="app">
+    <!-- 카메라 영상 + 오버레이 -->
+    <section id="stage">
+      <div id="view" class="view">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <canvas id="debug" class="hidden"></canvas>
+        <div id="floor-handles" class="hidden">
+          <button class="handle" data-i="0" data-label="Back · left" aria-label="Back left corner"></button>
+          <button class="handle" data-i="1" data-label="Back · right" aria-label="Back right corner"></button>
+          <button class="handle" data-i="2" data-label="Front · right" aria-label="Front right corner"></button>
+          <button class="handle" data-i="3" data-label="Front · left" aria-label="Front left corner"></button>
+        </div>
+        <div id="tap-hint" class="tap-hint hidden"></div>
+        <!-- 자유 연습 코스: 번호를 끌어다 놓아 포인트를 만든다 -->
+        <div id="course" class="course hidden">
+          <div id="course-field" class="course-field">
+            <div id="course-tray" class="course-tray">
+              <div id="course-slots" class="course-slots"></div>
+              <span class="course-hint">Drag the numbers onto the field</span>
+              <div class="course-cycles" role="group" aria-label="Target cycles">
+                <span>Cycles</span>
+                <button type="button" id="cycles-dec" aria-label="Fewer cycles">−</button>
+                <output id="cycles-out">10</output>
+                <button type="button" id="cycles-inc" aria-label="More cycles">+</button>
+              </div>
+              <button type="button" id="course-clear" class="btn btn-ghost">Clear all</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 상단 HUD -->
+      <header id="hud" class="hud">
+        <div class="hud-left">
+          <span id="hud-mode" class="hud-mode">Arcade</span>
+          <span id="hud-instruction" class="hud-instruction"></span>
+        </div>
+        <div class="hud-center">
+          <span class="hud-label">Time</span>
+          <span id="hud-timer" class="hud-timer">--</span>
+        </div>
+        <div class="hud-right">
+          <span class="hud-label">Score</span>
+          <span id="hud-combo" class="hud-combo"></span>
+          <span id="hud-score" class="hud-score">0</span>
+          <span id="hud-lives" class="hud-lives"></span>
+        </div>
+      </header>
+
+      <button id="btn-flip" class="btn-flip" aria-label="Switch front/rear camera" title="Switch camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 0 1 14.5-3.5M20 4v4h-4M20 15a8 8 0 0 1-14.5 3.5M4 20v-4h4"/></svg></button>
+      <!-- 8자 드리블 방향: 게임 화면에서 바로 (게임 중에도 바꿀 수 있음) -->
+      <div id="f8-dir" class="f8-dir hidden" role="group" aria-label="Figure 8 direction">
+        <div id="f8-side" class="seg" role="radiogroup" aria-label="Figure 8: cone to go to first">
+          <button type="button" role="radio" data-side="L">Left first</button>
+          <button type="button" role="radio" data-side="R">Right first</button>
+        </div>
+        <div id="f8-rot" class="seg" role="radiogroup" aria-label="Figure 8: direction">
+          <button type="button" role="radio" data-rot="cw">↻ Clockwise</button>
+          <button type="button" role="radio" data-rot="ccw">↺ Counterclockwise</button>
+        </div>
+      </div>
+      <button id="btn-replace-puck" class="btn btn-primary btn-replace hidden">Use this object as the puck (3 s)</button>
+
+      <!-- 영역 편집 바 -->
+      <div id="area-bar" class="area-bar hidden">
+        <span class="area-hint"><b id="area-step" class="setup-step hidden">1 / 2 Play area</b>Drag the four corners of the center frame outward to the real floor corners. Narrow at the back (far), wide at the front (camera) — it is right when the grid looks glued to the floor.</span>
+        <div class="area-actions">
+          <button id="area-auto" class="btn btn-ghost">Auto white floor</button>
+          <button id="area-full" class="btn btn-ghost">Full view</button>
+          <button id="area-reset" class="btn btn-ghost">Back to center frame</button>
+          <button id="area-done" class="btn btn-primary">Done</button>
+        </div>
+      </div>
+      <!-- 시작 준비 2단계: 퍽 등록 -->
+      <div id="setup-bar" class="area-bar hidden">
+        <span class="area-hint"><b class="setup-step">2 / 2 Register puck</b>Place the puck (ball, lid or puck) in the center circle and wait 3 s. Once registered you will pick a game.</span>
+        <div class="area-actions"><button id="setup-skip" class="btn btn-ghost hidden">Skip (use registered puck)</button></div>
+      </div>
+
+      <!-- 인식 상태 -->
+      <div id="status" class="status">
+        <span class="chip" id="chip-floor"><i></i>Floor</span>
+        <span class="chip" id="chip-puck"><i></i>Puck</span>
+        <span class="chip" id="chip-stick"><i></i>Stick</span>
+        <span class="chip chip-fps" id="chip-fps">-- fps</span>
+      </div>
+
+      <!-- 하단 컨트롤 -->
+      <nav id="controls" class="controls">
+        <button id="btn-mode" class="btn">Mode</button>
+        <button id="btn-floor-lock" class="btn">Area</button>
+        <button id="btn-calib" class="btn">Calibrate</button>
+        <button id="btn-settings" class="btn">Settings</button>
+        <button id="btn-rank" class="btn">Ranking</button>
+        <button id="btn-me" class="btn">My info</button>
+        <button id="btn-start" class="btn btn-primary">Start</button>
+      </nav>
+    </section>
+
+    <!-- 시작 화면 -->
+    <div id="splash" class="panel splash">
+      <div class="splash-inner">
+        <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
+        <p id="lang-hint" class="lang-hint hidden" data-ugc><a href="/" data-lang="ko" lang="ko">한국어로 보기 →</a></p>
+        <div class="masthead"><span>iPad · Phone · Laptop</span></div>
+        <h1 class="lockup">Puck Dribble<span class="lockup-script"> Trainer</span></h1>
+        <picture>
+          <source srcset="icons/hero-art.webp" type="image/webp" />
+          <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="" role="img" aria-label="Stick and puck illustration" decoding="async" />
+        </picture>
+        <p class="lead">The stickhandling game that reads your puck. Show us your skills</p>
+        <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
+        <div id="invite-card" class="invite-card hidden" role="status">
+          <b id="invite-title"></b>
+          <span id="invite-sub"></span>
+        </div>
+        <!-- 로그인 / 회원가입 -->
+        <div id="auth-card" class="auth-card hidden">
+          <div id="auth-logged" class="auth-logged hidden">
+            <span id="auth-who"></span>
+            <button type="button" id="btn-admin" class="btn btn-ghost hidden">Operator</button>
+            <button type="button" id="btn-me-splash" class="btn btn-ghost">My info</button>
+            <button type="button" id="btn-logout" class="btn btn-ghost">Log out</button>
+          </div>
+          <form id="auth-form" autocomplete="off">
+            <div class="auth-tabs">
+              <button type="button" class="tab active" data-tab="login">Log in</button>
+              <button type="button" class="tab" data-tab="register">Sign up</button>
+            </div>
+            <div class="auth-grid">
+              <label>Player nickname<input id="auth-nick" type="text" maxlength="12" placeholder="e.g. Lightning" required /></label>
+              <label>Password (6 digits)<input id="auth-pin" type="password" inputmode="numeric" maxlength="64" placeholder="••••••" required /></label>
+              <label class="reg-only hidden">Sign-up code<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. K7MP-Q2XD" /></label>
+              <label class="reg-only hidden">Country<select id="auth-country"></select></label>
+              <label class="reg-only hidden">Team name<input id="auth-team" type="text" maxlength="20" placeholder="e.g. Seoul Youth" /></label>
+              <label class="reg-only hidden">Age<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="e.g. 11" /></label>
+              <label class="reg-only hidden">Jersey number (optional)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="e.g. 87" /></label>
+              <div class="field reg-only hidden"><span id="auth-stick-label">Stick</span>
+                <div id="auth-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="auth-stick-label">
+                  <button type="button" role="radio" aria-checked="false" data-stick="L">Left (L)</button>
+                  <button type="button" role="radio" aria-checked="false" data-stick="R">Right (R)</button>
+                </div>
+              </div>
+            </div>
+            <p class="reg-only hidden auth-hint">Members join with a sign-up code. No code? Play as a guest and follow the steps on the result screen to share your play and get one. Use a nickname, not your real name (it is shown in the rankings).</p>
+            <p id="auth-error" class="error hidden"></p>
+            <div class="row" style="justify-content:center">
+              <button type="submit" id="auth-submit" class="btn btn-primary">Log in</button>
+              <button type="button" id="auth-guest" class="btn btn-ghost">Play as guest (not ranked)</button>
+            </div>
+          </form>
+          <p id="auth-store-note" class="muted"></p>
+        </div>
+        <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
+        <button id="btn-mouse" class="btn btn-mouse hidden" title="Test admin only">Start with mouse (no camera)</button>
+        <p id="splash-error" class="error hidden"></p>
+        <div id="splash-diag" class="diag hidden">
+          <label>Choose camera <select id="diag-camera"></select></label>
+          <div class="row" style="justify-content:center">
+            <button type="button" id="btn-retry-camera" class="btn btn-primary">Try again</button>
+            <button type="button" id="btn-copy-diag" class="btn btn-ghost">Copy diagnostics</button>
+          </div>
+          <pre id="diag-info" class="diag-info"></pre>
+        </div>
+        <details class="howto">
+          <summary>First time? — How to play</summary>
+          <ol class="tips">
+            <li><span><b>Set up</b> — Stand your phone, iPad or laptop on a stand so the front camera sees you and the floor.</span></li>
+            <li><span><b>Register puck</b> — A ball, a lid or a puck: hold it in the center circle for 3 s and it is recognized. It only needs a different color from the background.</span></li>
+            <li><span><b>Start</b> — Hold the registered puck in the circle 3 s more to start hands-free. Restart the same way when a game ends.</span></li>
+            <li><span><b>Area</b> — If the floor looks narrower at the back, fit the four corners with the "Area" button to correct the perspective.</span></li>
+            <li><span><b>Note</b> — Keep other objects of the same color off the floor. Tracking stops when the screen is covered.</span></li>
+          </ol>
+        </details>
+        <p class="about">Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.</p>
+        <nav class="site-links" aria-label="Guide pages"><a href="/en/guide/">Guide</a><a href="/en/games/">The 7 games</a><a href="/en/faq/">FAQ</a></nav>
+        <p class="analytics-note">We use Google Analytics to count visits and plays. No personal details such as nicknames or ages are sent.</p>
+        <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>All rights reserved · no copying or redistribution</span></p>
+      </div>
+    </div>
+
+    <!-- 모드 선택 -->
+    <div id="panel-mode" class="panel modal hidden">
+      <div class="modal-card">
+        <header><h2>Mode</h2><button class="btn btn-ghost btn-close" data-close="panel-mode">Close</button></header>
+        <div class="time-row">
+          <div id="time-seg" class="seg" role="group" aria-label="Game time">
+            <button type="button" data-min="1">1 min</button>
+            <button type="button" data-min="3">3 min</button>
+            <button type="button" data-min="5">5 min</button>
+          </div>
+          <p class="muted">Game time · ranked separately per time</p>
+        </div>
+        <p id="mode-pick-hint" class="muted pick-hint">Hold the puck in the middle of a card for 2 s to pick it</p>
+        <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
+        <div id="mode-list" class="mode-list"></div>
+        <div class="versus-row">
+          <label class="switch invisible-switch"><input type="checkbox" id="invisible-toggle" /><span>Invisible mode — your puck is hidden while you play, so you dodge by feel alone (ranked separately)</span></label>
+          <label class="switch"><input type="checkbox" id="versus-toggle" /><span>2-player versus (take turns)</span></label>
+          <div id="versus-names" class="versus-names hidden">
+            <input id="p1-name" type="text" maxlength="10" placeholder="Player 1" value="플레이어 1" />
+            <input id="p2-name" type="text" maxlength="10" placeholder="Player 2" value="플레이어 2" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 설정 -->
+    <div id="panel-settings" class="panel modal hidden">
+      <div class="modal-card">
+        <header><h2>Settings</h2><button class="btn btn-ghost btn-close" data-close="panel-settings">Close</button></header>
+        <div class="settings-grid">
+          <label><span data-ugc>언어 · Language</span>
+            <span class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></span>
+          </label>
+          <label>Camera
+            <select id="sel-camera"></select>
+          </label>
+          <label class="switch"><input type="checkbox" id="set-mirror" checked /><span>Mirror left/right</span></label>
+          <label class="switch"><input type="checkbox" id="set-debug" /><span>Show detection mask (debug)</span></label>
+          <label class="switch"><input type="checkbox" id="set-sound" checked /><span>Sound effects</span></label>
+          <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>Hands-free start (puck in the circle for 3 s)</span></label>
+          <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>Push toward the camera = up on screen (Arcade, Puck Dodge, Wide Dribble, Free Practice)</span></label>
+
+          <label>Floor brightness threshold <output id="out-whiteV"></output>
+            <input type="range" id="set-whiteV" min="80" max="240" step="1" />
+          </label>
+          <label>Floor saturation tolerance <output id="out-whiteC"></output>
+            <input type="range" id="set-whiteC" min="10" max="120" step="1" />
+          </label>
+          <label>Puck color tolerance <output id="out-puckTol"></output>
+            <input type="range" id="set-puckTol" min="20" max="200" step="1" />
+          </label>
+          <label>Stick color tolerance <output id="out-stickTol"></output>
+            <input type="range" id="set-stickTol" min="20" max="200" step="1" />
+          </label>
+          <label>Play area
+            <select id="set-floorMode">
+              <option value="auto">Auto-detect white floor</option>
+              <option value="manual">Manual (drag the corners)</option>
+              <option value="full">Whole camera view (best for laptop webcams)</option>
+            </select>
+          </label>
+          <label>Detection resolution
+            <select id="set-procWidth">
+              <option value="240">Normal (240px, fast)</option>
+              <option value="320">High (320px)</option>
+              <option value="400">Highest (400px, when the puck looks small)</option>
+            </select>
+          </label>
+          <label>Control with
+            <select id="set-controller">
+              <option value="puck">Puck</option>
+              <option value="stick">Stick blade (practice without a puck)</option>
+            </select>
+          </label>
+          <label>My puck transparency % (0 clear · 100 hidden — play by feel) <output id="out-puckTransparency"></output>
+            <input type="range" id="set-puckTransparency" min="0" max="100" step="10" />
+          </label>
+          <label>Background transparency % (how much camera shows through in Arcade · Puck Dodge) <output id="out-bgTransparency"></output>
+            <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
+          </label>
+          <label>Real width of the play area (m) <output id="out-floorWidthM"></output>
+            <input type="range" id="set-floorWidthM" min="0.5" max="6" step="0.1" />
+          </label>
+          <label>Difficulty
+            <select id="set-difficulty">
+              <option value="easy">Easy</option>
+              <option value="normal" selected>Normal</option>
+              <option value="hard">Hard</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <span id="settings-account" class="muted" style="align-self:center"></span>
+          <button id="btn-settings-login" class="btn btn-primary hidden">Log in</button>
+          <button id="btn-settings-admin" class="btn btn-ghost hidden">Operator</button>
+          <button id="btn-settings-logout" class="btn btn-ghost hidden">Log out</button>
+        </div>
+        <div class="row">
+          <button id="btn-reset-settings" class="btn btn-ghost">Reset settings</button>
+          <button id="btn-reset-scores" class="btn btn-ghost">Clear records</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 보정 -->
+    <div id="panel-calib" class="panel modal hidden">
+      <div class="modal-card">
+        <header><h2>Calibration</h2><button class="btn btn-ghost btn-close" data-close="panel-calib">Close</button></header>
+        <p class="muted"><b>Auto (recommended)</b>: press the button, place the object you will use as a puck (a ball, a lid, a real puck — anything with a different color from the background) in the center circle and wait 3 s; its color and size are learned automatically. Works on any floor or mat. <b>Set by tap</b> means tapping the object directly on the screen.</p>
+        <div class="calib-grid">
+          <div class="calib-item">
+            <span class="swatch" id="swatch-puck"></span>
+            <div><b>Puck</b><small id="calib-puck-desc">Default: black</small></div>
+            <button class="btn btn-primary" data-autocalib="puck">Register puck again (3 s in the circle)</button>
+            <button class="btn" data-calib="puck">Set by tap</button>
+            <button class="btn btn-ghost" data-calib-reset="puck">Default</button>
+          </div>
+          <div class="calib-item">
+            <span class="swatch" id="swatch-stick"></span>
+            <div><b>Stick (blade / tape)</b><small id="calib-stick-desc">Not set</small></div>
+            <button class="btn btn-primary" data-autocalib="stick">3 s in the circle (auto)</button>
+            <button class="btn" data-calib="stick">Set by tap</button>
+            <button class="btn btn-ghost" data-calib-reset="stick">Clear</button>
+          </div>
+        </div>
+        <p class="muted">Tip: if the stick tape and the puck are the same color (both black), they are hard to tell apart while touching. Use a color that differs from both the floor and the puck, such as orange or blue.</p>
+      </div>
+    </div>
+
+    <!-- 랭킹 -->
+    <div id="panel-rank" class="panel modal hidden">
+      <div class="modal-card">
+        <header><h2>Ranking</h2><button class="btn btn-ghost btn-close" data-close="panel-rank">Close</button></header>
+        <div class="rank-filters">
+          <select id="rank-mode"></select>
+          <select id="rank-time" aria-label="Game time"></select>
+          <select id="rank-variant" aria-label="Normal · Invisible mode">
+            <option value="">Normal</option>
+            <option value="inv">Invisible mode</option>
+          </select>
+          <select id="rank-age"><option value="">All ages</option></select>
+          <select id="rank-scope">
+            <option value="all">Worldwide</option>
+            <option value="country">My country</option>
+            <option value="team">My team</option>
+          </select>
+        </div>
+        <p id="rank-me" class="muted"></p>
+        <div class="rank-table-wrap"><table class="rank-table"><thead><tr><th>#</th><th>Nickname</th><th>Team</th><th>Country</th><th>Age group</th><th>Score</th></tr></thead><tbody id="rank-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- 결과 -->
+    <div id="panel-result" class="panel modal hidden">
+      <div class="modal-card">
+        <header><h2 id="result-title">Result</h2><button class="btn btn-ghost btn-close" data-close="panel-result">Close</button></header>
+        <div id="result-body" class="result-body"></div>
+        <p id="result-rank" class="result-rank hidden"></p>
+        <div id="result-guest" class="result-guest hidden"></div>
+        <div id="result-share" class="result-share hidden"></div>
+        <div id="result-choice" class="choice">
+          <button id="btn-result-again" class="choice-opt left"><span class="choice-fill"></span><span class="choice-label">Play again</span><small>← Puck to the left</small></button>
+          <button id="btn-result-next" class="choice-opt left hidden"><span class="choice-fill"></span><span class="choice-label">Next player</span><small>← Puck to the left</small></button>
+          <div id="choice-track" class="choice-track" aria-hidden="true">
+            <span class="zone zone-l"></span><span class="zone zone-r"></span>
+            <i id="choice-dot" class="hidden"></i>
+            <small id="choice-hint">Hold the puck left or right for 2 s</small>
+          </div>
+          <button id="btn-result-mode" class="choice-opt right"><span class="choice-fill"></span><span class="choice-label">Choose mode</span><small>Puck to the right →</small></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 내 정보: 프로필·회원 등급, 출석, 누적 훈련, 게임별 기록, 커뮤니티 활동 -->
+    <div id="panel-me" class="panel modal hidden">
+      <div class="modal-card me-card">
+        <header><h2>My Info</h2><button class="btn btn-ghost btn-close" data-close="panel-me">Close</button></header>
+        <div id="me-guest" class="hidden">
+          <p class="muted">Log in and your attendance and game records are saved to your account.</p>
+          <button type="button" id="me-login" class="btn btn-primary">Log in</button>
+        </div>
+        <div id="me-body">
+          <section class="me-sec">
+            <div id="me-card" class="me-profile"></div>
+            <button type="button" id="me-edit-toggle" class="btn btn-ghost">Edit profile</button>
+            <form id="me-edit" class="me-edit hidden" autocomplete="off">
+              <div class="adm-row">
+                <label>Country<select id="me-country"></select></label>
+                <label>Team name<input id="me-team" type="text" maxlength="20" /></label>
+                <label>Age<input id="me-age" type="number" inputmode="numeric" min="3" max="99" /></label>
+                <label>Jersey number (optional)<input id="me-number" type="number" inputmode="numeric" min="0" max="99" /></label>
+              </div>
+              <div class="me-edit-stick"><span id="me-stick-label">Stick</span>
+                <div id="me-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="me-stick-label">
+                  <button type="button" role="radio" aria-checked="false" data-stick="L">Left (L)</button>
+                  <button type="button" role="radio" aria-checked="false" data-stick="R">Right (R)</button>
+                </div>
+              </div>
+              <p id="me-edit-msg" class="error hidden"></p>
+              <div class="row"><button type="submit" id="me-edit-save" class="btn btn-primary">Save</button><button type="button" id="me-edit-cancel" class="btn btn-ghost">Cancel</button></div>
+            </form>
+          </section>
+          <section class="me-sec">
+            <h3>Attendance</h3>
+            <div id="me-att-sum" class="me-stats"></div>
+            <div class="me-cal-nav"><button type="button" id="me-prev" class="btn btn-ghost" aria-label="Previous month">‹</button><b id="me-month"></b><button type="button" id="me-next" class="btn btn-ghost" aria-label="Next month">›</button></div>
+            <div id="me-cal" class="me-cal"></div>
+          </section>
+          <section class="me-sec">
+            <h3>Training totals</h3>
+            <div id="me-totals" class="me-stats"></div>
+          </section>
+          <section class="me-sec">
+            <h3>Records by game</h3>
+            <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>Game</th><th>Best</th><th>Plays</th><th>My rank</th><th>Last 10</th></tr></thead><tbody id="me-scores"></tbody></table></div>
+          </section>
+          <section class="me-sec">
+            <h3>Community activity</h3>
+            <div id="me-comm"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- 로그인: 게임 중(게스트)에 설정에서 연다. 첫 화면의 로그인 카드를 잠시 이 창으로 옮겨 쓴다 -->
+    <div id="panel-login" class="panel modal hidden">
+      <div class="modal-card login-card">
+        <header><h2>Login</h2><button class="btn btn-ghost btn-close" data-close="panel-login">Close</button></header>
+        <div id="login-slot"></div>
+      </div>
+    </div>
+
+    <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견 -->
+    <div id="panel-admin" class="panel modal hidden">
+      <div class="modal-card admin">
+        <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">Close</button></header>
+        <p id="adm-error" class="error hidden"></p>
+        <section class="adm-sec">
+          <h3>Stats</h3>
+          <p class="muted">Counted from member accounts (sign-ups, attendance, plays). Visitors and guest plays are in Google Analytics.</p>
+          <div id="adm-stats" class="me-stats"></div>
+          <div id="adm-chart" class="adm-chart"></div>
+          <div id="adm-stats-more" class="adm-stats-more"></div>
+          <div class="row">
+            <button type="button" id="adm-stats-refresh" class="btn">Refresh</button>
+            <a class="btn btn-ghost" href="https://analytics.google.com/analytics/web/#/a416394719p564426108/reports/intelligenthome" target="_blank" rel="noopener">Open Google Analytics</a>
+          </div>
+        </section>
+        <section class="adm-sec">
+          <h3>Open sign-up</h3>
+          <p id="adm-members" class="muted"></p>
+          <button type="button" id="adm-init" class="btn btn-primary hidden">Open sign-up (number existing accounts)</button>
+        </section>
+        <section class="adm-sec">
+          <h3>Operator password</h3>
+          <p class="muted">Use a password of 12+ characters for the operator account instead of 6 digits. The phone login screen shows a number pad, so 12+ digits is easiest.</p>
+          <div class="adm-row">
+            <label>Current password<input id="adm-pw-now" type="password" maxlength="64" autocomplete="current-password" /></label>
+            <label>New password (12+ characters)<input id="adm-pw-new" type="password" maxlength="64" autocomplete="new-password" /></label>
+            <label>Confirm new password<input id="adm-pw-new2" type="password" maxlength="64" autocomplete="new-password" /></label>
+            <button type="button" id="adm-pw-save" class="btn">Change password</button>
+          </div>
+          <p id="adm-pw-msg" class="ok-msg hidden" role="status"></p>
+        </section>
+        <section class="adm-sec">
+          <h3>One-time code</h3>
+          <p class="muted">DM the code (or link) to a guest whose Instagram play post you checked. Only one person can use it.</p>
+          <div class="adm-row">
+            <input id="adm-one-note" type="text" maxlength="60" placeholder="Note (e.g. Instagram ID)" aria-label="Note" />
+            <button type="button" id="adm-one" class="btn btn-primary">Create</button>
+          </div>
+          <div id="adm-one-out" class="adm-out hidden"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>Beta link</h3>
+          <p class="muted">Many people sign up with the same link. It closes automatically after the deadline.</p>
+          <div class="adm-row">
+            <label>Deadline<input id="adm-beta-date" type="date" /></label>
+            <label>Max sign-ups<input id="adm-beta-max" type="number" min="0" inputmode="numeric" placeholder="0 = no limit" /></label>
+            <input id="adm-beta-note" type="text" maxlength="60" placeholder="Note" aria-label="Note" />
+            <button type="button" id="adm-beta" class="btn btn-primary">Create</button>
+          </div>
+          <div id="adm-beta-out" class="adm-out hidden"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>Guest notice</h3>
+          <p class="muted">How guests get a member code, shown on their result screen: post a play video on Instagram and DM the official account.</p>
+          <div class="adm-row">
+            <label>Official Instagram account<input id="adm-sns" type="text" maxlength="60" placeholder="e.g. puck.official" /></label>
+            <label>Hashtag<input id="adm-hashtag" type="text" maxlength="40" placeholder="e.g. puckdribblechallenge" /></label>
+            <button type="button" id="adm-save-config" class="btn">Save</button>
+          </div>
+        </section>
+        <section class="adm-sec">
+          <h3>Beta period</h3>
+          <p class="muted">Only beta members who send feedback with [To the developer] in Community by the end date stay members. Others can no longer post scores or write after the end date. Members who joined with a one-time code are full members from the start, so the beta period does not apply to them.</p>
+          <div class="adm-row">
+            <label>Beta end date<input id="adm-beta-end" type="date" /></label>
+            <button type="button" id="adm-save-beta-end" class="btn">Save</button>
+          </div>
+          <p id="adm-beta-sum" class="muted"></p>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>No.</th><th>Nickname</th><th>Joined via</th><th>Feedback</th><th>Status</th><th></th></tr></thead><tbody id="adm-betas"></tbody></table></div>
+        </section>
+        <section class="adm-sec">
+          <h3>Feedback to the developer</h3>
+          <div id="adm-feedback" class="adm-feedback"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>Codes</h3>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>Code</th><th>Type</th><th>Used</th><th>Closes</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody id="adm-codes"></tbody></table></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 커뮤니티: 코스·기록 공유, 코스 기록 게시판 -->
+    <div id="panel-community" class="panel modal hidden">
+      <div class="modal-card community">
+        <header><h2>Community</h2><button class="btn btn-ghost btn-close" data-close="panel-community">Close</button></header>
+        <div class="comm-bar">
+          <div id="comm-filter" class="seg" role="group" aria-label="Post type">
+            <button type="button" data-filter="all" class="active">All</button>
+            <button type="button" data-filter="course">Courses</button>
+            <button type="button" data-filter="record">Records</button>
+          </div>
+          <select id="comm-mode" class="comm-mode" aria-label="Filter by mode"></select>
+          <div id="comm-sort" class="seg" role="group" aria-label="Sort">
+            <button type="button" data-sort="recent" class="active">Newest</button>
+            <button type="button" data-sort="cheers">Most cheers</button>
+          </div>
+          <button type="button" id="comm-write" class="btn btn-primary">Write a post</button>
+          <button type="button" id="comm-feedback" class="btn">To the developer</button>
+        </div>
+        <p id="comm-note" class="muted"></p>
+        <form id="comm-form" class="comm-form hidden" autocomplete="off">
+          <div id="comm-type" class="seg" role="group" aria-label="Post type">
+            <button type="button" data-type="course">Share my course</button>
+            <button type="button" data-type="record">Records</button>
+          </div>
+          <div id="comm-preview" class="comm-preview"></div>
+          <label>Title<input id="comm-title" type="text" maxlength="30" placeholder="e.g. Backhand wide 4-point" required /></label>
+          <label>Text <output id="comm-count">0/200</output><textarea id="comm-body" rows="3" maxlength="200"></textarea></label>
+          <p id="comm-error" class="error hidden"></p>
+          <div class="row">
+            <button type="submit" id="comm-submit" class="btn btn-primary">Post</button>
+            <button type="button" id="comm-cancel" class="btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+        <form id="fb-form" class="comm-form fb-form hidden" autocomplete="off">
+          <h3>To the developer</h3>
+          <p id="fb-intro" class="fb-intro"></p>
+          <label>What you liked <output id="fb-good-count">0/500</output><textarea id="fb-good" rows="3" maxlength="500" placeholder="e.g. I like that I can change the figure-8 direction"></textarea></label>
+          <label>What to fix <output id="fb-fix-count">0/500</output><textarea id="fb-fix" rows="3" maxlength="500" placeholder="e.g. It often loses the puck in dim light"></textarea></label>
+          <p class="muted">Only the developer reads this. Sending again updates it.</p>
+          <p id="fb-error" class="error hidden"></p>
+          <div class="row">
+            <button type="submit" id="fb-submit" class="btn btn-primary">Send</button>
+            <button type="button" id="fb-cancel" class="btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+        <div class="comm-main">
+          <div id="comm-list" class="comm-list"></div>
+          <aside id="comm-detail" class="comm-detail" aria-live="polite"></aside>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </main>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

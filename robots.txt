@@ -1,0 +1,7 @@
+# Puck Dribble Trainer (puck-trainer.com)
+# All search engines and AI search / answer crawlers (Googlebot, Bingbot, Yeti, GPTBot, OAI-SearchBot,
+# ChatGPT-User, ClaudeBot, Claude-SearchBot, PerplexityBot, Google-Extended, ...) may crawl everything.
+User-agent: *
+Allow: /
+
+Sitemap: https://puck-trainer.com/sitemap.xml

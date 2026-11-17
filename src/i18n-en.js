@@ -728,6 +728,13 @@ export const EN = {
   '유지 취소': 'Undo keep',
   '정회원 유지': 'Membership kept',
   '회원이 없습니다': 'No members yet',
+  // 검색엔진용 제목 · 첫 화면 소개 · 안내 페이지 링크
+  '퍽 드리블 트레이너 — 카메라로 하는 하키 스틱핸들링 훈련 게임': 'Puck Dribble Trainer — Hockey Stickhandling Game With Your Camera',
+  '퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.': 'Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.',
+  '안내 페이지': 'Guide pages',
+  '사용 가이드': 'Guide',
+  '7가지 게임': 'The 7 games',
+  '자주 묻는 질문': 'FAQ',
   // 운영자 통계 · 방문 통계 안내
   '통계': 'Stats',
   '회원 기준(가입·출석·플레이)입니다. 방문자 수와 게스트 플레이는 Google 애널리틱스에서 봅니다.': 'Counted from member accounts (sign-ups, attendance, plays). Visitors and guest plays are in Google Analytics.',

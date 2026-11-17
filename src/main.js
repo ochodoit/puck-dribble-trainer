@@ -17,6 +17,8 @@ import { decideIdle, stepChoice, stepDwell, inCardCore, CHOICE_HOLD_S } from './
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAge, canRecordOn, TITLE_MAX } from './community.js';
 import { initCommunity } from './community-ui.js';
+import { memberStats } from './stats.js';
+import { initAnalytics, track } from './analytics.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -81,6 +83,7 @@ if (isDevHost(location)) window.__puckTrainer = { settings, vision, tracker, gam
 init();
 
 function init() {
+  initAnalytics(); // 방문·플레이 통계 (공식 주소에서만, 개인정보 없이)
   initI18n();
   bindLangButtons();
   onLangChange(() => { renderModeList(); updateHud(true); refreshCalibUI(); if (!els.panelCommunity.classList.contains('hidden')) community?.refresh(); });
@@ -212,8 +215,10 @@ async function onAuthSubmit(e) {
       forgetInvite();
       $('#auth-code').value = '';
       toast(`환영합니다, ${app.account.current().nick}! ${memberBadge(app.account.current())}`, 4000);
+      track('sign_up', { method: app.account.current()?.via === 'beta' ? 'beta' : 'one' });
     } else {
       await app.account.login(nick, pin);
+      track('login', { method: 'nickname' });
     }
     $('#auth-pin').value = '';
     els.authError.classList.add('hidden');
@@ -400,13 +405,23 @@ function recordPlay(result) {
   const done = result.reason !== 'manual' && result.mode.id !== 'free';
   app.account.recordActivity({
     key: done ? result.rankKey || result.mode.id : null, score: done ? result.score : null,
-    sec: result.elapsed, dist: (tracker.distance || 0) * settings.floorWidthM, touches: tracker.touches || 0,
+    sec: result.elapsed, dist: (tracker.distance || 0) * settings.floorWidthM, touches: tracker.touches || 0, mode: result.mode.id,
   }).then(() => { app.attendedDay = `${u.id}:${dayKey()}`; }).catch(() => {});
+}
+
+/** 방문·플레이 통계(GA4)에 한 판: 게임 이름·회원/게스트·끝까지 했는지·플레이 초·점수 (마우스 테스트와 3초 미만은 빼고) */
+function trackPlay(result) {
+  if (app.mouseMode || !(result.elapsed >= 3)) return;
+  track('game_end', {
+    mode: result.mode.name, member: app.account?.current() ? 'member' : 'guest',
+    completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed), score: Math.round(Number(result.score) || 0),
+  });
 }
 
 // =============== 운영자 화면 ===============
 function setupAdmin() {
   const openAdmin = () => { open($('#panel-admin')); renderAdmin(); };
+  $('#adm-stats-refresh').addEventListener('click', () => { app.adminActs = null; renderAdmin(); });
   $('#btn-admin').addEventListener('click', openAdmin);
   $('#btn-settings-admin').addEventListener('click', () => { close(els.panelSettings); openAdmin(); });
   $('#adm-init').addEventListener('click', () => adminDo(async () => {
@@ -557,6 +572,54 @@ async function renderAdminBeta(a) {
     <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time><button type="button" class="btn btn-ghost btn-del" data-act="delete-fb">삭제</button></header>
     ${f.good ? `<p><em>좋았던 점</em><span data-ugc>${esc(f.good)}</span></p>` : ''}${f.fix ? `<p><em>고쳤으면 하는 점</em><span data-ugc>${esc(f.fix)}</span></p>` : ''}</article>`).join('')
     : '<p class="muted">아직 온 의견이 없습니다</p>';
+  return all;
+}
+
+/**
+ * 운영자 통계 (회원 기준): 전체·새 가입, 출석한 회원, 회원 판 수·훈련 시간, 최근 14일 그래프, 게임별·연령대·국가.
+ * 활동 기록은 회원 수만큼 읽으므로 1분 동안은 다시 읽지 않는다 ('새로 고침' 버튼은 바로 다시 읽음)
+ */
+async function renderAdminStats(a, members) {
+  const box = $('#adm-stats');
+  try {
+    if (!app.adminActs || Date.now() - app.adminActs.at > 60000) app.adminActs = { at: Date.now(), rows: await a.activityList() };
+    const s = memberStats(members, app.adminActs.rows);
+    const hm = (sec) => { const m = Math.round(sec / 60), h = Math.floor(m / 60), mm = m % 60; return h ? `${h}시간 ${mm}분` : `${mm}분`; };
+    const tile = (v, label, sub) => '<div class="me-stat"><b>' + v + '</b><span>' + label + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>';
+    box.innerHTML = [
+      tile(s.members.total, '전체 회원', `베타 ${s.members.beta} · 1회용 ${s.members.one}`),
+      tile(s.members.d7, '최근 7일 가입', `오늘 ${s.members.today} · 30일 ${s.members.d30}`),
+      tile(s.attended.today, '오늘 출석한 회원', `7일 ${s.attended.d7} · 30일 ${s.attended.d30}`),
+      tile(s.games.today, '오늘 회원 판 수', `7일 ${s.games.d7} · 누적 ${s.games.total}`),
+      tile(hm(s.games.sec), '회원 누적 훈련 시간', ''),
+    ].join('');
+    $('#adm-chart').innerHTML = statsChart(s.daily);
+    const chips = (rows, label) => rows.map(([k, n]) => '<span class="adm-chip"><span>' + esc(label(k)) + '</span> <b>' + n + '</b></span>').join(' ');
+    const modeName = (id) => MODES.find((m) => m.id === id)?.name || id;
+    $('#adm-stats-more').innerHTML = [
+      ['게임별 판 수', s.modes.length ? chips(s.modes, modeName) : '<span class="muted">이번 업데이트부터 쌓입니다</span>'],
+      ['연령대', chips(s.ages, (g) => g)],
+      ['국가', chips(s.countries, countryLabel)],
+    ].map(([h, body]) => '<p class="adm-line"><b class="adm-line-h">' + h + '</b> ' + body + '</p>').join('');
+  } catch (e) {
+    box.innerHTML = '<p class="error">' + esc(tr('통계를 불러오지 못했습니다')) + ': ' + esc(e.message || String(e)) + '</p>';
+  }
+}
+
+/** 최근 14일 막대 그래프 (SVG): 막대 = 회원 판 수, 빨간 점 = 그날 가입 (숫자) */
+function statsChart(daily) {
+  const W = 300, H = 104, top = 14, base = 74, step = W / daily.length, bw = Math.min(14, step * 0.62);
+  const max = Math.max(1, ...daily.map((d) => d.games));
+  const bars = daily.map((d, i) => {
+    const x = i * step + (step - bw) / 2, h = d.games ? Math.max(2, ((base - top) * d.games) / max) : 0, cx = i * step + step / 2;
+    const label = i % 2 === daily.length % 2 ? '' : '<text class="ax" x="' + cx + '" y="' + (H - 3) + '">' + Number(d.day.slice(5, 7)) + '/' + Number(d.day.slice(8)) + '</text>';
+    const val = d.games ? '<text class="v" x="' + cx + '" y="' + (base - h - 3) + '">' + d.games + '</text>' : '';
+    const join = d.joins ? '<circle cx="' + cx + '" cy="' + (base + 9) + '" r="4.5"/><text class="j" x="' + cx + '" y="' + (base + 11.4) + '">' + d.joins + '</text>' : '';
+    return '<rect x="' + x.toFixed(1) + '" y="' + (base - h).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="2"/>' + val + join + label;
+  }).join('');
+  const cap = tr('최근 14일: 막대 = 회원 판 수, 빨간 점 = 가입');
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(cap) + '"><line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '"/>' + bars + '</svg>'
+    + '<p class="adm-legend muted">' + esc(cap) + '</p>';
 }
 
 async function renderAdmin() {
@@ -572,7 +635,8 @@ async function renderAdmin() {
       $('#adm-beta-end').value = cfg.betaEndsAt ? ymd(cfg.betaEndsAt) : '';
       app.adminConfigLoaded = true;
     }
-    await renderAdminBeta(a);
+    const members = await renderAdminBeta(a);
+    await renderAdminStats(a, members);
     const rows = await a.listCodes();
     $('#adm-codes').innerHTML = rows.length ? rows.map((c) => {
       const st = codeStatus(c);
@@ -791,6 +855,7 @@ async function startCamera() {
   try {
     await startStream();
     await populateCameras();
+    track('camera_start');
     els.splash.classList.add('hidden');
     $('#splash-diag').classList.add('hidden');
     app.started = true;
@@ -804,6 +869,7 @@ async function startCamera() {
     }
   } catch (err) {
     console.error(err);
+    track('camera_error', { error: String(err?.name || 'Error').slice(0, 40) });
     showSplashError(describeCameraError(err));
     els.btnCamera.disabled = false;
     els.btnCamera.textContent = '다시 시도';
@@ -1290,6 +1356,7 @@ function commitLearnedModel(target, done, refresh = false) {
   const model = { r: done.r, g: done.g, b: done.b, area: done.area };
   $('#btn-replace-puck').classList.add('hidden');
   if (target === 'puck') {
+    if (!app.mouseMode) track('puck_registered');
     settings.puckModel = model; settings.puckTol = done.tol;
     vision.seedPuck(done.cx, done.cy, done.area); tracker.reset();
     $('#set-puckTol').value = done.tol; $('#out-puckTol').value = done.tol;
@@ -1391,6 +1458,7 @@ function startRun(opts = {}) {
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(마름모 표시)된 뒤 시작하세요.' : '퍽이 인식(빨간 점 표시)된 뒤 시작하세요.'); }
   tracker.resetStats();
   game.start(tracker, opts);
+  if (!app.mouseMode) track('game_start', { mode: game.mode.name, member: app.account?.current() ? 'member' : 'guest' });
   if (settings.invisible) toast('투명 모드 — 화면에 내 퍽이 보이지 않습니다. 손의 감각으로!', 2600);
   else if (settings.puckTransparency > 0) toast(settings.puckTransparency === 100 ? '내 퍽 투명도 100% — 화면에 퍽이 보이지 않습니다. 감각으로 영역에 들어가세요!' : `내 퍽 투명도 ${settings.puckTransparency}%`, 2600);
   updateHud();
@@ -1403,6 +1471,7 @@ game.onEnd = (result) => {
   showResult(result, isBest);
   submitResult(result);
   recordPlay(result);
+  trackPlay(result);
   renderShare(result);
   updateHud();
 };

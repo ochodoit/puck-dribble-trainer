@@ -363,6 +363,12 @@ export class LocalAccountStore {
   /** 운영자: 베타 멤버만 (베타 링크로 가입 또는 예전 계정) */
   async betaMembers() { return (await this.memberList()).filter(isBetaUser); }
 
+  /** 운영자: 모든 회원의 활동 기록 (출석·판 수·훈련 시간 통계용) */
+  async activityList() {
+    this._needAdmin();
+    return Object.entries(this._get(this.ACTIVITY, {})).map(([uid, a]) => cleanActivity(a, uid));
+  }
+
   /** 운영자: 코드 하나 지우기 */
   async deleteCode(code) {
     this._needAdmin();

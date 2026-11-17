@@ -1,12 +1,13 @@
 // 내 정보: 출석·최근 기록·누적 훈련 통계 (계정에 저장하는 활동 기록). 화면 없는 순수 계산만.
 // 활동 기록 한 사람당 하나:
-//   { uid, days: { 'YYYY-MM-DD': { n: 판 수, s: 훈련 초 } }, totals: { games, sec, dist(m), touches },
+//   { uid, days: { 'YYYY-MM-DD': { n: 판 수, s: 훈련 초 } }, totals: { games, sec, dist(m), touches, modes: { 모드 id: 판 수 } },
 //     recent: { 랭킹 키: [{ s: 점수, at: ms }, … 최근 RECENT_MAX 판] }, updatedAt }
 // 출석 = 그날 로그인한 채로 플레이 화면을 연 날 (days 에 그날 키가 있음)
 
 export const RECENT_MAX = 10;     // 게임별 최근 기록 개수
 export const DAYS_MAX = 3650;     // 출석 기록은 최근 10년까지만 남김
 export const RECENT_KEYS_MAX = 40; // 최근 기록을 남기는 게임(랭킹 키) 수 상한
+const MODE_RE = /^[a-z0-9]{2,16}$/;  // totals.modes 의 모드 id
 
 /** 이 기기 시간대 기준 날짜 키: 'YYYY-MM-DD' */
 export function dayKey(ms = Date.now()) {
@@ -17,7 +18,7 @@ export function dayKey(ms = Date.now()) {
 const num = (v, def = 0) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : def);
 
 export function emptyActivity(uid) {
-  return { uid, days: {}, totals: { games: 0, sec: 0, dist: 0, touches: 0 }, recent: {}, updatedAt: 0 };
+  return { uid, days: {}, totals: { games: 0, sec: 0, dist: 0, touches: 0, modes: {} }, recent: {}, updatedAt: 0 };
 }
 
 /** 저장된 값을 믿지 않고 모양을 맞춘다 (빠진 칸은 0, 이상한 값은 버림) */
@@ -28,7 +29,8 @@ export function cleanActivity(raw, uid) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(k) && v && typeof v === 'object') a.days[k] = { n: Math.floor(num(v.n)), s: Math.round(num(v.s)) };
   }
   const t = raw.totals || {};
-  a.totals = { games: Math.floor(num(t.games)), sec: Math.round(num(t.sec)), dist: num(t.dist), touches: Math.floor(num(t.touches)) };
+  a.totals = { games: Math.floor(num(t.games)), sec: Math.round(num(t.sec)), dist: num(t.dist), touches: Math.floor(num(t.touches)), modes: {} };
+  for (const [k, v] of Object.entries(t.modes && typeof t.modes === 'object' ? t.modes : {}).slice(0, 20)) if (MODE_RE.test(k) && num(v) > 0) a.totals.modes[k] = Math.floor(num(v));
   for (const [k, list] of Object.entries(raw.recent || {})) {
     if (!/^[a-z0-9@-]{2,32}$/.test(k) || !Array.isArray(list)) continue;
     const rows = list.filter((r) => r && Number.isFinite(r.s) && Number.isFinite(r.at)).map((r) => ({ s: r.s, at: r.at })).slice(-RECENT_MAX);
@@ -40,7 +42,7 @@ export function cleanActivity(raw, uid) {
 
 /**
  * 활동 하나를 더한 새 기록. entry = null 이면 출석만 (그날을 표시).
- * entry: { key: 랭킹 키 | null(점수 없는 연습·중간에 멈춤), score, sec, dist(m), touches }
+ * entry: { key: 랭킹 키 | null(점수 없는 연습·중간에 멈춤), score, sec, dist(m), touches, mode: 모드 id(게임별 판 수) }
  */
 export function addActivity(act, entry = null, now = Date.now()) {
   const a = cleanActivity(act, act?.uid);
@@ -52,6 +54,7 @@ export function addActivity(act, entry = null, now = Date.now()) {
     a.totals.games += 1; a.totals.sec += sec;
     a.totals.dist = Math.round((a.totals.dist + num(entry.dist)) * 10) / 10;
     a.totals.touches += Math.floor(num(entry.touches));
+    if (MODE_RE.test(String(entry.mode || ''))) a.totals.modes[entry.mode] = (a.totals.modes[entry.mode] || 0) + 1;
     if (entry.key && Number.isFinite(entry.score)) {
       const list = a.recent[entry.key] || (a.recent[entry.key] = []);
       list.push({ s: entry.score, at: now });

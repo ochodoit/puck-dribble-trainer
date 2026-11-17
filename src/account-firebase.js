@@ -335,6 +335,13 @@ export class FirebaseAccountStore {
   /** 운영자: 베타 멤버만 (베타 링크로 가입 또는 예전 계정) */
   async betaMembers() { return (await this.memberList()).filter(isBetaUser); }
 
+  /** 운영자: 모든 회원의 활동 기록 activity/{uid} (출석·판 수·훈련 시간 통계용. 규칙: 운영자만 목록 읽기) */
+  async activityList() {
+    this._needAdmin();
+    const snap = await this.F.getDocs(this.F.query(this.F.collection(this.db, 'activity'), this.F.limit(2000)));
+    return snap.docs.map((d) => cleanActivity(d.data(), d.id));
+  }
+
   /** 운영자: 코드 하나 지우기 */
   async deleteCode(code) {
     this._needAdmin();

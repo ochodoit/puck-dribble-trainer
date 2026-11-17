@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <!-- 보안: 이 사이트와 Firebase·글꼴 주소의 스크립트만 실행 (글에 HTML이 끼어들어도 스크립트는 못 돈다) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src https://headsuppuck.firebaseapp.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; frame-src https://headsuppuck.firebaseapp.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#F4F1EA" />
@@ -195,6 +195,7 @@
             <li><span><b>주의</b> — 같은 색 물체를 바닥에 두지 마세요. 화면이 가려지면 추적이 멈춥니다.</span></li>
           </ol>
         </details>
+        <p class="analytics-note">방문·플레이 통계를 위해 Google 애널리틱스를 씁니다. 별명·나이 같은 개인정보는 보내지 않습니다.</p>
         <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>무단 복제·배포 금지</span></p>
       </div>
     </div>
@@ -437,6 +438,17 @@
       <div class="modal-card admin">
         <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">닫기</button></header>
         <p id="adm-error" class="error hidden"></p>
+        <section class="adm-sec">
+          <h3>통계</h3>
+          <p class="muted">회원 기준(가입·출석·플레이)입니다. 방문자 수와 게스트 플레이는 Google 애널리틱스에서 봅니다.</p>
+          <div id="adm-stats" class="me-stats"></div>
+          <div id="adm-chart" class="adm-chart"></div>
+          <div id="adm-stats-more" class="adm-stats-more"></div>
+          <div class="row">
+            <button type="button" id="adm-stats-refresh" class="btn">새로 고침</button>
+            <a class="btn btn-ghost" href="https://analytics.google.com/analytics/web/#/a416394719p564426108/reports/intelligenthome" target="_blank" rel="noopener">Google 애널리틱스 열기</a>
+          </div>
+        </section>
         <section class="adm-sec">
           <h3>가입 준비</h3>
           <p id="adm-members" class="muted"></p>

@@ -15,6 +15,8 @@
   import { alphaLayer } from '../src/theme.js';
   import { rankKey, FLYER_R, WIDE_DRILLS, WIDE_HOLD_R, laneX, figure8Waypoints, FIGURE8_DIRS, GATE_DRAW_R, TARGET_DRAW_R, PUCK_R as ME_R, HIT_OVERLAP, circleOverlap, overlapReach, discRectOverlap } from '../src/game.js';
   import { makeFloorMapping } from '../src/geometry.js';
+  import { memberStats, lastDays } from '../src/stats.js';
+  import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
   import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit } from '../src/account.js';
   import { addActivity, cleanActivity, streak, attendanceSummary, monthGrid, keyInfo, dayKey, sparkPoints, RECENT_MAX } from '../src/activity.js';
   import { siteAllowed, isDevHost, OFFICIAL_URL } from '../src/guard.js';
@@ -895,6 +897,50 @@
       const c3 = vc.calibCircle();
       check('PL5 puck registration / start circle sits at the center of the play area, kept inside the picture', c0.x === 120 && c0.y === 90 && near(c1.x, 170, 1e-6) && c1.y > 60 && c1.y < 70
         && c13.x === c1.x && c13.y === c1.y && near(c13.r, c1.r * 1.3) && near(c2.y, 180 - c2.r) && c2.x > c2.r && c3.x === 120 && c3.y === 90, { c0, c1, c2, c3 });
+    }
+
+    // ===== 운영자 통계(회원 기준) · 방문·플레이 통계(GA4)는 공식 주소에서만, 개인정보 없이 =====
+    {
+      const now = new Date(2026, 10, 18, 15).getTime(), DAYMS = 864e5;
+      const members = [
+        { id: 'a', beta: true, code: 'B', via: 'beta', joinedAt: now - 10 * DAYMS, ageGroup: 'U12', country: 'KR' },
+        { id: 'b', beta: false, code: 'O', via: 'one', joinedAt: now - 2 * DAYMS, ageGroup: 'U12', country: 'KR' },
+        { id: 'c', createdAt: now - 40 * DAYMS, ageGroup: '성인', country: 'US' },              // 코드 없이 가입한 예전 계정 = 베타로 봄
+        { id: 'd', beta: true, code: 'B', via: 'beta', joinedAt: now - 3600e3, ageGroup: 'U10', country: 'KR' }, // 오늘 가입
+      ];
+      let a1 = cleanActivity(null, 'a');
+      a1 = addActivity(a1, { key: 'wide@60', score: 10, sec: 60, mode: 'wide' }, now - 5 * DAYMS);
+      a1 = addActivity(a1, { key: null, score: null, sec: 30, mode: 'figure8' }, now);   // 중간에 멈춘 판도 판 수에
+      a1 = addActivity(a1, { key: 'wide@60', score: 12, sec: 60, mode: 'wide' }, now);
+      let a2 = addActivity(cleanActivity(null, 'b'), null, now - DAYMS);                    // 어제는 출석만
+      a2 = addActivity(a2, { key: 'quick', score: 30, sec: 20, mode: 'quick' }, now - 20 * DAYMS);
+      const s = memberStats(members, [a1, a2], now);
+      const last = s.daily[s.daily.length - 1], twoAgo = s.daily[s.daily.length - 3], yday = s.daily[s.daily.length - 2];
+      check('ST1 operator stats: members by join route, new sign-ups, attendance, member games and time', s.members.total === 4 && s.members.beta === 3 && s.members.one === 1
+        && s.members.today === 1 && s.members.d7 === 2 && s.members.d30 === 3 && s.attended.today === 1 && s.attended.d7 === 2 && s.attended.d30 === 2
+        && s.games.total === 4 && s.games.today === 2 && s.games.d7 === 3 && s.games.d30 === 4 && s.games.sec === 170, s);
+      check('ST1 14-day chart, games by mode, age groups, countries', s.daily.length === 14 && last.day === '2026-11-18' && last.joins === 1 && last.games === 2 && last.players === 1
+        && twoAgo.joins === 1 && yday.players === 1 && yday.games === 0 && lastDays(3, now).join() === '2026-11-16,2026-11-17,2026-11-18'
+        && s.modes.map(([k, n]) => k + n).join() === 'wide2,figure81,quick1' && JSON.stringify(s.ages) === '[["U10",1],["U12",2],["성인",1]]' && JSON.stringify(s.countries) === '[["KR",3],["US",1]]',
+        { daily: s.daily.slice(-3), modes: s.modes, ages: s.ages, countries: s.countries });
+      const dirty = cleanActivity({ totals: { games: 2, modes: { wide: 2, '<x>': 3, figure8: -1, quick: 'a' } } }, 'u');
+      check('ST1 stored games-by-mode is sanitized', JSON.stringify(dirty.totals.modes) === '{"wide":2}' && JSON.stringify(cleanActivity(null, 'u').totals.modes) === '{}', dirty.totals);
+
+      const L = (protocol, hostname) => ({ protocol, hostname });
+      const allow = [L('https:', 'puck-trainer.com'), L('https:', 'www.puck-trainer.com'), L('http:', 'puck-trainer.com'), L('http:', 'localhost'), L('http:', '127.0.0.1'),
+        L('https:', 'ochodoit.github.io'), L('https:', 'puck-trainer.com.evil.example'), L('https:', '192.168.0.12')].map((l) => (analyticsAllowed(l) ? 1 : 0)).join('');
+      const offHere = initAnalytics(location, document) === false && typeof window.gtag === 'undefined' && !document.querySelector('script[src*="googletagmanager"]');
+      // 공식 주소인 척하는 가짜 창·문서로: 실제 GA에는 아무것도 보내지 않는다
+      const fakeWin = {}, added = [];
+      const fakeDoc = { defaultView: fakeWin, head: { appendChild: (el) => added.push(el) }, createElement: () => ({}) };
+      const on = initAnalytics(L('https:', 'puck-trainer.com'), fakeDoc);
+      track('game_end', { mode: '8자 드리블', member: 'guest', completed: 'yes', play_seconds: 45, score: 12 });
+      const dl = (fakeWin.dataLayer || []).map((x) => [...x]);
+      const cfg = dl.find((x) => x[0] === 'config'), ev = dl.find((x) => x[0] === 'event');
+      check('GA1 analytics only on the official https address; signals and ad personalization off; events carry no personal details', allow === '11000000' && offHere && on
+        && added[0]?.src === `https://www.googletagmanager.com/gtag/js?id=${GA_ID}` && added[0]?.async === true && cfg?.[1] === GA_ID
+        && cfg?.[2]?.allow_google_signals === false && cfg?.[2]?.allow_ad_personalization_signals === false
+        && ev?.[1] === 'game_end' && JSON.stringify(Object.keys(ev?.[2] || {}).sort()) === '["completed","member","mode","play_seconds","score"]', { allow, offHere, dl });
     }
 
     // ===== 내 정보: 출석·최근 기록·누적, 순위 요약, 프로필 수정 확인 =====

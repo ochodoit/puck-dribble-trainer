@@ -47,20 +47,65 @@ export const WIDE_END = { x: 0.105, w: 0.13 }; // 훈련 1의 끝 구역: 예전
 /** n번 칸의 가로 가운데 (1 ~ 10) */
 export const laneX = (n) => (n - 0.5) / WIDE_LANES;
 
-export const PUCK_R = 0.025;
+export const PUCK_R = 0.025; // 평면 경기장에 그리는 내 퍽(잉크 정원) 반지름 = 목표 판정에 쓰는 크기 (경기장 가로 대비)
 const CONE_R = 0.045;
-// 목표 지점 크기 (바닥 폭 단위): 예전의 절반. 판정 반경은 그린 원보다 조금 넉넉하게
-export const TARGET_DRAW_R = 0.02125; // 반응 타겟 그린 원 반지름 (예전의 절반)
-const TARGET_HIT_R = 0.026;       // 반응 타겟 판정 반경 (그린 원보다 조금 넉넉하게)
+// 목표 지점 크기 (경기장 가로 대비): 예전의 절반
+export const TARGET_DRAW_R = 0.02125; // 반응 타겟 원 반지름 (예전의 절반)
 const REACT_APPROACH = 0.4;       // 타겟 쪽으로 이만큼(폭/초) 빠르게 다가가기 시작하면 '반응'
-const WAYPOINT_R = 0.0225;        // 8자 게이트 판정 반경 (그린 원보다 조금 넉넉하게)
-export const GATE_DRAW_R = 0.01875; // 8자 게이트 그린 원 반지름 (예전의 절반)
+export const GATE_DRAW_R = 0.01875; // 8자 게이트 원 반지름 (예전의 절반)
 export const F8_HOLD_R = 0.055;     // 8자 시작 대기 원 반지름 (가운데). 판정은 1.25배
 export const F8_HOLD_SEC = 3;       // 가운데 원에 퍽을 둔 채로 3초(3·2·1을 세며 원이 차오름) -> 시작. 그동안 게임 시계는 멈춤
 const F8_CONES = [0.3, 0.7];       // 두 콘의 가로 위치 (세로는 가운데)
+/** 퀵 핸즈 박스 (경기장 가로·세로 대비. 가운데) */
+const QUICK_BOX = { w: 0.34, h: 0.5 };
 
-/** 반응 타겟 하나 (무작위 자리, 판정 반경은 그린 원보다 조금 넉넉) */
-const newTarget = () => ({ x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_DRAW_R, hitR: TARGET_HIT_R, born: clockNow(), lastD: null, lastAt: 0, approachN: 0, approachAt: 0 });
+/**
+ * 목표 통과 판정: 내 퍽(원)과 목표(원·사각형)가 겹친 넓이가 둘 중 작은 쪽 넓이의 이만큼 이상이면 통과.
+ * 점 하나(퍽 가운데)가 아니라 화면에 보이는 퍽 원 전체로 본다 — 퍽이 목표에 걸치기만 해도 인정
+ */
+export const HIT_OVERLAP = 0.3;
+
+/** 두 원(반지름 r1·r2, 가운데 거리 d)이 겹친 넓이 */
+export function circleOverlap(d, r1, r2) {
+  if (d >= r1 + r2) return 0;
+  if (d <= Math.abs(r1 - r2)) return Math.PI * Math.min(r1, r2) ** 2;
+  const a = Math.acos(Math.min(1, Math.max(-1, (d * d + r1 * r1 - r2 * r2) / (2 * d * r1))));
+  const b = Math.acos(Math.min(1, Math.max(-1, (d * d + r2 * r2 - r1 * r1) / (2 * d * r2))));
+  return r1 * r1 * (a - Math.sin(2 * a) / 2) + r2 * r2 * (b - Math.sin(2 * b) / 2);
+}
+
+const _reach = new Map();
+/** 두 원이 (작은 쪽 넓이 대비) frac 이상 겹치는 가장 먼 가운데 거리. 이 거리보다 가까우면 통과 */
+export function overlapReach(r1, r2, frac = HIT_OVERLAP) {
+  const key = `${r1}|${r2}|${frac}`;
+  let d = _reach.get(key);
+  if (d !== undefined) return d;
+  const need = frac * Math.PI * Math.min(r1, r2) ** 2;
+  let lo = Math.abs(r1 - r2), hi = r1 + r2;
+  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (circleOverlap(m, r1, r2) >= need) lo = m; else hi = m; }
+  if (_reach.size > 200) _reach.clear();
+  _reach.set(key, lo);
+  return lo;
+}
+
+/** 원(가운데 c, 반지름 r)과 사각형 z(가운데 x·y, 너비 w, 높이 h)가 겹친 넓이 (세로로 잘라 더함) */
+export function discRectOverlap(c, r, z, n = 32) {
+  const x0 = Math.max(c.x - r, z.x - z.w / 2), x1 = Math.min(c.x + r, z.x + z.w / 2);
+  if (!(x1 > x0)) return 0;
+  const y0 = z.y - z.h / 2, y1 = z.y + z.h / 2, dx = (x1 - x0) / n;
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    const x = x0 + (i + 0.5) * dx, hh = Math.sqrt(Math.max(0, r * r - (x - c.x) ** 2));
+    s += Math.max(0, Math.min(c.y + hh, y1) - Math.max(c.y - hh, y0));
+  }
+  return s * dx;
+}
+
+/** 사각형 목표 판정: 내 퍽 원이 사각형과 (작은 쪽 넓이 대비) frac 이상 겹치면 true */
+export const discInRect = (c, r, z, frac = HIT_OVERLAP) => discRectOverlap(c, r, z) >= frac * Math.min(Math.PI * r * r, z.w * z.h);
+
+/** 반응 타겟 하나 (평면 좌표: 세로는 A배. 무작위 자리) */
+const newTarget = (A = 1) => ({ x: rand(0.12, 0.88), y: rand(0.15, 0.85) * A, r: TARGET_DRAW_R, born: clockNow(), lastD: null, lastAt: 0, approachN: 0, approachAt: 0 });
 
 /** 8자 방향: 가운데에서 어느 콘으로 먼저 가는지(L/R) × 콘을 위·아래 어느 쪽부터 도는지(up/down) */
 export const FIGURE8_DIRS = ['L-up', 'L-down', 'R-up', 'R-down'];
@@ -150,15 +195,42 @@ export class Game {
     this.lastTickSec = -1;
     this._puckTouchesBase = 0;
     this._f8Prev = null;
+    this._prevMe = null;
     this.f8Hold = null; // 8자 시작 대기 {t: 가운데 원에 퍽을 둔 시간(초)}. null 이면 진행 중
+    this._A = this.plane.A; // 경기장 세로 비율이 바뀌면(화면 회전 등) 코스·목표를 다시 맞춘다
     if (this.mode?.id === 'figure8') this._figure8Course(); // 시작 전에도 코스와 첫 방향(점선)을 미리 보여 준다
+    if (this.mode?.id === 'quick') this.zones = [{ ...this._quickZone(), active: false }]; // 시작 전 박스 미리보기
   }
 
+  /** 8자 코스 (평면 좌표: 가로 1 × 세로 A). 게이트·콘 자리는 경기장 비율로 정하고 세로만 A배 */
   _figure8Course() {
-    this.cones = F8_CONES.map((x) => ({ x, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }));
-    this.waypoints = figure8Waypoints(this.figure8Dir);
+    const A = this.plane.A;
+    this.cones = F8_CONES.map((x) => ({ x, y: 0.5 * A, r: CONE_R, moving: false, hitUntil: 0 }));
+    this.waypoints = figure8Waypoints(this.figure8Dir).map((p) => ({ x: p.x, y: p.y * A }));
     this.wpIndex = 0;
   }
+
+  /** 퀵 핸즈 박스 (평면 좌표, 가운데) */
+  _quickZone() {
+    const A = this.plane.A;
+    return { id: 'C', x: 0.5, y: 0.5 * A, w: QUICK_BOX.w, h: QUICK_BOX.h * A, active: true, warn: false };
+  }
+
+  /** 경기장 세로 비율(A)이 바뀌었을 때: 코스·박스·타겟을 새 비율에 맞춘다 (진행 상황은 그대로) */
+  _replane() {
+    const A = this.plane.A, old = this._A;
+    this._A = A;
+    if (!(old > 0) || old === A) return;
+    const k = A / old;
+    if (this.mode.id === 'figure8') { const i = this.wpIndex; this._figure8Course(); this.wpIndex = i; }
+    if (this.mode.id === 'quick' && this.zones.length) this.zones = [this._quickZone()];
+    for (const t of this.targets) t.y *= k;
+    if (this._prevMe) this._prevMe.y *= k;
+    if (this._f8Prev) this._f8Prev.y *= k;
+  }
+
+  /** 가운데 원 판정 (8자 시작 대기): 평면 좌표의 경기장 가운데 */
+  get center() { return { x: 0.5, y: 0.5 * this.plane.A }; }
 
   /** 8자 방향 바꾸기 (게임 중에도). 게이트를 새 방향으로 다시 놓고 가운데 게이트부터 — 점수·바퀴 수·시간은 그대로 */
   setFigure8Dir(dir) {
@@ -170,17 +242,17 @@ export class Game {
     if (this.running) { this.f8Hold = { t: 0 }; this._f8HoldText(); }
   }
 
-  /** 8자 시작 대기 한 프레임: 가운데 원에 퍽을 둔 채로 3·2·1 (벗어나면 처음부터) -> 다 세면 바로 시작 */
-  _f8HoldStep(dt, pp, puck) {
-    const h = this.f8Hold;
-    const inside = pp && puck.state !== 'lost' && Math.hypot(pp.x - 0.5, pp.y - 0.5) < F8_HOLD_R * 1.25;
+  /** 8자 시작 대기 한 프레임: 가운데 원에 퍽을 둔 채로 3·2·1 (벗어나면 처음부터) -> 다 세면 바로 시작. me: 평면 좌표 */
+  _f8HoldStep(dt, me, puck) {
+    const h = this.f8Hold, c = this.center;
+    const inside = me && puck.state !== 'lost' && Math.hypot(me.x - c.x, me.y - c.y) < F8_HOLD_R * 1.25;
     const before = h.t;
     h.t = inside ? h.t + dt : 0;
     if (inside && before === 0) this.sfx?.tick();                                        // 3
     else if (inside && Math.floor(h.t) > Math.floor(before) && h.t < F8_HOLD_SEC) this.sfx?.tick(); // 2, 1
     if (h.t >= F8_HOLD_SEC) {
       this.f8Hold = null; this._f8Prev = null; this.wpIndex = 0;
-      this._pop(0.5, 0.5, '시작!', C.red, 'script');
+      this._pop(c.x, c.y, '시작!', C.red, 'script');
       this.sfx?.go();
       this.instruction = '진한 빨간 원으로 · 옅은 원이 그다음';
       return;
@@ -204,8 +276,7 @@ export class Game {
     this.tracker = puck;
     this.running = true;
     this.startedAt = clockNow();
-    const d = DIFF[this.difficulty] || DIFF.normal;
-    const p = puck?.pos || { x: 0.5, y: 0.5 };
+    const p = puck?.pos ? this.toPlane(puck.pos.x, puck.pos.y) : this.center; // 평면 좌표의 지금 내 퍽 자리
 
     switch (this.mode.id) {
       case 'arcade':
@@ -233,7 +304,7 @@ export class Game {
         this._f8HoldText();
         break;
       case 'quick':
-        this.zones = [{ id: 'C', x: 0.5, y: 0.5, w: 0.34, h: 0.5, active: true }];
+        this.zones = [this._quickZone()];
         this.stats = { touches: 0, outside: 0 };
         this._puckTouchesBase = puck?.touches || 0;
         this.instruction = '박스 안에서 빠르게 좌우로!';
@@ -264,6 +335,7 @@ export class Game {
 
   /** dt: 초, puck: Tracker, now: ms */
   update(dt, puck, now) {
+    if (this._A !== this.plane.A) this._replane();
     // 와이드 드리블: 훈련 전 가운데 대기 중에는 게임 시계가 멈춤
     if (!(this.running && ((this.wide && this.wide.hold != null) || this.f8Hold))) this.elapsed += dt;
     for (const e of this.effects) e.age = (now - e.t0) / e.dur;
@@ -291,6 +363,9 @@ export class Game {
     const pos = puck.pos;
     const tracked = puck.state === 'tracked';
     const pp = pos ? { x: pos.x, y: pos.y } : null;
+    // 아케이드를 뺀 모든 모드는 평면 경기장(가로 1 × 세로 A)에서 판정한다 — 화면에 보이는 그대로
+    const me = pp && this.mode.id !== 'arcade' ? this.toPlane(pp.x, pp.y) : null;
+    if (this.mode.id !== 'arcade') this.me = me;
 
     switch (this.mode.id) {
       case 'arcade': {
@@ -301,10 +376,7 @@ export class Game {
         break;
       }
       case 'obstacle': {
-        // 바닥 원근이 아니라 평면에서 판정: 퍽의 (u,v)를 가로 1 × 세로 A 평면 좌표로 옮긴다
         const A = this.plane.A;
-        const me = pp ? this.toPlane(pp.x, pp.y) : null;
-        this.me = me;
         // 시간이 지날수록 동시에 날아오는 퍽 수 증가
         const want = Math.min(d.flyMax_n, d.flyers + Math.floor(this.elapsed / d.flyEvery));
         this.flySpawnTimer -= dt;
@@ -347,9 +419,6 @@ export class Game {
         break;
       }
       case 'wide': {
-        // 평면 경기장에서 판정 (퍽 피하기·자유 연습과 같은 좌표·방향)
-        const me = pp ? this.toPlane(pp.x, pp.y) : null;
-        this.me = me;
         if (this.stage !== this.wide.stage) this._wideStage(this.stage); // 고른 시간이 지나면 다음 훈련
         else if (this.wide.A !== this.plane.A) this._wideZones();         // 화면 크기가 바뀌면 구역 높이도
         const w = this.wide;
@@ -369,7 +438,7 @@ export class Game {
           break;
         }
         const z = this.zones.find((zz) => zz.active);
-        if (me && tracked && z && this._inZone(me, z)) {
+        if (me && tracked && z && discInRect(me, PUCK_R, z)) { // 퍽 원이 구역에 30% 이상 걸치면
           this.stats.reps++; this.stats.drills[w.stage]++; this.score = this.stats.reps;
           this.sfx?.rep();
           if (w.seq) {
@@ -385,27 +454,28 @@ export class Game {
         break;
       }
       case 'figure8': {
-        if (this.f8Hold) { this._f8HoldStep(dt, pp, puck); break; }
-        if (pp && tracked) {
+        if (this.f8Hold) { this._f8HoldStep(dt, me, puck); break; }
+        if (me && tracked) {
           const wp = this.waypoints[this.wpIndex];
-          const prev = this._f8Prev && dist(this._f8Prev, pp) < 0.15 ? this._f8Prev : pp; // 추적이 튄 큰 점프는 선분으로 보지 않음
-          this._f8Prev = { x: pp.x, y: pp.y };
-          if (segDist(prev, pp, wp) < WAYPOINT_R) {
+          const prev = this._f8Prev && dist(this._f8Prev, me) < 0.15 ? this._f8Prev : me; // 추적이 튄 큰 점프는 선분으로 보지 않음
+          this._f8Prev = { x: me.x, y: me.y };
+          // 퍽 원이 게이트 원에 30% 이상 겹치면 통과 (빠르게 지나가 프레임 사이에 건너뛰어도 선분으로)
+          if (segDist(prev, me, wp) < overlapReach(PUCK_R, GATE_DRAW_R)) {
             this.stats.gates++; this.score += 1;
             this._ring(wp.x, wp.y, GATE_DRAW_R, now); // 숫자 대신 지나간 자리에 퍼지는 고리
             this.sfx?.rep();
             this.wpIndex = (this.wpIndex + 1) % this.waypoints.length;
-            if (this.wpIndex === 0) { this.stats.laps++; this.score += 4; this._pop(0.5, 0.5, `${this.stats.laps}바퀴!`, C.red, 'script'); this.sfx?.target(); }
+            if (this.wpIndex === 0) { this.stats.laps++; this.score += 4; this._pop(this.center.x, this.center.y, `${this.stats.laps}바퀴!`, C.red, 'script'); this.sfx?.target(); }
             this.instruction = `다음 게이트 ${this.wpIndex + 1}/${this.waypoints.length}`;
           }
-          this._checkCones(pp, now, () => { this.stats.hits++; this.score = Math.max(0, this.score - 2); });
+          this._checkCones(me, now, () => { this.stats.hits++; this.score = Math.max(0, this.score - 2); });
         }
         break;
       }
       case 'quick': {
         const z = this.zones[0];
-        if (pp && tracked) {
-          if (this._inZone(pp, z)) {
+        if (me && tracked) {
+          if (discInRect(me, PUCK_R, z)) {
             const touches = puck.touches - this._puckTouchesBase;
             if (touches > this.stats.touches) { this.sfx?.rep(); }
             this.stats.touches = touches; this.score = touches;
@@ -424,15 +494,17 @@ export class Game {
         if (t && !t.spawnedAt) t.spawnedAt = now;
         // 반응 시간 = 타겟 출현 후 퍽이 그 타겟 쪽으로 움직이기 시작할 때까지 (이동 시간과 분리).
         // 도착하자마자 다음 타겟이 나오므로 '움직이는 중'이 아니라 '새 타겟 쪽으로 방향을 잡았는가'로 본다 (2프레임 연속)
-        if (t && !t.movedAt && tracked && pp) {
-          const d = dist(pp, t);
+        if (t && !t.movedAt && tracked && me) {
+          const d = dist(me, t);
           const v = t.lastD != null && now > t.lastAt ? (t.lastD - d) / ((now - t.lastAt) / 1000) : 0;
           if (v > REACT_APPROACH) { t.approachAt = t.approachAt || t.lastAt; if (++t.approachN >= 2) t.movedAt = t.approachAt; }
           else { t.approachN = 0; t.approachAt = 0; }
           t.lastD = d; t.lastAt = now;
         }
-        if (pp && tracked) {
-          this._checkTargets(pp, (t) => {
+        if (me && tracked) {
+          const prev = this._prevMe && dist(this._prevMe, me) < 0.15 ? this._prevMe : me; // 빠르게 지나가도 선분으로 (튄 점프 제외)
+          this._prevMe = { x: me.x, y: me.y };
+          this._checkTargets(prev, me, (t) => {
             const total = (now - t.spawnedAt) / 1000;
             const rt = ((t.movedAt || now) - t.spawnedAt) / 1000;
             this.stats.times.push(rt); this.stats.travel.push(total - rt); this.stats.hits++;
@@ -441,7 +513,7 @@ export class Game {
             this._pop(t.x, t.y, `반응 ${rt.toFixed(2)}s`, C.ink);
             this.sfx?.target();
             // 도착 즉시 다음 타겟을 무작위 자리에 (기다림 없음)
-            this._spawnTarget(pp, 0.3, 0.5);
+            this._spawnTarget(me, 0.3, 0.5);
             this.targets[0].spawnedAt = now;
           });
         }
@@ -449,14 +521,12 @@ export class Game {
       }
       default: { // free: 평면에서 번호 순서대로 포인트에 퍽을 가져다 놓기
         const A = this.plane.A;
-        const me = pp ? this.toPlane(pp.x, pp.y) : null;
-        this.me = me;
         const pts = this.course.points;
         if (pts.length && me && tracked) {
           const tg = pts[this.courseIdx % pts.length];
           const dd = Math.hypot(me.x - tg.x, me.y - tg.y * A);
           if (dd > this.course.reach * 1.6) this.courseLeft = true; // 같은 포인트를 다시 찍으려면 한 번 벗어나야 함
-          if (dd < this.course.reach && this.courseLeft) {
+          if (dd < overlapReach(PUCK_R, this.course.reach) && this.courseLeft) { // 퍽 원이 목표 원에 30% 이상 걸치면
             this.stats.reached++;
             this.sfx?.rep();
             this.courseIdx++;
@@ -510,28 +580,31 @@ export class Game {
     return null;
   }
 
+  /** 반응 타겟을 평면 경기장의 무작위 자리에 (avoid: 지금 내 퍽 자리, 평면 좌표. 그 자리에서 min~max 거리) */
   _spawnTarget(avoid, minDist = 0.25, maxDist = Infinity) {
+    const A = this.plane.A;
     for (let tries = 0; tries < 80; tries++) {
-      const t = newTarget();
+      const t = newTarget(A);
       const dd = dist(t, avoid);
       if (dd < minDist || dd > maxDist) continue;
       if (this.cones.some((c) => coneDist(t, c) < c.r + t.r + 0.04)) continue;
       this.targets = [t];
       return;
     }
-    // 빈자리를 못 찾으면 콘에서 가장 먼 후보를 사용
-    let bestT = null, bestD = -1;
-    for (let i = 0; i < 40; i++) {
-      const t = newTarget();
-      const dmin = Math.min(dist(t, avoid), ...this.cones.map((c) => coneDist(t, c)));
-      if (dmin > bestD) { bestD = dmin; bestT = t; }
+    // 빈자리를 못 찾으면(경기장이 납작해 거리 범위를 못 맞춤 등) 범위에 가장 가까운 후보를 사용
+    let bestT = null, bestD = Infinity;
+    for (let i = 0; i < 60; i++) {
+      const t = newTarget(A);
+      const dd = dist(t, avoid), off = dd < minDist ? minDist - dd : dd > maxDist ? dd - maxDist : 0;
+      if (off < bestD) { bestD = off; bestT = t; }
     }
     this.targets = [bestT];
   }
 
-  _checkTargets(pp, onHit) {
+  /** 반응 타겟 판정: 이번 프레임에 퍽이 지나간 선분(prev -> me)이 타겟과 30% 이상 겹치면 */
+  _checkTargets(prev, me, onHit) {
     for (const t of [...this.targets]) {
-      if (dist(pp, t) < (t.hitR || t.r)) { onHit(t); return; }
+      if (segDist(prev, me, t) < overlapReach(PUCK_R, t.r)) { onHit(t); return; }
     }
   }
 
@@ -549,8 +622,6 @@ export class Game {
       }
     }
   }
-
-  _inZone(p, z) { return Math.abs(p.x - z.x) < z.w / 2 && Math.abs(p.y - z.y) < z.h / 2; }
 
   /** 와이드 드리블: i번째 훈련 시작 (처음 또는 시간이 지나 다음 훈련으로) */
   _wideStage(i) {

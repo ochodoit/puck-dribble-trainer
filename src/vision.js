@@ -16,6 +16,7 @@ export class Vision {
     this.mirror = true;
     this.frame = null;          // 마지막 ImageData (보정용 샘플링)
     this.floorAuto = null;      // EMA 적용된 자동 바닥 사다리꼴 {y0,y1,tl,tr,bl,br} (뒤쪽은 좁고 앞쪽은 넓은 원근)
+    this.areaCenter = null;     // 게임 영역(바닥) 가운데 (처리 px). 퍽 등록·시작 원 자리
     this.floorLocked = false;
     this.floorPolygon = [];     // 자동 감지 윤곽 (표시용)
     this.floorOnCount = 0; this.floorOffCount = 0;
@@ -133,6 +134,7 @@ export class Vision {
     }
 
     const mapping = quad ? makeFloorMapping(quad) : null;
+    this.useArea(mapping);
     const result = {
       floor: { quad, mapping, detected: floorDetected, locked: this.floorLocked, polygon: this.floorPolygon, mode: settings.floorMode, fallback: settings.floorMode === 'auto' && this.floorFallback },
       puck: null,
@@ -407,9 +409,25 @@ export class Vision {
     return { r, g, b, area };
   }
 
-  /** 자동 지정용 원 (처리 좌표) */
-  /** 가운데 원 (퍽 등록·핸즈프리 시작). scale: 인식할 때는 그린 원보다 조금 넓게 본다 (원 가장자리에 걸쳐도 됨) */
-  calibCircle(scale = 1) { const r = Math.min(this.PW, this.PH) * 0.095 * scale; return { x: this.PW / 2, y: this.PH / 2, r }; }
+  /**
+   * 게임 영역(바닥)이 정해지면 그 가운데를 기억한다: 퍽 등록·핸즈프리 시작 원이 영역 한가운데에 오게.
+   * mapping: 바닥 사상 (없으면 화면 가운데). 카메라는 process() 가, 마우스 테스트 모드는 main 이 부른다
+   */
+  useArea(mapping) {
+    const c = mapping ? mapping.toPx(0.5, 0.5) : null;
+    this.areaCenter = c && Number.isFinite(c[0]) && Number.isFinite(c[1]) ? c : null;
+  }
+
+  /**
+   * 가운데 원 (퍽 등록·핸즈프리 시작): 게임 영역의 한가운데(원근 기준 바닥 가운데). 원이 화면 밖으로 나가지 않게 안쪽으로.
+   * scale: 인식할 때는 그린 원보다 조금 넓게 본다 (원 가장자리에 걸쳐도 됨) — 자리는 같고 반지름만
+   */
+  calibCircle(scale = 1) {
+    const { PW, PH } = this, r0 = Math.min(PW, PH) * 0.095;
+    const [cx, cy] = this.areaCenter || [PW / 2, PH / 2];
+    const x = Math.min(PW - r0, Math.max(r0, cx)), y = Math.min(PH - r0, Math.max(r0, cy));
+    return { x, y, r: r0 * scale };
+  }
 
   /** (x, y) 둘레 고리(r1~r2)의 바닥색. 퍽·스틱처럼 튀는 색은 두 번째 평균에서 뺀다 (진짜 퍽을 덮는 색) */
   ringColor(x, y, r1, r2) {

@@ -6,7 +6,7 @@
 //         feedback/{uid} 개발자에게 (베타 마감 전에 보내면 정회원 유지)
 import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, rankAmong, NOT_READY,
-  betaState, isActiveMember, LAPSED, validateFeedback, validateStrongPassword, rankSummaryOf, validateEdit,
+  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, rankSummaryOf, validateEdit,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
 
@@ -318,16 +318,22 @@ export class FirebaseAccountStore {
     return snap.docs.map((d) => this._fb(d.data()));
   }
 
-  /** 운영자: 베타 멤버 목록 (의견 보낸 시각·유지 여부 포함) */
-  async betaMembers() {
+  /**
+   * 운영자: 전체 회원 목록 (가입 번호 순, 의견 보낸 시각·유지 여부 포함).
+   * 베타 링크로 가입한 베타 멤버뿐 아니라 1회용 코드로 가입한 정회원, 코드 없이 가입했던 예전 계정까지 모두
+   */
+  async memberList() {
     this._needAdmin();
     const [us, fb] = await Promise.all([
-      this.F.getDocs(this.F.query(this.F.collection(this.db, 'users'), this.F.where('beta', '==', true), this.F.limit(1000))),
+      this.F.getDocs(this.F.query(this.F.collection(this.db, 'users'), this.F.limit(1000))),
       this.listFeedback(),
     ]);
     const at = new Map(fb.map((f) => [f.uid, f.at]));
     return us.docs.map((d) => ({ id: d.id, ...d.data(), feedbackAt: at.get(d.id) ?? null })).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
   }
+
+  /** 운영자: 베타 멤버만 (베타 링크로 가입 또는 예전 계정) */
+  async betaMembers() { return (await this.memberList()).filter(isBetaUser); }
 
   /** 운영자: 코드 하나 지우기 */
   async deleteCode(code) {

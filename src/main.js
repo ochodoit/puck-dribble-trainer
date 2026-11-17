@@ -7,7 +7,7 @@ import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, isBetaUser, FEEDBACK_MAX, LAPSED, stickLabel } from './account.js';
 import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
 import { makeFloorMapping } from './geometry.js';
 import { clock, clockNow } from './clock.js';
@@ -462,8 +462,8 @@ function setupAdmin() {
     const row = b.closest('tr');
     if (b.dataset.act === 'delete') {
       const note = app.account.kind === 'firebase' ? `\n${tr('로그인 계정은 Firebase 콘솔(Authentication)에서 따로 지워야 같은 별명으로 다시 가입할 수 있습니다')}` : '';
-      if (confirmDelete(`${row.dataset.nick}: ${tr('베타 멤버의 가입 정보와 의견을 지웁니다')}${note}`)) {
-        adminDo(async () => { await app.account.deleteMember(row.dataset.uid); toast('베타 멤버를 지웠습니다'); });
+      if (confirmDelete(`${row.dataset.nick}: ${tr('회원의 가입 정보와 의견을 지웁니다')}${note}`)) {
+        adminDo(async () => { await app.account.deleteMember(row.dataset.uid); toast('회원을 지웠습니다'); });
       }
       return;
     }
@@ -526,23 +526,33 @@ function showIssued(box, c) {
 }
 
 const STATUS_LABEL = { ok: '사용 가능', off: '꺼짐', expired: '마감', full: '다 씀', missing: '-' };
-const BETA_LABEL = { kept: '유지', beta: '기다리는 중', lapsed: '유지 안 됨' };
+const BETA_LABEL = { kept: '유지', beta: '기다리는 중', lapsed: '유지 안 됨', member: '정회원' };
+/** 어떻게 가입했나: 베타 링크(베타 멤버) · 1회용 코드(처음부터 정회원) · 코드가 생기기 전 예전 가입(베타 멤버로 봄) */
+const joinLabel = (u) => (!u.code ? '예전 가입' : u.via === 'beta' || u.beta ? '베타 링크' : '1회용 코드');
 
-/** 운영자: 베타 멤버별 의견·유지 상태, 개발자에게 온 의견 */
+/**
+ * 운영자: 회원 목록(가입 경로·의견·유지 상태)과 개발자에게 온 의견.
+ * 베타 기간 규칙(의견을 보내야 정회원 유지)은 베타 링크로 가입한 베타 멤버에게만 해당하고,
+ * 1회용 코드로 가입한 사람은 처음부터 정회원이라 '정회원'으로 표시한다
+ */
 async function renderAdminBeta(a) {
-  const [betas, fbs] = await Promise.all([a.betaMembers(), a.listFeedback()]);
+  const [all, fbs] = await Promise.all([a.memberList(), a.listFeedback()]);
   const end = app.site?.betaEndsAt ?? null;
-  const st = betas.map((b) => betaState(b, end));
+  const st = all.map((u) => betaState(u, end));
   const n = (k) => st.filter((x) => x === k).length;
-  $('#adm-beta-sum').textContent = `베타 멤버 ${betas.length}명 · 유지 ${n('kept')}명 · 기다리는 중 ${n('beta')}명 · 유지 안 됨 ${n('lapsed')}명`
-    + (end ? '' : ' · 종료일을 아직 정하지 않았습니다');
-  $('#adm-betas').innerHTML = betas.length ? betas.map((b, i) => {
-    const act = b.kept ? '<button type="button" class="btn btn-ghost" data-act="unkeep">유지 취소</button>'
+  const betaN = all.filter(isBetaUser).length, oneN = all.length - betaN;
+  const sum = [`회원 ${all.length}명`, `베타 멤버 ${betaN}명`, `유지 ${n('kept')}명`, `기다리는 중 ${n('beta')}명`, `유지 안 됨 ${n('lapsed')}명`];
+  if (oneN) sum.push(`1회용 코드로 가입 ${oneN}명`);
+  if (!end) sum.push('종료일을 아직 정하지 않았습니다');
+  $('#adm-beta-sum').textContent = sum.join(' · ');
+  $('#adm-betas').innerHTML = all.length ? all.map((u, i) => {
+    const beta = st[i] !== 'member';
+    const act = !beta ? '' : u.kept ? '<button type="button" class="btn btn-ghost" data-act="unkeep">유지 취소</button>'
       : st[i] !== 'kept' ? '<button type="button" class="btn btn-ghost" data-act="keep">정회원 유지</button>' : '';
     const del = '<button type="button" class="btn btn-ghost btn-del" data-act="delete">삭제</button>';
-    return `<tr data-uid="${esc(b.id)}" data-nick="${esc(b.nick)}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(b.memberNo)}</td><td data-ugc>${esc(b.nick)}</td>
-      <td>${b.feedbackAt ? ymd(b.feedbackAt) : '-'}</td><td>${BETA_LABEL[st[i]] || ''}</td><td class="adm-acts">${act}${del}</td></tr>`;
-  }).join('') : '<tr><td colspan="5" class="muted">베타 멤버가 없습니다</td></tr>';
+    return `<tr data-uid="${esc(u.id)}" data-nick="${esc(u.nick)}" data-beta="${beta ? 1 : 0}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(u.memberNo)}</td><td data-ugc>${esc(u.nick)}</td>
+      <td>${joinLabel(u)}</td><td>${u.feedbackAt ? ymd(u.feedbackAt) : '-'}</td><td>${BETA_LABEL[st[i]] || ''}</td><td class="adm-acts">${act}${del}</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="muted">회원이 없습니다</td></tr>';
   $('#adm-feedback').innerHTML = fbs.length ? fbs.map((f) => `<article class="fb-item" data-uid="${esc(f.uid)}" data-nick="${esc(f.nick)}">
     <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time><button type="button" class="btn btn-ghost btn-del" data-act="delete-fb">삭제</button></header>
     ${f.good ? `<p><em>좋았던 점</em><span data-ugc>${esc(f.good)}</span></p>` : ''}${f.fix ? `<p><em>고쳤으면 하는 점</em><span data-ugc>${esc(f.fix)}</span></p>` : ''}</article>`).join('')
@@ -987,9 +997,9 @@ function loop(raw) {
 /** 마우스 모드 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이어도 마지막 자리를 유지) */
 function stepMouse(now) {
   let meas = null;
-  // 마우스 모드의 게임 바닥은 늘 화면 전체 (8자·반응 타겟 등 맵이 비틀리지 않게).
-  // 영역 편집 중에만 네 모서리로 만든 바닥을 보여 줘서 격자가 모서리를 따라 움직인다
-  const q = app.areaEditing && settings.floorMode === 'manual' && settings.manualQuad ? settings.manualQuad : null;
+  // 마우스 모드도 카메라와 같이 네 모서리로 정한 바닥을 쓴다 (게임은 모두 평면 경기장이라 맵이 비틀리지 않음).
+  // 바닥은 대기 화면의 퍽 등록·시작 원 자리(영역 가운데)와 영역 편집 격자에 쓰인다
+  const q = settings.floorMode === 'manual' && settings.manualQuad ? settings.manualQuad : null;
   const floorMap = q ? makeFloorMapping(q.map(([u, v]) => [u * vision.PW, v * vision.PH])) : null;
   if (mouse.has) {
     meas = pointerToUV(mouse.x, mouse.y, {
@@ -1000,6 +1010,7 @@ function stepMouse(now) {
     });
   }
   app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas, floorMap);
+  vision.useArea(app.lastVision.floor.mapping);
   app.lastFrameAt = now;
   app.frames++;
   if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }

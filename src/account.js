@@ -354,11 +354,14 @@ export class LocalAccountStore {
     return Object.values(this._get(this.FEEDBACK, {})).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  /** 운영자: 베타 멤버 목록 (의견 보낸 시각·유지 여부 포함) */
-  async betaMembers() {
+  /** 운영자: 전체 회원 목록 (가입 번호 순, 의견 보낸 시각·유지 여부 포함) — 베타 멤버·1회용 코드 정회원·예전 계정 모두 */
+  async memberList() {
     this._needAdmin();
-    return Object.values(this._users()).map((u) => this._public(u)).filter(isBetaUser).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
+    return Object.values(this._users()).map((u) => this._public(u)).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
   }
+
+  /** 운영자: 베타 멤버만 (베타 링크로 가입 또는 예전 계정) */
+  async betaMembers() { return (await this.memberList()).filter(isBetaUser); }
 
   /** 운영자: 코드 하나 지우기 */
   async deleteCode(code) {

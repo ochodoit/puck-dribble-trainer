@@ -415,8 +415,9 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#mode-list > :nth-child(4)'); // 8자 드리블
   await page.waitForSelector('#f8-dir:not(.hidden)');
   await page.click('#f8-side [data-side="R"]'); await page.click('#f8-rot [data-rot="ccw"]');
-  const f8 = await page.evaluate(() => { const g = window.__puckTrainer.game; return { saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).figure8Dir, mode: g.mode.id, first: g.waypoints[1], dir: g.figure8Dir }; });
-  const f8Ok = f8.saved === 'R-down' && f8.dir === 'R-down' && f8.mode === 'figure8' && f8.first?.x === 0.7 && f8.first?.y === 0.78;
+  const f8 = await page.evaluate(() => { const g = window.__puckTrainer.game; return { saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).figure8Dir, mode: g.mode.id, first: g.waypoints[1], dir: g.figure8Dir, A: g.plane.A }; });
+  // 게이트는 평면 경기장 좌표 (세로 = 경기장 비율 A배): 오른쪽 콘(0.7)의 아래쪽(경기장 높이의 78%)
+  const f8Ok = f8.saved === 'R-down' && f8.dir === 'R-down' && f8.mode === 'figure8' && f8.first?.x === 0.7 && Math.abs(f8.first?.y / f8.A - 0.78) < 1e-9;
   console.log(`${f8Ok ? 'PASS' : 'FAIL'} figure 8 direction picked on the game screen (right first, counterclockwise) and previewed (${JSON.stringify(f8)})`);
   if (!f8Ok) failed = true;
 

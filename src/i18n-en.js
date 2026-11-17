@@ -231,7 +231,6 @@ export const EN = {
   '최고 (400px, 퍽이 작게 보일 때)': 'Highest (400px, when the puck looks small)',
   '조작 대상': 'Control with',
   '스틱 블레이드 (퍽 없이 연습)': 'Stick blade (practice without a puck)',
-  '내 퍽 표시 % (100 또렷이 · 0 안 보임 — 헤드업 훈련)': 'My puck visibility % (100 clear · 0 hidden — heads-up training)',
   '내 퍽 투명도 % (0 또렷이 · 100 안 보임 — 감각으로 플레이)': 'My puck transparency % (0 clear · 100 hidden — play by feel)',
   '내 퍽 투명도 {0#}%': 'My puck transparency {0}%',
   '내 퍽 투명도 100% — 화면에 퍽이 보이지 않습니다. 감각으로 영역에 들어가세요!': 'My puck transparency 100% — your puck is hidden on screen. Find the zones by feel!',
@@ -246,8 +245,6 @@ export const EN = {
   '설정을 초기화했습니다': 'Settings reset',
   '기록을 초기화했습니다': 'Records cleared',
   '보정에서 스틱 색을 먼저 지정하세요': 'Set the stick color in Calibrate first',
-  '내 퍽 표시 {0#}%': 'My puck visibility {0}%',
-  '내 퍽 표시 0% — 화면에 퍽이 보이지 않습니다. 감각으로!': 'My puck visibility 0% — your puck is hidden on screen. Play by feel!',
 
   // ---------- 보정 ----------
   '자동 지정(추천)': 'Auto (recommended)',
@@ -560,11 +557,8 @@ export const EN = {
   // ---------- 8자 드리블 방향 ----------
   '왼쪽 먼저': 'Left first',
   '오른쪽 먼저': 'Right first',
-  '위로 돌기': 'Around the top',
-  '아래로 돌기': 'Around the bottom',
   '8자 드리블 방향': 'Figure 8 direction',
   '8자 드리블: 먼저 갈 콘': 'Figure 8: cone to go to first',
-  '8자 드리블: 콘을 도는 방향': 'Figure 8: way around the cone',
 
   // ---------- 정회원 · 가입 코드 ----------
   '운영자': 'Operator',

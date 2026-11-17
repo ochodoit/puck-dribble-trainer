@@ -36,8 +36,11 @@ service cloud.firestore {
       return !('number' in d) || d.number == null || (d.number is int && d.number >= 0 && d.number <= 99);
     }
     // 코스 도전 기록: 평균·가장 빠른 사이클 시간(초)
-    function courseRecord(d) {
-      return d.avg is number && d.avg > 0 && d.avg < 3600 && d.best is number && d.best > 0;
+    // 기록 자랑 글에는 쓸 수 없음 (그 글은 점수 + 나이 조건만). 예시 코스(starter-*)는 글 문서가 없어도 허용
+    function courseRecord(postId, d) {
+      let path = /databases/$(database)/documents/posts/$(postId);
+      return (!exists(path) || get(path).data.type != 'record')
+        && d.avg is number && d.avg > 0 && d.avg < 3600 && d.best is number && d.best > 0;
     }
     // 기록 자랑 도전 기록: 점수 + 나이 조건 (글쓴이와 같거나 어린 선수만, 글쓴이 본인 제외)
     function scoreRecord(postId, uid, d) {
@@ -78,7 +81,7 @@ service cloud.firestore {
       match /records/{uid} {
         allow read: if true;
         allow write: if request.auth != null && request.auth.uid == uid && request.resource.data.uid == uid
-          && (courseRecord(request.resource.data) || scoreRecord(id, uid, request.resource.data));
+          && (courseRecord(id, request.resource.data) || scoreRecord(id, uid, request.resource.data));
       }
       match /cheers/{uid} {
         allow read: if true;

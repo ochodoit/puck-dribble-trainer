@@ -118,6 +118,14 @@
     for (let i = 0; i < 10; i++) { drawScene({ puck: { x: 320, y: 300 } }); r = vision.process(scene, settings); const [u, v] = r.floor.mapping.toUV(r.puck.x, r.puck.y); tracker.update({ u, v }, now); now += 33; }
     game.start(tracker);
     let lastU = null;
+    for (let t = 0; t < 100; t++) { // 훈련 시작 전: 퍽을 가운데에 3초 넘게 둔다
+      drawScene({ puck: { x: 320, y: 300 } });
+      r = vision.process(scene, settings);
+      if (r.puck) { const [u, v] = r.floor.mapping.toUV(r.puck.x, r.puck.y); tracker.update({ u, v }, now); } else tracker.update(null, now);
+      game.update(0.033, tracker, now);
+      now += 33;
+    }
+    check('wide drill starts after the puck sits in the middle for 3 s', game.wide.hold === null && game.elapsed < 0.4, { hold: game.wide.hold, elapsed: game.elapsed, me: game.me });
     for (let t = 0; t < 240; t++) {
       const x = 320 + Math.sin(t / 8) * 230;  // 좌우 왕복 (약 1.65초 주기)
       drawScene({ puck: { x, y: 300 } });
@@ -436,30 +444,54 @@
         const fp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
         let tw = 900000;
         const go = (x, y = 0.5, n = 3) => { fp.pos = { x, y }; for (let i = 0; i < n && w.running; i++) { w.update(0.033, fp, tw); tw += 33; } };
+        const hold = () => go(0.5, 0.5, 95); // 가운데에 3초 넘게: 훈련 시작
         const toStage = (k) => { go(0.5, 0.5, 1); w.elapsed = 60 * k - 0.01; go(0.5, 0.5, 1); };
         w.start(fp);
-        const z = w.zones;
+        const z0 = w.zones;
         check('W1 wide: 3 drills x chosen time, ranked per time', w.limit === 180 && w.mode.timed && rankKey('wide', 60) === 'wide@60' && WIDE_DRILLS.length === 3, w.limit);
+        // 시작 전 대기: 가운데 구역 + 첫 목표(옅게). 3초 계속 둬야 시작, 그동안 시계·점수 멈춤, 벗어나면 처음부터
+        go(0.1, 0.5, 60);
+        const waitOut = { elapsed: w.elapsed, hold: w.wide.hold, reps: w.stats.reps };
+        go(0.5, 0.5, 60); const half = w.wide.hold, halfZone = w.zones[0].progress;
+        go(0.9, 0.5, 1); const reset = w.wide.hold;
+        hold();
+        check('W0 each drill waits for the puck to sit in the middle for 3 s (clock stopped)', z0.length === 2 && z0[0].hold && Math.abs(z0[0].x - 0.5) < 1e-9 && Math.abs(z0[0].w - 0.2) < 1e-9
+          && z0[1].id === 'L' && !z0[1].active && z0[1].next && waitOut.elapsed === 0 && waitOut.hold === 0 && waitOut.reps === 0 && half > 1.9 && half < 2.1 && Math.abs(halfZone - half / 3) < 1e-9
+          && reset === 0 && w.wide.hold === null && w.elapsed > 0 && w.elapsed < 0.2, { z0, waitOut, half, halfZone, reset, hold: w.wide.hold, elapsed: w.elapsed });
+        {
+          // 자동 시작(시작 원에 3초)으로 시작하면 훈련 1은 바로, 훈련 2부터는 가운데 대기
+          const h = new Game(null); h.setMode('wide'); h.playSeconds = 60; h.resetState(); h.start(fp, { handsFree: true });
+          const hz = h.zones.map((q) => [q.id, !!q.hold, !!q.active]).join('|');
+          h.update(0.033, fp, tw); const he = h.elapsed;
+          h.elapsed = 60 - 0.01; h.update(0.033, { ...fp, pos: { x: 0.1, y: 0.5 } }, tw);
+          check('W0 auto-start: drill 1 runs at once, drill 2 waits in the middle', hz === 'L,false,true|R,false,false' && he > 0 && h.wide.stage === 1 && h.wide.hold === 0 && h.zones[0].hold, { hz, he, stage: h.wide.stage, hold: h.wide.hold });
+        }
+        const z = w.zones;
         check('W2 drill 1 end boxes: half the old width, centered top-to-bottom', z.length === 2 && Math.abs(z[0].w - 0.13) < 1e-9 && Math.abs(z[0].x - 0.105) < 1e-9 && Math.abs(z[1].x - 0.895) < 1e-9
           && Math.abs(z[0].y - w.plane.A / 2) < 1e-9 && Math.abs(z[0].h - 0.6 * w.plane.A) < 1e-9 && z[0].active && !z[1].active, z);
         go(0.1); go(0.5); go(0.9); go(0.1); go(0.9, 0.05);
         check('W2 drill 1 alternates left/right ends (outside the band does not count)', w.stats.drills[0] === 3 && w.score === 3, w.stats);
         toStage(1);
+        const e1 = w.elapsed; go(0.1, 0.5, 30);
+        const wait2 = { zones: w.zones.map((q) => [q.id, !!q.hold, !!q.active]).join('|'), stopped: w.elapsed === e1, reps: w.stats.drills[1], stageLeft: w.stageLeft };
+        hold();
         const z2 = w.zones.map((q) => [q.n, q.active]);
         const order2 = [];
         go(laneX(10)); // 틀린 칸: 세지 않음
         const wrong = w.stats.drills[1];
         for (const n of [1, 2, 1, 10, 9, 10]) { order2.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
         check('W3 drill 2 sequence 1,2,1,10,9,10 (lanes 1..10 across the board)', w.wide.stage === 1 && z2.join('|') === '1,true|2,false' && wrong === 0 && order2.join() === '1,2,1,10,9,10'
-          && w.stats.drills[1] === 6 && w.stats.sets[1] === 1 && Math.abs(laneX(1) - 0.05) < 1e-9 && Math.abs(laneX(10) - 0.95) < 1e-9 && Math.abs(w.stageLeft - 60) < 1, { z2, order2, stats: w.stats, stageLeft: w.stageLeft });
+          && w.stats.drills[1] === 6 && w.stats.sets[1] === 1 && Math.abs(laneX(1) - 0.05) < 1e-9 && Math.abs(laneX(10) - 0.95) < 1e-9 && Math.abs(w.stageLeft - 60) < 1
+          && wait2.zones === 'C,true,false|1,false,false' && wait2.stopped && wait2.reps === 0 && Math.abs(wait2.stageLeft - 60) < 0.1, { z2, order2, wait2, stats: w.stats, stageLeft: w.stageLeft });
         toStage(2);
+        hold();
         const order3 = [];
-        for (const n of [1, 2, 1, 5, 6, 5, 10, 9, 10, 1]) { order3.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
-        check('W4 drill 3 sequence 1,2,1,5,6,5,10,9,10 repeats', w.wide.stage === 2 && order3.join() === '1,2,1,5,6,5,10,9,10,1' && w.stats.drills[2] === 10 && w.stats.sets[2] === 1, { order3, stats: w.stats });
+        for (const n of [1, 2, 1, 6, 5, 6, 5, 10, 9, 10, 5, 6, 5, 6, 1]) { order3.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
+        check('W4 drill 3 sequence 1,2,1,6,5,6,5,10,9,10,5,6,5,6 repeats', w.wide.stage === 2 && order3.join() === '1,2,1,6,5,6,5,10,9,10,5,6,5,6,1' && w.stats.drills[2] === 15 && w.stats.sets[2] === 1, { order3, stats: w.stats });
         go(0.5, 0.5, 1); w.elapsed = 180 - 0.01; go(0.5, 0.5, 2);
         const rows = wEnd ? Object.fromEntries(wEnd.items) : {};
-        check('W5 ends after all 3 drills; result per drill', wEnd && wEnd.reason === 'time' && wEnd.score === 19 && wEnd.seconds === 60 && wEnd.rankKey === 'wide@60'
-          && rows['훈련 1 · 좌우 끝'] === 3 && rows['훈련 2 · 양 끝 짧은 터치'] === '6 · 1세트' && rows['훈련 3 · 양 끝과 가운데'] === '10 · 1세트' && !WIDE_DRILLS.some((d) => /\d/.test(d.label)) && rows['게임 시간'] === '1분 × 3', wEnd && wEnd.items);
+        check('W5 ends after all 3 drills; result per drill', wEnd && wEnd.reason === 'time' && wEnd.score === 24 && wEnd.seconds === 60 && wEnd.rankKey === 'wide@60'
+          && rows['훈련 1 · 좌우 끝'] === 3 && rows['훈련 2 · 양 끝 짧은 터치'] === '6 · 1세트' && rows['훈련 3 · 양 끝과 가운데'] === '15 · 1세트' && !WIDE_DRILLS.some((d) => /\d/.test(d.label)) && rows['게임 시간'] === '1분 × 3', wEnd && wEnd.items);
       }
       // 추적을 잃으면 시계도 멈춤
       const g2b = new Game(null); g2b.setMode('arcade'); g2b.start(tp, { handsFree: true });

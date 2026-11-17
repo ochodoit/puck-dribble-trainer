@@ -1,5 +1,5 @@
 // 오버레이 캔버스 렌더링 — 영상 위에 얇은 잉크 선(종이색 헤일로)과 알약 라벨, 포인트 레드
-import { PUCK_R, FLYER_R, WIDE_DRILLS, WIDE_BAND, WIDE_END, GATE_DRAW_R } from './game.js';
+import { PUCK_R, FLYER_R, WIDE_DRILLS, WIDE_BAND, WIDE_END, WIDE_HOLD_W, GATE_DRAW_R } from './game.js';
 import { C, F, rgba, inkStroke, text, pill, sparks, alphaLayer } from './theme.js';
 
 /** 퍽 피하기의 평면 경기장 사각형 (캔버스 px). topInset: 상단 HUD가 가리는 높이 비율 */
@@ -320,15 +320,21 @@ export class Renderer {
     const yc = A / 2, bh = WIDE_BAND * A;
     text(ctx, `DRILL ${stage + 1}/${WIDE_DRILLS.length}`, f.x + W * 0.012, f.y + fs * 0.95, fs * 0.66, { weight: 600, color: C.mute, align: 'left', halo: false });
 
-    // 구역만 그린다: 지금 가야 할 곳 = 진한 빨강(맥박), 그다음 = 옅은 빨강. 대기 중에는 훈련 1의 끝 구역 미리보기
+    // 구역만 그린다: 지금 가야 할 곳 = 진한 빨강(맥박), 그다음 = 옅은 빨강.
+    // 훈련 시작 전 = 가운데 대기 구역(3초 동안 아래에서 위로 차오름). 게임 전에는 훈련 1의 시작 화면 미리보기
     const zones = running ? game.zones : [
-      { x: WIDE_END.x, y: yc, w: WIDE_END.w, h: bh, active: true },
-      { x: 1 - WIDE_END.x, y: yc, w: WIDE_END.w, h: bh, active: false },
+      { x: 0.5, y: yc, w: WIDE_HOLD_W, h: bh, hold: true, progress: 0 },
+      { x: WIDE_END.x, y: yc, w: WIDE_END.w, h: bh, active: false },
     ];
     const pulse = 0.5 + 0.5 * Math.sin(now / 200);
     for (const z of [...zones].sort((a, b) => a.active - b.active)) { // 그다음 구역을 먼저, 지금 구역을 위에
       const [x0, y0] = P(z.x - z.w / 2, z.y - z.h / 2), [x1, y1] = P(z.x + z.w / 2, z.y + z.h / 2);
-      if (z.active) {
+      if (z.hold) {
+        const k = z.progress || 0, fillH = (y1 - y0) * k;
+        ctx.fillStyle = rgba(C.red, 0.1); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        if (k > 0) { ctx.fillStyle = rgba(C.red, 0.78); ctx.fillRect(x0, y1 - fillH, x1 - x0, fillH); }
+        ctx.lineWidth = hair * 2; ctx.strokeStyle = k > 0 ? C.red : rgba(C.red, 0.45 + 0.45 * pulse); ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      } else if (z.active) {
         ctx.fillStyle = rgba(C.red, 0.68 + 0.12 * pulse); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
         ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       } else {
@@ -361,6 +367,7 @@ export class Renderer {
       const min = Math.round(game.playSeconds / 60);
       text(ctx, `시작하면 훈련 3가지를 ${min}분씩 이어서 합니다`, f.x + f.w / 2, f.y + f.h * 0.42, fs, { weight: 600, color: C.inkSoft, halo: true });
       WIDE_DRILLS.forEach((d, i) => text(ctx, d.label, f.x + f.w / 2, f.y + f.h * 0.42 + fs * (1.9 + i * 1.45), fs * 0.85, { weight: 500, color: C.mute, halo: true }));
+      text(ctx, '훈련마다 퍽을 가운데에 3초 두면 시작', f.x + f.w / 2, f.y + f.h * 0.42 + fs * (1.9 + WIDE_DRILLS.length * 1.45 + 0.4), fs * 0.85, { weight: 600, color: C.red, halo: true });
     }
     for (const e of game.effects) {
       if (e.type !== 'pop') continue;

@@ -9,7 +9,7 @@ export const MODES = [
   { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
     desc: '평면 경기장의 네 변에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
   { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 0, timed: true, stages: 3,
-    desc: '3가지 훈련을 고른 시간만큼 이어서: ① 좌우 끝 ② 양 끝 짧은 터치 (1-2-1-10-9-10) ③ 양 끝과 가운데 (1-2-1-5-6-5-10-9-10). 판 왼쪽 끝이 1, 오른쪽 끝이 10' },
+    desc: '3가지 훈련을 고른 시간만큼 이어서: ① 좌우 끝 ② 양 끝 짧은 터치 (1-2-1-10-9-10) ③ 양 끝과 가운데 (1-2-1-6-5-6-5-10-9-10-5-6-5-6). 판 왼쪽 끝이 1, 오른쪽 끝이 10. 훈련마다 퍽을 가운데에 3초 두면 시작' },
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
     desc: '두 콘 사이를 8자로 돌며 게이트 통과. 진한 빨간 원이 다음, 옅은 원이 그다음. 콘을 치면 감점.' },
   { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 20,
@@ -35,8 +35,11 @@ export const rankKey = (modeId, seconds, invisible = false) => {
 export const WIDE_DRILLS = [
   { label: '좌우 끝', seq: null },
   { label: '양 끝 짧은 터치', seq: [1, 2, 1, 10, 9, 10] },
-  { label: '양 끝과 가운데', seq: [1, 2, 1, 5, 6, 5, 10, 9, 10] },
+  { label: '양 끝과 가운데', seq: [1, 2, 1, 6, 5, 6, 5, 10, 9, 10, 5, 6, 5, 6] },
 ];
+/** 훈련마다 시작 전 퍽을 가운데 구역에 이만큼(초) 계속 둬야 시작. 그동안 게임 시계는 멈춤 */
+export const WIDE_HOLD_SEC = 3;
+export const WIDE_HOLD_W = 0.2; // 가운데 대기 구역 폭 (5·6번 칸 두 칸)
 export const WIDE_LANES = 10;
 export const WIDE_BAND = 0.6;   // 구역 높이 (경기장 세로 대비, 위아래 가운데)
 export const WIDE_END = { x: 0.105, w: 0.13 }; // 훈련 1의 끝 구역: 예전(폭 0.26)의 절반 두께, 바깥 끝은 그대로
@@ -145,6 +148,8 @@ export class Game {
       case 'wide':
         this.stats = { reps: 0, drills: WIDE_DRILLS.map(() => 0), sets: WIDE_DRILLS.map(() => 0) };
         this._wideStage(0);
+        // 시작 원에 퍽을 3초 둬서 시작했으면(자동 시작) 이미 준비된 것: 훈련 1은 바로. 버튼으로 시작하면 훈련 1도 가운데 대기부터
+        if (opts.handsFree) { this.wide.hold = null; this._wideZones(); }
         break;
       case 'figure8':
         this.cones = [{ x: 0.3, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }, { x: 0.7, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }];
@@ -188,7 +193,8 @@ export class Game {
 
   /** dt: 초, puck: Tracker, now: ms */
   update(dt, puck, now) {
-    this.elapsed += dt;
+    // 와이드 드리블: 훈련 전 가운데 대기 중에는 게임 시계가 멈춤
+    if (!(this.running && this.wide && this.wide.hold != null)) this.elapsed += dt;
     for (const e of this.effects) e.age = (now - e.t0) / e.dur;
     this.effects = this.effects.filter((e) => e.age < 1);
 
@@ -276,6 +282,21 @@ export class Game {
         if (this.stage !== this.wide.stage) this._wideStage(this.stage); // 고른 시간이 지나면 다음 훈련
         else if (this.wide.A !== this.plane.A) this._wideZones();         // 화면 크기가 바뀌면 구역 높이도
         const w = this.wide;
+        if (w.hold != null) {
+          // 시작 전: 가운데 구역에 3초 계속 두면 시작 (벗어나거나 퍽을 놓치면 처음부터)
+          const c = this.zones.find((zz) => zz.hold);
+          const inside = me && puck.state !== 'lost' && c && this._inZone(me, c);
+          const before = Math.floor(w.hold);
+          w.hold = inside ? w.hold + dt : 0;
+          if (inside && Math.floor(w.hold) > before && w.hold < WIDE_HOLD_SEC) this.sfx?.tick();
+          if (w.hold >= WIDE_HOLD_SEC) {
+            w.hold = null;
+            this._pop(0.5, this.plane.A * 0.5, '시작!', C.red, 'script');
+            this.sfx?.go();
+          }
+          this._wideZones();
+          break;
+        }
         const z = this.zones.find((zz) => zz.active);
         if (me && tracked && z && this._inZone(me, z)) {
           this.stats.reps++; this.stats.drills[w.stage]++; this.score = this.stats.reps;
@@ -458,7 +479,7 @@ export class Game {
   _wideStage(i) {
     const first = !this.wide;
     const d = WIDE_DRILLS[i];
-    this.wide = { stage: i, seq: d.seq, idx: 0 };
+    this.wide = { stage: i, seq: d.seq, idx: 0, hold: 0 }; // hold: 가운데에 둔 시간(초). null 이면 훈련 진행 중
     this._wideZones();
     if (!first) {
       this._pop(0.5, this.plane.A * 0.5, d.label, C.red, 'script'); // 바뀐 훈련 이름만 (숫자 없이)
@@ -471,6 +492,15 @@ export class Game {
     const w = this.wide, A = this.plane.A;
     const y = A / 2, h = WIDE_BAND * A;
     w.A = A;
+    if (w.hold != null) {
+      // 시작 전: 가운데 대기 구역(차오르는 정도 = progress) + 첫 목표를 옅게 미리
+      const first = w.seq
+        ? { id: w.seq[0], n: w.seq[0], x: laneX(w.seq[0]), y, w: 1 / WIDE_LANES, h, active: false, next: true }
+        : { id: 'L', x: WIDE_END.x, y, w: WIDE_END.w, h, active: false, next: true };
+      this.zones = [{ id: 'C', x: 0.5, y, w: WIDE_HOLD_W, h, active: false, hold: true, progress: Math.min(1, w.hold / WIDE_HOLD_SEC) }, first];
+      this.instruction = w.hold > 0 ? '그대로 두세요' : '퍽을 가운데에 3초 두세요';
+      return;
+    }
     if (!w.seq) {
       // 훈련 1: 좌우 끝 구역을 번갈아 (idx 0 = 왼쪽부터)
       this.zones = [

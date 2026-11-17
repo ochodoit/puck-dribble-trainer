@@ -354,7 +354,7 @@ const skipSetup = async (page, touch = false) => {
   if (!guestOk) failed = true;
   await page.click('[data-close="panel-result"]');
   // 운영자 화면 (관리자 별명): 1회용 코드 만들기 -> 목록, 끄기
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ nick: 'test123', pin: '123456', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ nick: 'test123', pin: '123456', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' , stick: 'L' }); });
   await page.click('#btn-settings');
   const adminBtn = await page.isVisible('#btn-settings-admin');
   await page.click('#btn-settings-admin');
@@ -597,10 +597,11 @@ const skipSetup = async (page, touch = false) => {
   await page.click('.auth-tabs .tab[data-tab="register"]');
   await page.fill('#auth-nick', 'Ace'); await page.fill('#auth-pin', '123456'); await page.fill('#auth-code', 'ace1-2345');
   await page.selectOption('#auth-country', 'US'); await page.fill('#auth-team', 'Blades'); await page.fill('#auth-age', '25');
+  await page.click('#auth-stick [data-stick="R"]');
   await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
   await page.waitForSelector('#auth-logged:not(.hidden)'); await tick();
   const who = await page.textContent('#auth-who');
-  ok(/Ace/.test(who) && /USA/.test(who) && /Adult \(age 25\)/.test(who) && /Member No\.0001/.test(who), 'profile line is shown in English', who.trim());
+  ok(/Ace/.test(who) && /USA/.test(who) && /Adult \(age 25\)/.test(who) && /Member No\.0001/.test(who) && /Right/.test(who), 'profile line is shown in English (incl. stick)', who.trim());
   ok((await leftover()).length === 0, 'no Korean left on the English first screen', JSON.stringify(await leftover()));
   await page.click('#btn-camera');
   await page.waitForFunction(() => window.__puckTrainer.app.started && window.__puckTrainer.app.lastVision, null, { timeout: 15000 });
@@ -616,13 +617,13 @@ const skipSetup = async (page, touch = false) => {
   await tick(300);
   // 모든 패널을 열어 남은 한국어가 없는지 확인
   const left = [];
-  for (const [btn, panel] of [['#btn-mode', 'panel-mode'], ['#btn-settings', 'panel-settings'], ['#btn-calib', 'panel-calib'], ['#btn-rank', 'panel-rank']]) {
-    await page.click(btn); await page.waitForSelector(`#${panel}:not(.hidden)`); await tick(150);
+  for (const [btn, panel] of [['#btn-mode', 'panel-mode'], ['#btn-settings', 'panel-settings'], ['#btn-calib', 'panel-calib'], ['#btn-rank', 'panel-rank'], ['#btn-me', 'panel-me']]) {
+    await page.click(btn); await page.waitForSelector(`#${panel}:not(.hidden)`); await tick(panel === 'panel-me' ? 600 : 150); // 내 정보는 기록·순위를 불러온 뒤
     left.push(...(await leftover()));
     await page.click(`[data-close="${panel}"]`);
   }
   const hud = await page.evaluate(() => ({ mode: document.querySelector('#hud-mode').textContent, start: document.querySelector('#btn-start').textContent, ctl: [...document.querySelectorAll('#controls .btn')].map((b) => b.textContent).join('|') }));
-  ok(left.length === 0 && /^Arcade/.test(hud.mode) && hud.start === 'Start' && hud.ctl === 'Mode|Area|Calibrate|Settings|Ranking|Start', 'stage, HUD and every panel are in English', JSON.stringify({ left, hud }));
+  ok(left.length === 0 && /^Arcade/.test(hud.mode) && hud.start === 'Start' && hud.ctl === 'Mode|Area|Calibrate|Settings|Ranking|My info|Start', 'stage, HUD and every panel are in English', JSON.stringify({ left, hud }));
 
   // ---- 커뮤니티: 9번 칸 ----
   await page.click('#btn-mode'); await page.waitForSelector('#panel-mode:not(.hidden)');
@@ -662,7 +663,7 @@ const skipSetup = async (page, touch = false) => {
   const resel = await page.evaluate(() => document.querySelectorAll('#comm-detail .detail-board li').length);
   ok(unsel.sel === 0 && /Tap a post to see/.test(unsel.empty || '') && resel === 1, 'tapping a post toggles its top 5 panel', JSON.stringify({ unsel, resel }));
   // 다른 선수가 같은 코스로 기록을 갈아치움
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Bee', pin: '654321', country: 'CA', team: 'Hive', age: 12, code: 'TEAMBETA' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Bee', pin: '654321', country: 'CA', team: 'Hive', age: 12, code: 'TEAMBETA' , stick: 'L' }); });
   await page.click('#comm-list .post[data-id="starter-wide"] [data-act="practice"]'); await tick(200);
   const holder = await page.evaluate(() => window.__puckTrainer.app.challenge.holder);
   const run2 = await finish(Array(9).fill(1));
@@ -756,11 +757,11 @@ const skipSetup = async (page, touch = false) => {
     && /Brag updated with the new record/.test(replaced.toast) && replaced.posts.length === 1 && replaced.posts[0].id === bragId && replaced.posts[0].score === 1500 && replaced.posts[0].cheers === 0 && replaced.first === 'Even better',
   'only one brag per mode: posting again replaces it', JSON.stringify({ own, replPv, replaced }));
   // 나이 규칙: 글쓴이(12세)보다 많은 선수는 플레이만, 같거나 어린 선수만 도전 기록에 오른다
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Old', pin: '111111', country: 'US', team: 'Elders', age: 30, code: 'TEAMBETA' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Old', pin: '111111', country: 'US', team: 'Elders', age: 30, code: 'TEAMBETA' , stick: 'L' }); });
   await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
   const oldToast = await page.textContent('#toast');
   const oldRun = await playArcade(2000);
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Kid', pin: '222222', country: 'KR', team: 'Cubs', age: 10, code: 'TEAMBETA' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Kid', pin: '222222', country: 'KR', team: 'Cubs', age: 10, code: 'TEAMBETA' , stick: 'L' }); });
   await page.click('#btn-share-2'); await page.waitForSelector('#panel-community:not(.hidden)'); await tick(200);
   await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
   const kidRun = await playArcade(900);

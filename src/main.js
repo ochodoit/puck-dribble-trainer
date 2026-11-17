@@ -253,7 +253,7 @@ function refreshAuthUI() {
   els.authLogged.classList.toggle('hidden', !u);
   els.authForm.classList.toggle('hidden', !!u);
   if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} <span class="member-badge">${esc(memberBadge(u))}</span>${u.stick ? ' · ' + stickLabel(u.stick) : ''} · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)${betaChipHtml()}`;
-  $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup}${u.stick ? ', ' + tr(stickLabel(u.stick)) : ''})` : '로그인하지 않음 (랭킹 미등록)';
+  $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup})${u.stick ? ' · ' + stickLabel(u.stick) : ''}` : '로그인하지 않음 (랭킹 미등록)';
   $('#btn-settings-logout').classList.toggle('hidden', !u);
   $('#btn-settings-login').classList.toggle('hidden', !!u || !app.account); // 게스트로 플레이 중에도 설정에서 로그인
   if (u && !$('#panel-login').classList.contains('hidden')) close($('#panel-login'));

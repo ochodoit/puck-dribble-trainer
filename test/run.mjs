@@ -75,6 +75,7 @@ const skipSetup = async (page, touch = false) => {
   const fillReg = async (pin = '123456') => {
     await page.fill('#auth-nick', '번개손'); await page.fill('#auth-pin', pin);
     await page.selectOption('#auth-country', 'KR'); await page.fill('#auth-team', '서울 유스'); await page.fill('#auth-age', '11'); await page.fill('#auth-number', '87');
+    await page.click('#auth-stick [data-stick="L"]');
   };
   await page.click('.auth-tabs .tab[data-tab="register"]');
   await fillReg();
@@ -290,15 +291,15 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${washOk ? 'PASS' : 'FAIL'} background transparency slider (60% -> wash ${wash.a})`);
   if (!washOk) failed = true;
 
-  // 내 퍽 표시 슬라이더 (10 단위, 0~100) -> 아케이드·평면 렌더러에 반영되고 저장됨
+  // 내 퍽 투명도 슬라이더 (10 단위, 0~100, 0 = 또렷이) -> 아케이드·평면 렌더러에 반영되고 저장됨
   await page.click('#btn-settings');
-  const sliderAttr = await page.evaluate(() => { const el = document.querySelector('#set-puckOpacity'); return { min: el.min, max: el.max, step: el.step, value: el.value }; });
-  await page.evaluate(() => { const el = document.querySelector('#set-puckOpacity'); el.value = '30'; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  const po = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.puckAlpha, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).puckOpacity, out: document.querySelector('#out-puckOpacity').value }));
-  await page.evaluate(() => { const el = document.querySelector('#set-puckOpacity'); el.value = '100'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const sliderAttr = await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); return { min: el.min, max: el.max, step: el.step, value: el.value }; });
+  await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '70'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const po = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.puckAlpha, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).puckTransparency, out: document.querySelector('#out-puckTransparency').value }));
+  await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '0'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.click('[data-close="panel-settings"]');
-  const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '10' && sliderAttr.value === '100' && Math.abs(po.a - 0.3) < 1e-9 && po.saved === 30 && po.out === '30';
-  console.log(`${poOk ? 'PASS' : 'FAIL'} puck opacity slider 0..100 step 10 (30% -> alpha ${po.a})`);
+  const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '10' && sliderAttr.value === '0' && Math.abs(po.a - 0.3) < 1e-9 && po.saved === 70 && po.out === '70';
+  console.log(`${poOk ? 'PASS' : 'FAIL'} puck transparency slider 0..100 step 10 (70% -> alpha ${po.a})`);
   if (!poOk) failed = true;
 
   // 노트북 웹캠 흐름: 게임 영역 전체 화면 + 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경
@@ -409,13 +410,14 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${lapsedOk ? 'PASS' : 'FAIL'} beta ended without feedback: score not ranked, notice + Instagram DM, profile says beta ended (${JSON.stringify({ ...lapsed, text: lapsed.text.slice(0, 40), chip3 })})`);
   if (!lapsedOk) failed = true;
   await page.evaluate(() => { const k = 'puck-trainer.site.v1'; const c = JSON.parse(localStorage.getItem(k)); delete c.betaEndsAt; localStorage.setItem(k, JSON.stringify(c)); });
-  // 8자 드리블 방향: 모드 창 위에서 고르면 저장되고, 고른 방향의 코스가 시작 전에 미리 보인다
+  // 8자 드리블 방향: 게임 화면에서 고르면(오른쪽 먼저 · 반시계 = 오른쪽 콘을 아래로) 저장되고, 고른 방향의 코스가 미리 보인다
   await page.click('#btn-mode');
-  await page.click('#f8-side [data-side="R"]'); await page.click('#f8-turn [data-turn="down"]');
   await page.click('#mode-list > :nth-child(4)'); // 8자 드리블
+  await page.waitForSelector('#f8-dir:not(.hidden)');
+  await page.click('#f8-side [data-side="R"]'); await page.click('#f8-rot [data-rot="ccw"]');
   const f8 = await page.evaluate(() => { const g = window.__puckTrainer.game; return { saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).figure8Dir, mode: g.mode.id, first: g.waypoints[1], dir: g.figure8Dir }; });
   const f8Ok = f8.saved === 'R-down' && f8.dir === 'R-down' && f8.mode === 'figure8' && f8.first?.x === 0.7 && f8.first?.y === 0.78;
-  console.log(`${f8Ok ? 'PASS' : 'FAIL'} figure 8 direction picked in the mode window (right first, around the bottom) and previewed (${JSON.stringify(f8)})`);
+  console.log(`${f8Ok ? 'PASS' : 'FAIL'} figure 8 direction picked on the game screen (right first, counterclockwise) and previewed (${JSON.stringify(f8)})`);
   if (!f8Ok) failed = true;
 
   // 아케이드 모드: 시작 -> 카운트다운 화면

@@ -72,6 +72,17 @@
       </header>
 
       <button id="btn-flip" class="btn-flip" aria-label="전면/후면 카메라 전환" title="카메라 전환"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 0 1 14.5-3.5M20 4v4h-4M20 15a8 8 0 0 1-14.5 3.5M4 20v-4h4"/></svg></button>
+      <!-- 8자 드리블 방향: 게임 화면에서 바로 (게임 중에도 바꿀 수 있음) -->
+      <div id="f8-dir" class="f8-dir hidden" role="group" aria-label="8자 드리블 방향">
+        <div id="f8-side" class="seg" role="radiogroup" aria-label="8자 드리블: 먼저 갈 콘">
+          <button type="button" role="radio" data-side="L">왼쪽 먼저</button>
+          <button type="button" role="radio" data-side="R">오른쪽 먼저</button>
+        </div>
+        <div id="f8-rot" class="seg" role="radiogroup" aria-label="8자 드리블: 도는 방향">
+          <button type="button" role="radio" data-rot="cw">↻ 시계방향</button>
+          <button type="button" role="radio" data-rot="ccw">↺ 반시계방향</button>
+        </div>
+      </div>
       <button id="btn-replace-puck" class="btn btn-primary btn-replace hidden">이 물체로 퍽 교체 (3초)</button>
 
       <!-- 영역 편집 바 -->
@@ -105,6 +116,7 @@
         <button id="btn-calib" class="btn">보정</button>
         <button id="btn-settings" class="btn">설정</button>
         <button id="btn-rank" class="btn">랭킹</button>
+        <button id="btn-me" class="btn">내 정보</button>
         <button id="btn-start" class="btn btn-primary">시작</button>
       </nav>
     </section>
@@ -130,6 +142,7 @@
           <div id="auth-logged" class="auth-logged hidden">
             <span id="auth-who"></span>
             <button type="button" id="btn-admin" class="btn btn-ghost hidden">운영자</button>
+            <button type="button" id="btn-me-splash" class="btn btn-ghost">내 정보</button>
             <button type="button" id="btn-logout" class="btn btn-ghost">로그아웃</button>
           </div>
           <form id="auth-form" autocomplete="off">
@@ -145,6 +158,12 @@
               <label class="reg-only hidden">팀 이름<input id="auth-team" type="text" maxlength="20" placeholder="예: 서울 유스" /></label>
               <label class="reg-only hidden">나이<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="예: 11" /></label>
               <label class="reg-only hidden">등번호 (선택)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="예: 87" /></label>
+              <div class="field reg-only hidden"><span id="auth-stick-label">스틱</span>
+                <div id="auth-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="auth-stick-label">
+                  <button type="button" role="radio" aria-checked="false" data-stick="L">레프트 (L)</button>
+                  <button type="button" role="radio" aria-checked="false" data-stick="R">라이트 (R)</button>
+                </div>
+              </div>
             </div>
             <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요. 별명은 실명 대신 쓰세요 (랭킹에 공개됩니다).</p>
             <p id="auth-error" class="error hidden"></p>
@@ -191,17 +210,6 @@
             <button type="button" data-min="5">5분</button>
           </div>
           <p class="muted">게임 시간 · 랭킹은 시간별로 따로</p>
-        </div>
-        <div class="time-row f8-row">
-          <div id="f8-side" class="seg" role="group" aria-label="8자 드리블: 먼저 갈 콘">
-            <button type="button" data-side="L">왼쪽 먼저</button>
-            <button type="button" data-side="R">오른쪽 먼저</button>
-          </div>
-          <div id="f8-turn" class="seg" role="group" aria-label="8자 드리블: 콘을 도는 방향">
-            <button type="button" data-turn="up">위로 돌기</button>
-            <button type="button" data-turn="down">아래로 돌기</button>
-          </div>
-          <p class="muted">8자 드리블 방향</p>
         </div>
         <p id="mode-pick-hint" class="muted pick-hint">퍽을 카드 가운데에 2초 두면 선택</p>
         <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
@@ -266,8 +274,8 @@
               <option value="stick">스틱 블레이드 (퍽 없이 연습)</option>
             </select>
           </label>
-          <label>내 퍽 표시 % (100 또렷이 · 0 안 보임 — 헤드업 훈련) <output id="out-puckOpacity"></output>
-            <input type="range" id="set-puckOpacity" min="0" max="100" step="10" />
+          <label>내 퍽 투명도 % (0 또렷이 · 100 안 보임 — 감각으로 플레이) <output id="out-puckTransparency"></output>
+            <input type="range" id="set-puckTransparency" min="0" max="100" step="10" />
           </label>
           <label>배경 투명도 % (아케이드·퍽 피하기에서 카메라가 비치는 정도) <output id="out-bgTransparency"></output>
             <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
@@ -285,6 +293,7 @@
         </div>
         <div class="row">
           <span id="settings-account" class="muted" style="align-self:center"></span>
+          <button id="btn-settings-login" class="btn btn-primary hidden">로그인</button>
           <button id="btn-settings-admin" class="btn btn-ghost hidden">운영자</button>
           <button id="btn-settings-logout" class="btn btn-ghost hidden">로그아웃</button>
         </div>
@@ -364,6 +373,65 @@
       </div>
     </div>
 
+    <!-- 내 정보: 프로필·회원 등급, 출석, 누적 훈련, 게임별 기록, 커뮤니티 활동 -->
+    <div id="panel-me" class="panel modal hidden">
+      <div class="modal-card me-card">
+        <header><h2>My Info</h2><button class="btn btn-ghost btn-close" data-close="panel-me">닫기</button></header>
+        <div id="me-guest" class="hidden">
+          <p class="muted">로그인하면 출석과 게임 기록이 계정에 쌓입니다.</p>
+          <button type="button" id="me-login" class="btn btn-primary">로그인</button>
+        </div>
+        <div id="me-body">
+          <section class="me-sec">
+            <div id="me-card" class="me-profile"></div>
+            <button type="button" id="me-edit-toggle" class="btn btn-ghost">프로필 수정</button>
+            <form id="me-edit" class="me-edit hidden" autocomplete="off">
+              <div class="adm-row">
+                <label>국가<select id="me-country"></select></label>
+                <label>팀 이름<input id="me-team" type="text" maxlength="20" /></label>
+                <label>나이<input id="me-age" type="number" inputmode="numeric" min="3" max="99" /></label>
+                <label>등번호 (선택)<input id="me-number" type="number" inputmode="numeric" min="0" max="99" /></label>
+              </div>
+              <div class="me-edit-stick"><span id="me-stick-label">스틱</span>
+                <div id="me-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="me-stick-label">
+                  <button type="button" role="radio" aria-checked="false" data-stick="L">레프트 (L)</button>
+                  <button type="button" role="radio" aria-checked="false" data-stick="R">라이트 (R)</button>
+                </div>
+              </div>
+              <p id="me-edit-msg" class="error hidden"></p>
+              <div class="row"><button type="submit" id="me-edit-save" class="btn btn-primary">저장</button><button type="button" id="me-edit-cancel" class="btn btn-ghost">취소</button></div>
+            </form>
+          </section>
+          <section class="me-sec">
+            <h3>출석</h3>
+            <div id="me-att-sum" class="me-stats"></div>
+            <div class="me-cal-nav"><button type="button" id="me-prev" class="btn btn-ghost" aria-label="이전 달">‹</button><b id="me-month"></b><button type="button" id="me-next" class="btn btn-ghost" aria-label="다음 달">›</button></div>
+            <div id="me-cal" class="me-cal"></div>
+          </section>
+          <section class="me-sec">
+            <h3>누적 훈련</h3>
+            <div id="me-totals" class="me-stats"></div>
+          </section>
+          <section class="me-sec">
+            <h3>게임별 기록</h3>
+            <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>게임</th><th>최고</th><th>플레이</th><th>내 순위</th><th>최근 10판</th></tr></thead><tbody id="me-scores"></tbody></table></div>
+          </section>
+          <section class="me-sec">
+            <h3>커뮤니티 활동</h3>
+            <div id="me-comm"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- 로그인: 게임 중(게스트)에 설정에서 연다. 첫 화면의 로그인 카드를 잠시 이 창으로 옮겨 쓴다 -->
+    <div id="panel-login" class="panel modal hidden">
+      <div class="modal-card login-card">
+        <header><h2>Login</h2><button class="btn btn-ghost btn-close" data-close="panel-login">닫기</button></header>
+        <div id="login-slot"></div>
+      </div>
+    </div>
+
     <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견 -->
     <div id="panel-admin" class="panel modal hidden">
       <div class="modal-card admin">
@@ -383,6 +451,7 @@
             <label>새 비밀번호 확인<input id="adm-pw-new2" type="password" maxlength="64" autocomplete="new-password" /></label>
             <button type="button" id="adm-pw-save" class="btn">비밀번호 바꾸기</button>
           </div>
+          <p id="adm-pw-msg" class="ok-msg hidden" role="status"></p>
         </section>
         <section class="adm-sec">
           <h3>1회용 코드</h3>

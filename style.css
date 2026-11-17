@@ -550,3 +550,65 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .fb-item header span, .fb-item header time { font-size: 11.5px; color: var(--mute); }
 .fb-item p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fb-item em { display: block; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--red); }
+
+/* ---------- 회원가입: 스틱 (레프트·라이트) ---------- */
+.auth-grid .field { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }
+.stick-seg { align-self: flex-start; }
+.stick-seg button { white-space: nowrap; }
+
+/* ---------- 8자 드리블 방향: 게임 화면 왼쪽 위 (게임 중에도 보임) ---------- */
+.f8-dir { position: absolute; left: calc(var(--safe-left) + 14px); top: calc(var(--safe-top) + 84px); z-index: 5; display: flex; gap: 8px; flex-wrap: wrap; max-width: calc(100% - 90px); }
+.f8-dir .seg { background: rgba(244, 241, 234, 0.92); }
+.f8-dir .seg button { padding: 6px 14px; font-size: 13px; min-height: 36px; white-space: nowrap; }
+@media (max-width: 640px) { .f8-dir { top: calc(var(--safe-top) + 68px); } .f8-dir .seg button { padding: 5px 10px; font-size: 12px; } }
+
+/* ---------- 운영자: 비밀번호 결과, 삭제 버튼 ---------- */
+.ok-msg { margin: 10px 0 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ok-msg::before { content: "✓ "; }
+.ok-msg.bad { color: var(--red); }
+.ok-msg.bad::before { content: ""; }
+.btn-del { color: var(--red); }
+.btn-del:hover { background: var(--red); color: var(--paper); }
+.fb-item header .btn-del { margin-left: auto; min-height: 30px; padding: 3px 12px; font-size: 12.5px; }
+
+/* ---------- 게임 중 로그인 창 ---------- */
+.modal-card.login-card { width: min(640px, 100%); }
+#login-slot .auth-card { margin: 0; width: 100%; }
+
+/* 퍽 투명도 + 마우스 모드: 플레이 중에는 커서도 숨김 (커서가 곧 퍽 위치) */
+#app.hide-cursor #view, #app.hide-cursor #view * { cursor: none !important; }
+
+/* ---------- 내 정보 ---------- */
+.modal-card.me-card { width: min(900px, 100%); }
+.me-sec { padding: 12px 0 16px; border-top: 1px solid rgba(22, 22, 22, 0.18); }
+.me-sec:first-of-type { border-top: 0; padding-top: 0; }
+.me-sec h3 { font-size: 20px; margin-bottom: 8px; }
+.me-sec h4 { font-size: 13px; letter-spacing: 0.04em; margin: 10px 0 4px; color: var(--ink-soft); }
+.me-profile .me-id { font-size: 20px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.me-facts { margin: 4px 0 0; font-size: 13.5px; }
+#me-edit-toggle { margin-top: 10px; }
+.me-edit { margin-top: 10px; display: grid; gap: 10px; }
+.me-edit select { font-size: 15px; padding: 9px 12px; border-radius: 12px; border: var(--line) solid var(--ink); background: var(--paper); color: var(--ink); }
+.me-edit-stick { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }
+.me-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.me-stat { border: 1px solid rgba(22, 22, 22, 0.25); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.me-stat b { font-family: var(--display); font-weight: 900; font-size: 24px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.me-stat span { font-size: 11.5px; color: var(--ink-soft); }
+.me-cal-nav { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0 6px; }
+.me-cal-nav .btn { min-height: 34px; padding: 4px 14px; }
+.me-cal table { width: 100%; max-width: 420px; margin: 0 auto; border-collapse: separate; border-spacing: 4px; table-layout: fixed; }
+.me-cal th { font-size: 11px; color: var(--mute); font-weight: 600; }
+.me-cal td { text-align: center; height: 34px; border-radius: 10px; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.me-cal td.on { color: var(--paper); font-weight: 700; }
+.me-cal td.lv1 { background: rgba(214, 48, 39, 0.45); }
+.me-cal td.lv2 { background: rgba(214, 48, 39, 0.7); }
+.me-cal td.lv3 { background: var(--red); }
+.me-cal td.on:not(.lv1):not(.lv2):not(.lv3) { background: rgba(214, 48, 39, 0.3); }
+.me-cal td.today { box-shadow: inset 0 0 0 2px var(--ink); }
+.me-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.me-table .me-rank { font-size: 12.5px; }
+.spark { width: 120px; height: 28px; display: block; }
+.spark polyline { fill: none; stroke: var(--red); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.spark circle { fill: var(--red); }
+.me-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.me-list .tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--red); }

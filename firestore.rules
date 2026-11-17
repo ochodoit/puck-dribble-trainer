@@ -48,6 +48,7 @@ service cloud.firestore {
         && d.team is string && d.team.size() <= 20
         && d.age is int && d.age >= 3 && d.age <= 99
         && (!('country' in d) || (d.country is string && d.country.size() <= 4))
+        && (!('stick' in d) || d.stick in ['L', 'R'])
         && validNumber(d);
     }
     // 별명: 2~12자 (글자·숫자·_-. 와 가운데 띄어쓰기), 소문자 키가 맞고, 운영자로 보일 이름은 안 됨
@@ -133,13 +134,13 @@ service cloud.firestore {
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
       allow create: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt'])
+        && request.resource.data.keys().hasOnly(['nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt', 'stick'])
         && validProfile(request.resource.data) && validNick(request.resource.data)
         && request.resource.data.ageGroup == ageGroupFor(request.resource.data.age)
         && request.resource.data.code is string && joinOk(request.resource.data, uid);
       // 본인: 등번호·국가·팀·나이만 고칠 수 있다 (별명·가입 정보·회원 번호·정회원 유지는 못 바꿈)
       allow update: if request.auth != null && request.auth.uid == uid && validProfile(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup', 'stick'])
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age', 'ageGroup'])
           || request.resource.data.ageGroup == ageGroupFor(request.resource.data.age));
       // 운영자: 기존 가입자 정리 (회원 번호·베타 표시), 의견을 못 보낸 베타 멤버도 정회원 유지(kept)
@@ -157,6 +158,17 @@ service cloud.firestore {
         && (d.good.size() > 0 || d.fix.size() > 0)
         && d.updatedAt == request.time;
     }
+    // 내 정보: 출석·최근 기록·누적 훈련 (activity.js). 본인만 읽고 쓰며 운영자는 지울 수 있다
+    match /activity/{uid} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'days', 'totals', 'recent', 'updatedAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.days is map && request.resource.data.days.size() <= 3700
+        && request.resource.data.totals is map && request.resource.data.recent is map && request.resource.data.recent.size() <= 40
+        && request.resource.data.updatedAt is number;
+      allow delete: if isAdmin();
+    }
     match /feedback/{uid} {
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
@@ -172,6 +184,7 @@ service cloud.firestore {
       allow create: if joiningNow()
         && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.nickLower == nick;
+      allow delete: if isAdmin(); // 운영자가 베타 멤버를 지우면 별명도 다시 쓸 수 있게
     }
 
     // ---- 커뮤니티 ----

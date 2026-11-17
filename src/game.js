@@ -1,5 +1,6 @@
 // 게임/트레이닝 로직. 좌표는 바닥 정규화 좌표 (u: 0..1 가로, v: 0..1 세로)
 import { Arcade } from './arcade.js';
+import { clockNow } from './clock.js';
 import { C } from './theme.js';
 
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
@@ -35,11 +36,11 @@ export const rankKey = (modeId, seconds, invisible = false) => {
 export const WIDE_DRILLS = [
   { label: '좌우 끝', seq: null },
   { label: '양 끝 짧은 터치', seq: [1, 2, 1, 10, 9, 10] },
-  { label: '양 끝과 가운데', seq: [1, 2, 1, 6, 5, 6, 5, 10, 9, 10, 5, 6, 5, 6] },
+  { label: '양 끝과 가운데', seq: [1, 2, 1, 6, 5, 10, 9, 10, 5, 6] },
 ];
 /** 훈련마다 시작 전 퍽을 가운데 구역에 이만큼(초) 계속 둬야 시작. 그동안 게임 시계는 멈춤 */
 export const WIDE_HOLD_SEC = 3;
-export const WIDE_HOLD_W = 0.2; // 가운데 대기 구역 폭 (5·6번 칸 두 칸)
+export const WIDE_HOLD_R = 0.06; // 가운데 대기 동그라미 반지름 (경기장 가로 대비). 판정은 조금 넉넉하게 1.25배
 export const WIDE_LANES = 10;
 export const WIDE_BAND = 0.6;   // 구역 높이 (경기장 세로 대비, 위아래 가운데)
 export const WIDE_END = { x: 0.105, w: 0.13 }; // 훈련 1의 끝 구역: 예전(폭 0.26)의 절반 두께, 바깥 끝은 그대로
@@ -54,10 +55,12 @@ const TARGET_HIT_R = 0.026;       // 반응 타겟 판정 반경 (그린 원보�
 const REACT_APPROACH = 0.4;       // 타겟 쪽으로 이만큼(폭/초) 빠르게 다가가기 시작하면 '반응'
 const WAYPOINT_R = 0.0225;        // 8자 게이트 판정 반경 (그린 원보다 조금 넉넉하게)
 export const GATE_DRAW_R = 0.01875; // 8자 게이트 그린 원 반지름 (예전의 절반)
+export const F8_HOLD_R = 0.055;     // 8자 시작 대기 원 반지름 (가운데). 판정은 1.25배
+export const F8_HOLD_SEC = 3;       // 가운데 원에 퍽을 둔 채로 3초(3·2·1을 세며 원이 차오름) -> 시작. 그동안 게임 시계는 멈춤
 const F8_CONES = [0.3, 0.7];       // 두 콘의 가로 위치 (세로는 가운데)
 
 /** 반응 타겟 하나 (무작위 자리, 판정 반경은 그린 원보다 조금 넉넉) */
-const newTarget = () => ({ x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_DRAW_R, hitR: TARGET_HIT_R, born: performance.now(), lastD: null, lastAt: 0, approachN: 0, approachAt: 0 });
+const newTarget = () => ({ x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_DRAW_R, hitR: TARGET_HIT_R, born: clockNow(), lastD: null, lastAt: 0, approachN: 0, approachAt: 0 });
 
 /** 8자 방향: 가운데에서 어느 콘으로 먼저 가는지(L/R) × 콘을 위·아래 어느 쪽부터 도는지(up/down) */
 export const FIGURE8_DIRS = ['L-up', 'L-down', 'R-up', 'R-down'];
@@ -147,6 +150,7 @@ export class Game {
     this.lastTickSec = -1;
     this._puckTouchesBase = 0;
     this._f8Prev = null;
+    this.f8Hold = null; // 8자 시작 대기 {t: 가운데 원에 퍽을 둔 시간(초)}. null 이면 진행 중
     if (this.mode?.id === 'figure8') this._figure8Course(); // 시작 전에도 코스와 첫 방향(점선)을 미리 보여 준다
   }
 
@@ -154,6 +158,40 @@ export class Game {
     this.cones = F8_CONES.map((x) => ({ x, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }));
     this.waypoints = figure8Waypoints(this.figure8Dir);
     this.wpIndex = 0;
+  }
+
+  /** 8자 방향 바꾸기 (게임 중에도). 게이트를 새 방향으로 다시 놓고 가운데 게이트부터 — 점수·바퀴 수·시간은 그대로 */
+  setFigure8Dir(dir) {
+    this.figure8Dir = FIGURE8_DIRS.includes(dir) ? dir : 'L-up';
+    if (this.mode?.id !== 'figure8') return;
+    this._figure8Course();
+    this._f8Prev = null;
+    // 게임 중에 바꾸면 시계를 멈추고, 다시 가운데 원 3초 -> 3·2·1 로 이어서 (점수·바퀴 수·남은 시간은 그대로)
+    if (this.running) { this.f8Hold = { t: 0 }; this._f8HoldText(); }
+  }
+
+  /** 8자 시작 대기 한 프레임: 가운데 원에 퍽을 둔 채로 3·2·1 (벗어나면 처음부터) -> 다 세면 바로 시작 */
+  _f8HoldStep(dt, pp, puck) {
+    const h = this.f8Hold;
+    const inside = pp && puck.state !== 'lost' && Math.hypot(pp.x - 0.5, pp.y - 0.5) < F8_HOLD_R * 1.25;
+    const before = h.t;
+    h.t = inside ? h.t + dt : 0;
+    if (inside && before === 0) this.sfx?.tick();                                        // 3
+    else if (inside && Math.floor(h.t) > Math.floor(before) && h.t < F8_HOLD_SEC) this.sfx?.tick(); // 2, 1
+    if (h.t >= F8_HOLD_SEC) {
+      this.f8Hold = null; this._f8Prev = null; this.wpIndex = 0;
+      this._pop(0.5, 0.5, '시작!', C.red, 'script');
+      this.sfx?.go();
+      this.instruction = '진한 빨간 원으로 · 옅은 원이 그다음';
+      return;
+    }
+    this._f8HoldText();
+  }
+
+  _f8HoldText() {
+    const h = this.f8Hold;
+    if (!h) return;
+    this.instruction = h.t > 0 ? `그대로 두세요 · ${Math.ceil(F8_HOLD_SEC - h.t)}` : '퍽을 가운데 원에 3초 두세요';
   }
 
   setMode(id) {
@@ -165,7 +203,7 @@ export class Game {
     this.resetState();
     this.tracker = puck;
     this.running = true;
-    this.startedAt = performance.now();
+    this.startedAt = clockNow();
     const d = DIFF[this.difficulty] || DIFF.normal;
     const p = puck?.pos || { x: 0.5, y: 0.5 };
 
@@ -190,6 +228,9 @@ export class Game {
         this._figure8Course();
         this.stats = { laps: 0, gates: 0, hits: 0 };
         this.instruction = '진한 빨간 원으로 · 옅은 원이 그다음';
+        // 시작 원에서 이미 3·2·1을 셌으면(자동 시작) 바로 시작. 버튼으로 시작하면 가운데 원에 3초부터
+        this.f8Hold = opts.handsFree ? null : { t: 0 };
+        this._f8HoldText();
         break;
       case 'quick':
         this.zones = [{ id: 'C', x: 0.5, y: 0.5, w: 0.34, h: 0.5, active: true }];
@@ -224,7 +265,7 @@ export class Game {
   /** dt: 초, puck: Tracker, now: ms */
   update(dt, puck, now) {
     // 와이드 드리블: 훈련 전 가운데 대기 중에는 게임 시계가 멈춤
-    if (!(this.running && this.wide && this.wide.hold != null)) this.elapsed += dt;
+    if (!(this.running && ((this.wide && this.wide.hold != null) || this.f8Hold))) this.elapsed += dt;
     for (const e of this.effects) e.age = (now - e.t0) / e.dur;
     this.effects = this.effects.filter((e) => e.age < 1);
 
@@ -315,7 +356,7 @@ export class Game {
         if (w.hold != null) {
           // 시작 전: 가운데 구역에 3초 계속 두면 시작 (벗어나거나 퍽을 놓치면 처음부터)
           const c = this.zones.find((zz) => zz.hold);
-          const inside = me && puck.state !== 'lost' && c && this._inZone(me, c);
+          const inside = me && puck.state !== 'lost' && c && Math.hypot(me.x - c.x, me.y - c.y) < c.r * 1.25;
           const before = Math.floor(w.hold);
           w.hold = inside ? w.hold + dt : 0;
           if (inside && Math.floor(w.hold) > before && w.hold < WIDE_HOLD_SEC) this.sfx?.tick();
@@ -344,6 +385,7 @@ export class Game {
         break;
       }
       case 'figure8': {
+        if (this.f8Hold) { this._f8HoldStep(dt, pp, puck); break; }
         if (pp && tracked) {
           const wp = this.waypoints[this.wpIndex];
           const prev = this._f8Prev && dist(this._f8Prev, pp) < 0.15 ? this._f8Prev : pp; // 추적이 튄 큰 점프는 선분으로 보지 않음
@@ -532,8 +574,8 @@ export class Game {
       const first = w.seq
         ? { id: w.seq[0], n: w.seq[0], x: laneX(w.seq[0]), y, w: 1 / WIDE_LANES, h, active: false, next: true }
         : { id: 'L', x: WIDE_END.x, y, w: WIDE_END.w, h, active: false, next: true };
-      this.zones = [{ id: 'C', x: 0.5, y, w: WIDE_HOLD_W, h, active: false, hold: true, progress: Math.min(1, w.hold / WIDE_HOLD_SEC) }, first];
-      this.instruction = w.hold > 0 ? '그대로 두세요' : '퍽을 가운데에 3초 두세요';
+      this.zones = [{ id: 'C', x: 0.5, y, r: WIDE_HOLD_R, w: WIDE_HOLD_R * 2, h: WIDE_HOLD_R * 2, active: false, hold: true, progress: Math.min(1, w.hold / WIDE_HOLD_SEC) }, first];
+      this.instruction = w.hold > 0 ? `그대로 두세요 · ${Math.ceil(WIDE_HOLD_SEC - w.hold)}` : '퍽을 가운데 동그라미에 3초 두세요';
       return;
     }
     if (!w.seq) {
@@ -556,7 +598,7 @@ export class Game {
   /** 목표를 지나간 자리에 잠깐 퍼지며 사라지는 잉크 고리 */
   _ring(x, y, r, now) { this.effects.push({ type: 'ring', x, y, r, t0: now, dur: 450, age: 0 }); }
 
-  _pop(x, y, text, color = C.ink, style = 'display') { this.effects.push({ type: 'pop', x, y, text, color, style, t0: performance.now(), dur: 900, age: 0 }); }
+  _pop(x, y, text, color = C.ink, style = 'display') { this.effects.push({ type: 'pop', x, y, text, color, style, t0: clockNow(), dur: 900, age: 0 }); }
 
   _buildResult(reason) {
     const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, limit: this.limit, seconds: this.mode.timed ? this.playSeconds : 0, invisible: this.invisible, rankKey: rankKey(this.mode.id, this.playSeconds, this.invisible), items: [] };

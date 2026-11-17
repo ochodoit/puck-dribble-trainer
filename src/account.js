@@ -1,6 +1,8 @@
 // 계정·랭킹 저장소. 기본은 기기 내(localStorage) 저장, firebase-config.js 가 채워지면 온라인(Firestore) 저장소로 전환.
 // 로그인: 별명 + 6자리 숫자 비밀번호. 프로필: 국가, 팀 이름, 나이(연령대 자동 계산).
 
+import { cleanActivity, addActivity } from './activity.js';
+
 export const COUNTRIES = [
   ['KR', '🇰🇷 대한민국'], ['US', '🇺🇸 미국'], ['CA', '🇨🇦 캐나다'], ['JP', '🇯🇵 일본'], ['CN', '🇨🇳 중국'],
   ['SE', '🇸🇪 스웨덴'], ['FI', '🇫🇮 핀란드'], ['CZ', '🇨🇿 체코'], ['SK', '🇸🇰 슬로바키아'], ['RU', '🇷🇺 러시아'],
@@ -149,7 +151,23 @@ export function validateFeedback({ good, fix } = {}) {
   return null;
 }
 
-export function validateProfile({ nick, pin, country, team, age, number }) {
+/** 스틱 방향: 'L' 레프트 | 'R' 라이트 */
+export const STICKS = ['L', 'R'];
+export const stickLabel = (s) => (s === 'L' ? '레프트' : s === 'R' ? '라이트' : '');
+
+/** 리더보드(점수 높은 순) -> 내 순위 요약: 전체·내 국가·내 팀. 기록이 없으면 null */
+export function rankSummaryOf(rows, u) {
+  if (!u) return null;
+  const pos = (f) => {
+    const rs = rows.filter((r) => matches(r, f));
+    const i = rs.findIndex((r) => r.uid === u.id);
+    return i >= 0 ? { rank: i + 1, total: rs.length } : null;
+  };
+  const world = pos({});
+  return world ? { world, country: u.country ? pos({ country: u.country }) : null, team: u.team ? pos({ team: u.team }) : null } : null;
+}
+
+export function validateProfile({ nick, pin, country, team, age, number, stick }) {
   if (!NICK_RE.test(String(nick || '').trim())) return '별명은 2~12자 (한글·영문·숫자·_-.)';
   if (RESERVED_NICK_RE.test(String(nick).trim())) return '쓸 수 없는 별명입니다 (운영자로 보이는 이름)';
   if (!PIN_RE.test(String(pin || ''))) return '비밀번호는 숫자 6자리';
@@ -158,6 +176,7 @@ export function validateProfile({ nick, pin, country, team, age, number }) {
   const a = Number(age);
   if (!Number.isInteger(a) || a < 3 || a > 99) return '나이는 3~99 사이 숫자';
   if (Number.isNaN(jerseyOf(number))) return '등번호는 0~99 사이 숫자';
+  if (!STICKS.includes(stick)) return '스틱(레프트·라이트)을 선택하세요';
   return null;
 }
 
@@ -187,6 +206,7 @@ export class LocalAccountStore {
     this.META = 'puck-trainer.members.v1';    // { count } 정회원 번호
     this.CONFIG = 'puck-trainer.site.v1';     // 게스트 안내(공식 인스타 등) · 베타 종료일
     this.FEEDBACK = 'puck-trainer.feedback.v1'; // { uid: { uid, nick, memberNo, good, fix, at, updatedAt } } 개발자에게
+    this.ACTIVITY = 'puck-trainer.activity.v1'; // { uid: 활동 기록 } 출석·최근 기록·누적 (activity.js)
     this.user = null;
     const nick = this._get(this.SESSION, null);
     if (nick) { const u = this._users()[normNick(nick)]; if (u) this.user = this._public(u); }
@@ -200,6 +220,7 @@ export class LocalAccountStore {
   _public(u) {
     return {
       id: u.id, nick: u.nick, number: Number.isInteger(u.number) ? u.number : null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup,
+      stick: STICKS.includes(u.stick) ? u.stick : null, joinedAt: u.joinedAt || u.createdAt || null,
       memberNo: Number.isInteger(u.memberNo) ? u.memberNo : null, beta: !!u.beta, code: u.code || null, via: u.via || null,
       kept: !!u.kept, feedbackAt: this._get(this.FEEDBACK, {})[u.id]?.at ?? null,
       admin: ADMIN_NICKS.includes(normNick(u.nick)),
@@ -226,8 +247,8 @@ export class LocalAccountStore {
     return codeInfo(key, this._codes()[key] || null);
   }
 
-  async register({ nick, pin, country, team, age, number, code }) {
-    const err = validateProfile({ nick, pin, country, team, age, number });
+  async register({ nick, pin, country, team, age, number, code, stick }) {
+    const err = validateProfile({ nick, pin, country, team, age, number, stick });
     if (err) throw new Error(err);
     const ckey = normCode(code);
     if (!ckey) throw new Error(codeError('none'));
@@ -245,7 +266,7 @@ export class LocalAccountStore {
     c.uses = (c.uses || 0) + 1; c.lastAt = Date.now();
     const now = Date.now();
     const u = {
-      id: key, nick: String(nick).trim(), number: jerseyOf(number), pinHash: await hashPin(nick, pin), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: now,
+      id: key, nick: String(nick).trim(), number: jerseyOf(number), pinHash: await hashPin(nick, pin), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), stick, createdAt: now,
       code: ckey, via: c.type, beta: c.type === 'beta', memberNo: meta.count, joinedAt: now,
     };
     users[key] = u;
@@ -339,6 +360,33 @@ export class LocalAccountStore {
     return Object.values(this._users()).map((u) => this._public(u)).filter(isBetaUser).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
   }
 
+  /** 운영자: 코드 하나 지우기 */
+  async deleteCode(code) {
+    this._needAdmin();
+    const codes = this._codes();
+    delete codes[normCode(code)];
+    this._set(this.CODES, codes);
+  }
+
+  /** 운영자: 개발자에게 온 의견 하나 지우기 (그 멤버의 '의견 보냄' 기록도 함께 사라짐) */
+  async deleteFeedback(uid) {
+    this._needAdmin();
+    const all = this._get(this.FEEDBACK, {});
+    delete all[uid];
+    this._set(this.FEEDBACK, all);
+  }
+
+  /** 운영자: 베타 멤버(가입 정보) 지우기 — 프로필과 의견을 지우고 별명을 다시 쓸 수 있게 한다 */
+  async deleteMember(uid) {
+    this._needAdmin();
+    if (uid === this.user?.id) throw new Error('지금 로그인한 운영자 계정은 지울 수 없습니다');
+    const users = this._users();
+    delete users[uid];
+    this._set(this.USERS, users);
+    const act = this._get(this.ACTIVITY, {}); delete act[uid]; this._set(this.ACTIVITY, act);
+    await this.deleteFeedback(uid);
+  }
+
   /** 운영자: 의견을 못 보낸 베타 멤버도 정회원으로 유지 */
   async keepMember(uid, kept = true) {
     this._needAdmin();
@@ -374,10 +422,12 @@ export class LocalAccountStore {
     return true;
   }
 
-  async updateProfile({ country, team, age, number }) {
+  async updateProfile({ country, team, age, number, stick }) {
     if (!this.user) throw new Error('로그인이 필요합니다');
-    if (number !== undefined && Number.isNaN(jerseyOf(number))) throw new Error('등번호는 0~99 사이 숫자');
+    const err = validateEdit({ team, age, number, stick });
+    if (err) throw new Error(err);
     const users = this._users(); const u = users[this.user.id];
+    if (stick !== undefined) u.stick = stick;
     if (number !== undefined) u.number = jerseyOf(number);
     if (country) u.country = country;
     if (team) u.team = String(team).trim();
@@ -420,6 +470,34 @@ export class LocalAccountStore {
   }
 
   async wouldRank(mode, score) { return rankAmong(await this.leaderboard(mode, {}, 100000), score); }
+
+  // ---- 내 정보 ----
+  /** 내 게임별 최고 기록: [{ mode: 랭킹 키, score, at, plays }] */
+  async myScores() {
+    if (!this.user) return [];
+    return this._scores().filter((s) => s.uid === this.user.id).map((s) => ({ mode: s.mode, score: s.score, at: s.at, plays: s.plays || 1 }));
+  }
+  /** 이 게임에서 내 순위: { world, country, team } 각 { rank, total } */
+  async rankSummary(mode) { return rankSummaryOf(await this.leaderboard(mode, {}, 100000), this.user); }
+  async getActivity() { return this.user ? cleanActivity(this._get(this.ACTIVITY, {})[this.user.id], this.user.id) : null; }
+  /** 활동 더하기 (entry 가 없으면 오늘 출석만). activity.js 의 addActivity */
+  async recordActivity(entry = null) {
+    if (!this.user) return null;
+    const all = this._get(this.ACTIVITY, {});
+    const a = addActivity(cleanActivity(all[this.user.id], this.user.id), entry);
+    all[this.user.id] = a;
+    this._set(this.ACTIVITY, all);
+    return a;
+  }
+}
+
+/** 프로필 수정 값 확인 (넘긴 칸만) */
+export function validateEdit({ team, age, number, stick } = {}) {
+  if (team !== undefined && (!String(team).trim() || String(team).trim().length > 20)) return '팀 이름은 1~20자';
+  if (age !== undefined) { const a = Number(age); if (!Number.isInteger(a) || a < 3 || a > 99) return '나이는 3~99 사이 숫자'; }
+  if (number !== undefined && Number.isNaN(jerseyOf(number))) return '등번호는 0~99 사이 숫자';
+  if (stick !== undefined && !STICKS.includes(stick)) return '스틱(레프트·라이트)을 선택하세요';
+  return null;
 }
 
 export function matches(s, { ageGroup, country, team } = {}) {

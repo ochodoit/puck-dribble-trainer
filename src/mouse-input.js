@@ -53,12 +53,15 @@ export function pointerToUV(px, py, ctx) {
     const p0 = game.toPlane(0, 0), p1 = game.toPlane(1, 1);
     return { u: clamp01(inv(X, p0.x, p1.x)), v: clamp01(inv(Y, p0.y, p1.y)) };
   }
-  // 그 밖(대기 중 가운데 원, 드릴): 화면 전체가 바닥
+  // 그 밖(대기 중 가운데 원, 드릴): 바닥 = 수동으로 맞춘 네 모서리(있으면), 없으면 화면 전체
+  if (ctx.floorMap) { const [u, v] = ctx.floorMap.toUV(nx * ctx.PW, ny * ctx.PH); return { u: clamp01(u), v: clamp01(v) }; }
   return { u: clamp01(nx), v: clamp01(ny) };
 }
 
 /** 카메라 영상 처리 결과 대신 쓰는 가짜 결과: 화면 전체가 바닥, 퍽은 포인터 자리 */
-export function mouseVisionResult(PW, PH, uv) {
+export function mouseVisionResult(PW, PH, uv, floorMap = null) {
+  // 수동 영역: 카메라 모드와 같이 네 모서리로 만든 원근 사상을 쓴다 (영역 편집이 테스트에서도 그대로 보이게)
+  if (floorMap) return { floor: { quad: floorMap.quad, mapping: floorMap, detected: true, locked: true, polygon: [], mode: 'manual', fallback: false }, puck: null, stick: null, puckCandidates: [], mouse: uv };
   const quad = [[0, 0], [PW, 0], [PW, PH], [0, PH]];
   const mapping = {
     quad,

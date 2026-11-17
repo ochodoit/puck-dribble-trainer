@@ -4,6 +4,7 @@
 //       일부 퍽은 내 퍽이 있는 줄을 겨냥해 떨어지므로 가만히 있으면 맞는다 (잦은 터치로 피한다).
 //       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점.
 import { C, F, rgba, text, sparks, font, alphaLayer } from './theme.js';
+import { clockNow } from './clock.js';
 
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
@@ -273,7 +274,7 @@ export class Arcade {
     if (label) this._pop(x, y, label, color, style === 'script' ? 1100 : 700, style);
   }
 
-  _pop(x, y, str, color, dur = 900, style = 'display') { this.effects.push({ type: 'pop', x, y, text: str, color, style, t0: performance.now(), dur, age: 0 }); }
+  _pop(x, y, str, color, dur = 900, style = 'display') { this.effects.push({ type: 'pop', x, y, text: str, color, style, t0: clockNow(), dur, age: 0 }); }
 
   result(puck) {
     const distM = Math.max(0, (puck?.distance || 0) - this.startDistance) * this.floorWidthM;

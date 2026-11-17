@@ -6,8 +6,9 @@
 //         feedback/{uid} 개발자에게 (베타 마감 전에 보내면 정회원 유지)
 import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, rankAmong, NOT_READY,
-  betaState, isActiveMember, LAPSED, validateFeedback, validateStrongPassword,
+  betaState, isActiveMember, LAPSED, validateFeedback, validateStrongPassword, rankSummaryOf, validateEdit,
 } from './account.js';
+import { cleanActivity, addActivity } from './activity.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
 const normNick = (n) => String(n).trim().toLowerCase();
@@ -61,8 +62,8 @@ export class FirebaseAccountStore {
   }
 
   /** 가입 = 정회원. 쓸 수 있는 코드가 있어야 하며, 코드 사용·회원 번호·프로필·별명을 한 트랜잭션으로 쓴다 (규칙이 함께 검사) */
-  async register({ nick, pin, country, team, age, number, code }) {
-    const err = validateProfile({ nick, pin, country, team, age, number });
+  async register({ nick, pin, country, team, age, number, code, stick }) {
+    const err = validateProfile({ nick, pin, country, team, age, number, stick });
     if (err) throw new Error(err);
     const ckey = normCode(code);
     if (!ckey) throw new Error(codeError('none'));
@@ -87,7 +88,7 @@ export class FirebaseAccountStore {
         if (st !== 'ok') throw new Error(codeError(st, cd));
         const no = (m.data().count || 0) + 1, now = Date.now();
         const p = {
-          nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: now,
+          nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), stick, createdAt: now,
           code: ckey, via: cd.type, beta: cd.type === 'beta', memberNo: no, joinedAt: now,
         };
         tx.set(this._doc('users', uid), p);
@@ -136,10 +137,12 @@ export class FirebaseAccountStore {
     return true;
   }
 
-  async updateProfile({ country, team, age, number }) {
+  async updateProfile({ country, team, age, number, stick }) {
     if (!this.user) throw new Error('로그인이 필요합니다');
-    if (number !== undefined && Number.isNaN(jerseyOf(number))) throw new Error('등번호는 0~99 사이 숫자');
+    const err = validateEdit({ team, age, number, stick });
+    if (err) throw new Error(err);
     const patch = {};
+    if (stick !== undefined) patch.stick = stick;
     if (number !== undefined) patch.number = jerseyOf(number);
     if (country) patch.country = country;
     if (team) patch.team = String(team).trim();
@@ -182,6 +185,35 @@ export class FirebaseAccountStore {
   }
 
   async wouldRank(mode, score) { return rankAmong(await this.leaderboard(mode, {}, 300), score); }
+
+  // ---- 내 정보 (활동 기록은 activity/{uid}: 본인만 읽고 씀) ----
+  /** 내 게임별 최고 기록. keys: 확인할 랭킹 키 목록 (scores_{key}/{uid} 를 한 번에 읽음) */
+  async myScores(keys = []) {
+    if (!this.user) return [];
+    const uid = this.user.id;
+    const snaps = await Promise.all(keys.map((k) => this.F.getDoc(this._doc(`scores_${k}`, uid)).catch(() => null)));
+    return snaps.map((s, i) => (s && s.exists() ? { mode: keys[i], score: s.data().score, at: s.data().at, plays: s.data().plays || 1 } : null)).filter(Boolean);
+  }
+  /** 이 게임에서 내 순위 (상위 300명 안에서): { world, country, team } */
+  async rankSummary(mode) { return rankSummaryOf(await this.leaderboard(mode, {}, 300), this.user); }
+  async getActivity() {
+    if (!this.user) return null;
+    const uid = this.user.id;
+    if (this._act?.uid === uid) return this._act.data;
+    const snap = await this.F.getDoc(this._doc('activity', uid));
+    const data = cleanActivity(snap.exists() ? snap.data() : null, uid);
+    this._act = { uid, data };
+    return data;
+  }
+  /** 활동 더하기 (entry 가 없으면 오늘 출석만) */
+  async recordActivity(entry = null) {
+    if (!this.user) return null;
+    const uid = this.user.id;
+    const a = addActivity(await this.getActivity(), entry);
+    await this.F.setDoc(this._doc('activity', uid), a);
+    this._act = { uid, data: a };
+    return a;
+  }
 
   // ---- 운영자 (규칙이 admins/{uid} 로 다시 검사) ----
   _needAdmin() { if (!this.user?.admin) throw new Error('운영자만 할 수 있습니다'); }
@@ -295,6 +327,35 @@ export class FirebaseAccountStore {
     ]);
     const at = new Map(fb.map((f) => [f.uid, f.at]));
     return us.docs.map((d) => ({ id: d.id, ...d.data(), feedbackAt: at.get(d.id) ?? null })).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
+  }
+
+  /** 운영자: 코드 하나 지우기 */
+  async deleteCode(code) {
+    this._needAdmin();
+    await this.F.deleteDoc(this._doc('codes', normCode(code)));
+  }
+
+  /** 운영자: 개발자에게 온 의견 하나 지우기 (그 멤버의 '의견 보냄' 기록도 함께 사라짐) */
+  async deleteFeedback(uid) {
+    this._needAdmin();
+    await this.F.deleteDoc(this._doc('feedback', uid));
+  }
+
+  /**
+   * 운영자: 베타 멤버(가입 정보) 지우기 — 프로필·의견·별명 문서를 지운다.
+   * 로그인 계정(Firebase Auth)은 브라우저에서 지울 수 없어 콘솔에 남는다.
+   */
+  async deleteMember(uid) {
+    this._needAdmin();
+    if (uid === this.user?.id) throw new Error('지금 로그인한 운영자 계정은 지울 수 없습니다');
+    const snap = await this.F.getDoc(this._doc('users', uid));
+    const nickLower = snap.exists() ? snap.data().nickLower : null;
+    const b = this.F.writeBatch(this.db);
+    b.delete(this._doc('users', uid));
+    b.delete(this._doc('feedback', uid));
+    if (nickLower) b.delete(this._doc('nicks', nickLower));
+    b.delete(this._doc('activity', uid));
+    await b.commit();
   }
 
   /** 운영자: 의견을 못 보낸 베타 멤버도 정회원으로 유지 */

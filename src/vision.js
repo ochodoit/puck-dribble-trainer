@@ -408,7 +408,29 @@ export class Vision {
   }
 
   /** 자동 지정용 원 (처리 좌표) */
-  calibCircle() { const r = Math.min(this.PW, this.PH) * 0.19; return { x: this.PW / 2, y: this.PH / 2, r }; }
+  /** 가운데 원 (퍽 등록·핸즈프리 시작). scale: 인식할 때는 그린 원보다 조금 넓게 본다 (원 가장자리에 걸쳐도 됨) */
+  calibCircle(scale = 1) { const r = Math.min(this.PW, this.PH) * 0.095 * scale; return { x: this.PW / 2, y: this.PH / 2, r }; }
+
+  /** (x, y) 둘레 고리(r1~r2)의 바닥색. 퍽·스틱처럼 튀는 색은 두 번째 평균에서 뺀다 (진짜 퍽을 덮는 색) */
+  ringColor(x, y, r1, r2) {
+    if (!this.frame) return null;
+    const { PW, PH } = this; const d = this.frame.data;
+    const a = r1 * r1, b = r2 * r2;
+    const x0 = Math.max(0, Math.floor(x - r2)), x1 = Math.min(PW - 1, Math.ceil(x + r2));
+    const y0 = Math.max(0, Math.floor(y - r2)), y1 = Math.min(PH - 1, Math.ceil(y + r2));
+    const px = [];
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const q = (xx - x) ** 2 + (yy - y) ** 2;
+      if (q < a || q > b) continue;
+      const p = (yy * PW + xx) * 4; px.push(d[p], d[p + 1], d[p + 2]);
+    }
+    if (px.length < 9) return null;
+    const mean = (keep) => { let r = 0, g = 0, bl = 0, n = 0; for (let i = 0; i < px.length; i += 3) if (keep(i)) { r += px[i]; g += px[i + 1]; bl += px[i + 2]; n++; } return n ? { r: r / n, g: g / n, b: bl / n, n } : null; };
+    const m1 = mean(() => true);
+    const m2 = mean((i) => (px[i] - m1.r) ** 2 + (px[i + 1] - m1.g) ** 2 + (px[i + 2] - m1.b) ** 2 < 60 * 60);
+    const m = m2 && m2.n >= 6 ? m2 : m1;
+    return { r: Math.round(m.r), g: Math.round(m.g), b: Math.round(m.b) };
+  }
 
   /**
    * 가운데 원 안에서 주변 배경(고리 영역)과 색이 다른 픽셀 덩어리를 찾는다.
@@ -417,12 +439,14 @@ export class Vision {
   autoCalibSample() {
     if (!this.frame) return { status: 'none' };
     const { PW, PH } = this; const d = this.frame.data;
-    const c = this.calibCircle();
-    const r2 = c.r * c.r, ring0 = (c.r * 1.1) ** 2, ring1 = (c.r * 1.5) ** 2;
+    const c = this.calibCircle(1.3); // 그린 원보다 조금 넓게 (원에 걸친 퍽도 인식)
+    // 배경 고리는 예전(큰) 원 크기 바깥에서 잰다: 원보다 큰 물체가 고리까지 덮어 '너무 큼'을 놓치지 않게
+    const ringR = Math.min(PW, PH) * 0.19;
+    const r2 = c.r * c.r, ring0 = (ringR * 1.1) ** 2, ring1 = (ringR * 1.5) ** 2;
     // 배경색: 원 바깥 고리의 평균과 분산 (질감 있는 매트일수록 임계값을 올림)
     let br = 0, bg = 0, bb = 0, bn = 0, bsq = 0;
-    const x0 = Math.max(0, Math.floor(c.x - c.r * 1.5)), x1 = Math.min(PW - 1, Math.ceil(c.x + c.r * 1.5));
-    const y0 = Math.max(0, Math.floor(c.y - c.r * 1.5)), y1 = Math.min(PH - 1, Math.ceil(c.y + c.r * 1.5));
+    const x0 = Math.max(0, Math.floor(c.x - ringR * 1.5)), x1 = Math.min(PW - 1, Math.ceil(c.x + ringR * 1.5));
+    const y0 = Math.max(0, Math.floor(c.y - ringR * 1.5)), y1 = Math.min(PH - 1, Math.ceil(c.y + ringR * 1.5));
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const dx = x - c.x, dy = y - c.y, q = dx * dx + dy * dy;
       if (q < ring0 || q > ring1) continue;

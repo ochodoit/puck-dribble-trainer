@@ -7,8 +7,12 @@ import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel } from './account.js';
 import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
+import { makeFloorMapping } from './geometry.js';
+import { clock, clockNow } from './clock.js';
+import { initMe } from './me-ui.js';
+import { dayKey } from './activity.js';
 import { decideIdle, stepChoice, stepDwell, inCardCore, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAge, canRecordOn, TITLE_MAX } from './community.js';
@@ -53,6 +57,10 @@ const app = {
   hudAt: 0,
   account: null,      // 계정 저장소 (local | firebase)
   authTab: 'login',
+  authStick: null,   // 회원가입 스틱 선택: 'L' | 'R'
+  cornerDrag: false, // 영역 편집: 모서리를 끄는 중
+  paused: false,     // 옵션 창이 떠서 멈춘 상태
+  cover: null,       // 퍽 투명도: 카메라 속 진짜 퍽을 덮는 자리 {x, y, r, rgb, alpha, at} (처리 픽셀 좌표)
   calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
   choice: { side: null, hold: 0, tick: -1, armAt: 0 }, // 게임 종료 후 선택 (왼쪽 = 한 번 더, 오른쪽 = 모드 선택)
   challenge: null,    // 커뮤니티 코스 도전 중: { id, title, sig, holder: {uid, nick, avg, best}|null }
@@ -107,10 +115,17 @@ async function setupAuth() {
   els.authCard.classList.remove('hidden');
   els.authNote.textContent = '계정 불러오는 중…';
   $$('.auth-tabs .tab').forEach((t) => t.addEventListener('click', () => setAuthTab(t.dataset.tab)));
+  $$('#auth-stick button').forEach((b) => b.addEventListener('click', () => {
+    app.authStick = b.dataset.stick;
+    $$('#auth-stick button').forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', String(on)); });
+  }));
   els.authForm.addEventListener('submit', onAuthSubmit);
   $('#auth-guest').addEventListener('click', () => { els.authForm.classList.add('hidden'); els.authNote.textContent = '게스트: 기록이 랭킹에 올라가지 않습니다.'; });
   $('#btn-logout').addEventListener('click', doLogout);
   $('#btn-settings-logout').addEventListener('click', doLogout);
+  $('#btn-settings-login').addEventListener('click', openLogin);
+  $('#btn-me').addEventListener('click', openMe);
+  $('#btn-me-splash').addEventListener('click', openMe);
   els.btnRank.addEventListener('click', () => openRank());
   [els.rankMode, els.rankAge, els.rankScope, $('#rank-time'), $('#rank-variant')].forEach((e) => e.addEventListener('change', () => renderRank()));
   MODES.filter((m) => m.id !== 'free').forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name; els.rankMode.appendChild(o); });
@@ -125,6 +140,7 @@ async function setupAuth() {
     : '기록은 이 기기에 저장됩니다. 여러 선수가 같은 기기로 겨룰 수 있어요.';
   refreshAuthUI();
   setupAdmin();
+  setupMe();
   showInvite();
 }
 
@@ -192,7 +208,7 @@ async function onAuthSubmit(e) {
   els.authSubmit.disabled = true;
   try {
     if (app.authTab === 'register') {
-      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value, code: $('#auth-code').value });
+      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value, code: $('#auth-code').value, stick: app.authStick });
       forgetInvite();
       $('#auth-code').value = '';
       toast(`환영합니다, ${app.account.current().nick}! ${memberBadge(app.account.current())}`, 4000);
@@ -214,13 +230,34 @@ function doLogout() {
   toast('로그아웃했습니다');
 }
 
+/** 게임 중(게스트) 로그인: 첫 화면의 로그인 카드를 로그인 창으로 잠시 옮겨 쓴다 (닫으면 제자리로) */
+function openLogin() {
+  const card = $('#auth-card');
+  if (!app.authHome) app.authHome = { parent: card.parentNode, next: card.nextSibling };
+  $('#login-slot').appendChild(card);
+  card.classList.remove('hidden');
+  setAuthTab('login');
+  close(els.panelSettings);
+  open($('#panel-login'));
+  $('#auth-nick').focus();
+}
+function restoreAuthCard() {
+  const h = app.authHome;
+  if (!h) return;
+  h.parent.insertBefore($('#auth-card'), h.next);
+  app.authHome = null;
+}
+
 function refreshAuthUI() {
   const u = app.account?.current();
   els.authLogged.classList.toggle('hidden', !u);
   els.authForm.classList.toggle('hidden', !!u);
-  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} <span class="member-badge">${esc(memberBadge(u))}</span> · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)${betaChipHtml()}`;
-  $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup})` : '로그인하지 않음 (랭킹 미등록)';
+  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} <span class="member-badge">${esc(memberBadge(u))}</span>${u.stick ? ' · ' + stickLabel(u.stick) : ''} · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)${betaChipHtml()}`;
+  $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup}${u.stick ? ', ' + tr(stickLabel(u.stick)) : ''})` : '로그인하지 않음 (랭킹 미등록)';
   $('#btn-settings-logout').classList.toggle('hidden', !u);
+  $('#btn-settings-login').classList.toggle('hidden', !!u || !app.account); // 게스트로 플레이 중에도 설정에서 로그인
+  if (u && !$('#panel-login').classList.contains('hidden')) close($('#panel-login'));
+  noteAttendance(); // 게임 중에 로그인한 날도 출석
   $('#btn-admin').classList.toggle('hidden', !isAdmin(u));
   $('#btn-settings-admin').classList.toggle('hidden', !isAdmin(u));
   refreshMouseButton();
@@ -338,6 +375,35 @@ async function renderGuestNotice(result, lapsed = false) {
   box.classList.remove('hidden');
 }
 
+// =============== 내 정보 ===============
+let meUI = null;
+function setupMe() {
+  meUI = initMe({
+    $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel,
+    COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin,
+  });
+}
+function openMe() { if (meUI) meUI.open(); }
+
+/** 출석: 로그인한 채로 플레이 화면을 연 날 (하루 한 번만 기록. 마우스 테스트 모드는 제외) */
+function noteAttendance() {
+  const u = app.account?.current();
+  if (!u || !app.started || app.mouseMode || app.attendedDay === `${u.id}:${dayKey()}`) return;
+  app.attendedDay = `${u.id}:${dayKey()}`;
+  app.account.recordActivity(null).catch(() => { app.attendedDay = null; });
+}
+
+/** 한 판 끝: 출석·훈련 시간·이동 거리·터치를 더하고, 끝까지 한 판이면 그 게임의 최근 기록에 점수를 남긴다 */
+function recordPlay(result) {
+  const u = app.account?.current();
+  if (!u || app.mouseMode || app.versus || !(result.elapsed >= 3)) return;
+  const done = result.reason !== 'manual' && result.mode.id !== 'free';
+  app.account.recordActivity({
+    key: done ? result.rankKey || result.mode.id : null, score: done ? result.score : null,
+    sec: result.elapsed, dist: (tracker.distance || 0) * settings.floorWidthM, touches: tracker.touches || 0,
+  }).then(() => { app.attendedDay = `${u.id}:${dayKey()}`; }).catch(() => {});
+}
+
 // =============== 운영자 화면 ===============
 function setupAdmin() {
   const openAdmin = () => { open($('#panel-admin')); renderAdmin(); };
@@ -350,10 +416,20 @@ function setupAdmin() {
   }));
   $('#adm-pw-save').addEventListener('click', () => adminDo(async () => {
     const ids = ['#adm-pw-now', '#adm-pw-new', '#adm-pw-new2'];
-    if ($('#adm-pw-new').value !== $('#adm-pw-new2').value) throw new Error('새 비밀번호가 서로 다릅니다');
-    await app.account.changePassword($('#adm-pw-now').value, $('#adm-pw-new').value);
-    ids.forEach((s) => { $(s).value = ''; });
-    toast('운영자 비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요', 4000);
+    const msg = $('#adm-pw-msg'), btn = $('#adm-pw-save');
+    const say = (text, bad) => { msg.textContent = text; msg.classList.toggle('bad', !!bad); msg.classList.remove('hidden'); };
+    msg.classList.add('hidden');
+    btn.disabled = true;
+    try {
+      if (!$('#adm-pw-now').value || !$('#adm-pw-new').value) throw new Error('지금 비밀번호와 새 비밀번호를 입력하세요');
+      if ($('#adm-pw-new').value !== $('#adm-pw-new2').value) throw new Error('새 비밀번호가 서로 다릅니다');
+      await app.account.changePassword($('#adm-pw-now').value, $('#adm-pw-new').value);
+      ids.forEach((s) => { $(s).value = ''; });
+      say('운영자 비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요');
+      toast('운영자 비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요', 4000);
+    } catch (e) {
+      say(e.message || String(e), true); // 실패도 버튼 옆에 (창 맨 위 오류 칸은 스크롤 밖일 수 있음)
+    } finally { btn.disabled = false; }
   }));
   $('#adm-one').addEventListener('click', () => adminDo(async () => {
     const c = await app.account.issueCode({ type: 'one', note: $('#adm-one-note').value });
@@ -382,7 +458,24 @@ function setupAdmin() {
   }));
   $('#adm-betas').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act]');
-    if (b) adminDo(async () => { await app.account.keepMember(b.closest('tr').dataset.uid, b.dataset.act === 'keep'); refreshAuthUI(); });
+    if (!b) return;
+    const row = b.closest('tr');
+    if (b.dataset.act === 'delete') {
+      const note = app.account.kind === 'firebase' ? `\n${tr('로그인 계정은 Firebase 콘솔(Authentication)에서 따로 지워야 같은 별명으로 다시 가입할 수 있습니다')}` : '';
+      if (confirmDelete(`${row.dataset.nick}: ${tr('베타 멤버의 가입 정보와 의견을 지웁니다')}${note}`)) {
+        adminDo(async () => { await app.account.deleteMember(row.dataset.uid); toast('베타 멤버를 지웠습니다'); });
+      }
+      return;
+    }
+    adminDo(async () => { await app.account.keepMember(row.dataset.uid, b.dataset.act === 'keep'); refreshAuthUI(); });
+  });
+  $('#adm-feedback').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act="delete-fb"]');
+    if (!b) return;
+    const art = b.closest('article');
+    if (confirmDelete(`${art.dataset.nick}: ${tr('이 의견을 지웁니다 (이 멤버가 의견을 보낸 기록도 사라집니다)')}`)) {
+      adminDo(async () => { await app.account.deleteFeedback(art.dataset.uid); toast('의견을 지웠습니다'); });
+    }
   });
   $('#adm-codes').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act]');
@@ -390,6 +483,9 @@ function setupAdmin() {
     const code = b.closest('tr').dataset.code;
     if (b.dataset.act === 'copy') copyText(inviteLink(code));
     else if (b.dataset.act === 'code') copyText(codeLabel(code), '코드를 복사했습니다');
+    else if (b.dataset.act === 'delete') {
+      if (confirmDelete(`${codeLabel(code)}: ${tr('이 코드를 지웁니다 (이미 가입한 사람은 그대로)')}`)) adminDo(async () => { await app.account.deleteCode(code); toast('코드를 지웠습니다'); });
+    }
     else adminDo(() => app.account.updateCode(code, { off: b.dataset.act === 'off' }));
   });
   $('#adm-codes').addEventListener('change', (e) => {
@@ -397,6 +493,9 @@ function setupAdmin() {
     if (inp && inp.value) adminDo(() => app.account.updateCode(inp.closest('tr').dataset.code, { expiresAt: endOfDay(inp.value) }));
   });
 }
+
+/** 지우기 전 확인 (되돌릴 수 없음) */
+function confirmDelete(what) { return window.confirm(`${what}\n\n${tr('지우면 되돌릴 수 없습니다. 지울까요?')}`); }
 
 /** 운영자 작업 실행 -> 오류는 화면 위에, 끝나면 목록 새로고침 */
 async function adminDo(fn) {
@@ -440,11 +539,12 @@ async function renderAdminBeta(a) {
   $('#adm-betas').innerHTML = betas.length ? betas.map((b, i) => {
     const act = b.kept ? '<button type="button" class="btn btn-ghost" data-act="unkeep">유지 취소</button>'
       : st[i] !== 'kept' ? '<button type="button" class="btn btn-ghost" data-act="keep">정회원 유지</button>' : '';
-    return `<tr data-uid="${esc(b.id)}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(b.memberNo)}</td><td data-ugc>${esc(b.nick)}</td>
-      <td>${b.feedbackAt ? ymd(b.feedbackAt) : '-'}</td><td>${BETA_LABEL[st[i]] || ''}</td><td class="adm-acts">${act}</td></tr>`;
+    const del = '<button type="button" class="btn btn-ghost btn-del" data-act="delete">삭제</button>';
+    return `<tr data-uid="${esc(b.id)}" data-nick="${esc(b.nick)}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(b.memberNo)}</td><td data-ugc>${esc(b.nick)}</td>
+      <td>${b.feedbackAt ? ymd(b.feedbackAt) : '-'}</td><td>${BETA_LABEL[st[i]] || ''}</td><td class="adm-acts">${act}${del}</td></tr>`;
   }).join('') : '<tr><td colspan="5" class="muted">베타 멤버가 없습니다</td></tr>';
-  $('#adm-feedback').innerHTML = fbs.length ? fbs.map((f) => `<article class="fb-item">
-    <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time></header>
+  $('#adm-feedback').innerHTML = fbs.length ? fbs.map((f) => `<article class="fb-item" data-uid="${esc(f.uid)}" data-nick="${esc(f.nick)}">
+    <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time><button type="button" class="btn btn-ghost btn-del" data-act="delete-fb">삭제</button></header>
     ${f.good ? `<p><em>좋았던 점</em><span data-ugc>${esc(f.good)}</span></p>` : ''}${f.fix ? `<p><em>고쳤으면 하는 점</em><span data-ugc>${esc(f.fix)}</span></p>` : ''}</article>`).join('')
     : '<p class="muted">아직 온 의견이 없습니다</p>';
 }
@@ -471,7 +571,7 @@ async function renderAdmin() {
         : (c.expiresAt ? ymd(c.expiresAt) : '-');
       return `<tr data-code="${esc(c.code)}" class="${st === 'ok' ? '' : 'dim'}"><td><b>${esc(codeLabel(c.code))}</b></td><td>${c.type === 'beta' ? '베타' : '1회용'}</td>
         <td>${c.uses || 0}/${c.maxUses ? c.maxUses : '∞'}</td><td>${exp}</td><td data-ugc>${esc(c.note || '')}</td><td>${STATUS_LABEL[st]}</td>
-        <td class="adm-acts"><button type="button" class="btn btn-ghost" data-act="code">코드 복사</button><button type="button" class="btn btn-ghost" data-act="copy">링크 복사</button><button type="button" class="btn btn-ghost" data-act="${c.off ? 'on' : 'off'}">${c.off ? '켜기' : '끄기'}</button></td></tr>`;
+        <td class="adm-acts"><button type="button" class="btn btn-ghost" data-act="code">코드 복사</button><button type="button" class="btn btn-ghost" data-act="copy">링크 복사</button><button type="button" class="btn btn-ghost" data-act="${c.off ? 'on' : 'off'}">${c.off ? '켜기' : '끄기'}</button><button type="button" class="btn btn-ghost btn-del" data-act="delete">삭제</button></td></tr>`;
     }).join('') : '<tr><td colspan="7" class="muted">아직 만든 코드가 없습니다</td></tr>';
   } catch (e) {
     $('#adm-error').textContent = `운영자 정보를 불러오지 못했습니다: ${e.message || e}`;
@@ -498,15 +598,16 @@ function bindUI() {
     game.playSeconds = settings.playMinutes * 60; game.resetState();
     renderModeList(); updateHud(); syncScoreChallenge();
   }));
-  // 8자 드리블 방향: 먼저 갈 콘(왼쪽·오른쪽) × 콘을 도는 쪽(위·아래)
-  const setFigure8 = (side, turn) => {
-    if (game.running) game.stop('manual');
-    settings.figure8Dir = `${side}-${turn}`; persist();
-    game.figure8Dir = settings.figure8Dir; game.resetState();
-    renderModeList(); updateHud();
+  // 8자 드리블 방향: 게임 화면에서 먼저 갈 콘(왼쪽·오른쪽) × 도는 방향(시계·반시계). 게임 중에도 멈추지 않고 바뀐다
+  const setFigure8 = (dir) => {
+    if (dir === settings.figure8Dir) return;
+    settings.figure8Dir = dir; persist();
+    game.setFigure8Dir(dir);
+    toast(`${dir[0] === 'L' ? '왼쪽 먼저' : '오른쪽 먼저'} · ${f8Rot(dir) === 'cw' ? '↻ 시계방향' : '↺ 반시계방향'}`);
+    updateHud();
   };
-  $$('#f8-side button').forEach((b) => b.addEventListener('click', () => setFigure8(b.dataset.side, settings.figure8Dir.split('-')[1])));
-  $$('#f8-turn button').forEach((b) => b.addEventListener('click', () => setFigure8(settings.figure8Dir.split('-')[0], b.dataset.turn)));
+  $$('#f8-side button').forEach((b) => b.addEventListener('click', () => setFigure8(f8Dir(b.dataset.side, f8Rot(settings.figure8Dir)))));
+  $$('#f8-rot button').forEach((b) => b.addEventListener('click', () => setFigure8(f8Dir(settings.figure8Dir[0], b.dataset.rot))));
   els.invisibleToggle.addEventListener('change', () => {
     if (game.running) game.stop('manual');
     settings.invisible = els.invisibleToggle.checked; persist();
@@ -517,7 +618,6 @@ function bindUI() {
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
   $('#set-flipDepth').addEventListener('change', (e) => { settings.flipDepth = e.target.checked; applyDepthDirection(); persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
-  $$('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) close(m); }));
 
   // 모드/대결
   els.versusToggle.addEventListener('change', () => {
@@ -530,7 +630,7 @@ function bindUI() {
   $('#set-mirror').addEventListener('change', (e) => { settings.mirror = e.target.checked; applyMirror(); persist(); });
   $('#set-debug').addEventListener('change', (e) => { settings.debug = e.target.checked; els.debug.classList.toggle('hidden', !settings.debug); persist(); });
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckOpacity']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
     const input = $('#set-' + key), out = $('#out-' + key);
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); });
   }
@@ -583,6 +683,7 @@ function bindUI() {
   // 키보드(외장 키보드/TV·PC에서 사용): Space·Enter 시작/중지, R 초기화, F 전체화면, M 모드, D 디버그
   document.addEventListener('keydown', (e) => {
     if (!app.started || e.target.matches('input, select, textarea')) return;
+    if (optionPanelOpen()) return; // 옵션 창이 떠 있는 동안은 게임 단축키를 받지 않음
     switch (e.key) {
       case ' ': case 'Enter': e.preventDefault(); closeAllPanels(); toggleRun(); break;
       case 'r': case 'R': if (game.running) game.stop('manual'); game.resetState(); closeAllPanels(); updateHud(); toast('초기화'); break;
@@ -594,6 +695,17 @@ function bindUI() {
     }
   });
 }
+
+/**
+ * 8자 방향 'L-up' 등 <-> 화면에서 고르는 (먼저 갈 콘, 시계·반시계).
+ * 첫 콘을 도는 방향 기준: 왼쪽 콘을 위로 돌면 반시계, 아래로 돌면 시계 / 오른쪽 콘은 위로 돌면 시계.
+ */
+function f8Rot(dir) { return dir === 'L-down' || dir === 'R-up' ? 'cw' : 'ccw'; }
+function f8Dir(side, rot) { return `${side}-${(side === 'L') === (rot === 'ccw') ? 'up' : 'down'}`; }
+
+// 이 창들이 떠 있으면 뒤의 모든 것(게임 시계·퍽 추적·핸즈프리 시작)이 멈춘다
+const OPTION_PANELS = ['panel-settings', 'panel-admin', 'panel-calib', 'panel-rank', 'panel-login', 'panel-community', 'panel-me'];
+function optionPanelOpen() { return OPTION_PANELS.some((id) => !document.getElementById(id).classList.contains('hidden')); }
 
 function closeAllPanels() { $$('.modal').forEach(close); }
 
@@ -624,8 +736,8 @@ function startMouse() {
   els.splash.classList.add('hidden');
   $('#splash-diag').classList.add('hidden');
   app.started = true;
-  app.startedAt = performance.now();
-  app.lastFrameAt = performance.now();
+  app.startedAt = clockNow();
+  app.lastFrameAt = clockNow();
   requestAnimationFrame(loop);
   openModeAfterStart();
 }
@@ -672,7 +784,8 @@ async function startCamera() {
     els.splash.classList.add('hidden');
     $('#splash-diag').classList.add('hidden');
     app.started = true;
-    app.startedAt = performance.now();
+    app.startedAt = clockNow();
+    noteAttendance();
     requestWakeLock();
     requestAnimationFrame(loop);
     app.setup = 'area-wait'; // 첫 영상이 들어오면 1/2 영역 설정부터 (loop 에서 시작)
@@ -745,7 +858,7 @@ async function startStream() {
   const track = camera.stream.getVideoTracks()[0];
   track.addEventListener('ended', () => { app.cameraLost = true; toast('카메라 연결이 끊겼습니다. 설정에서 카메라를 다시 선택하세요.', 6000); if (game.running) game.stop('manual'); });
   app.cameraLost = false;
-  app.lastFrameAt = performance.now();
+  app.lastFrameAt = clockNow();
   vision.setSourceSize(width, height);
   els.view.style.aspectRatio = `${width} / ${height}`;
   vision.floorAuto = null;
@@ -793,9 +906,16 @@ function applyMirror() {
 }
 
 // =============== 메인 루프 ===============
-function loop(now) {
+function loop(raw) {
   if (!app.started) return;
   requestAnimationFrame(loop);
+  // 설정·운영자·보정·랭킹·로그인·커뮤니티 창이 떠 있으면 뒤의 모든 것을 멈춘다 (게임 시간·날아오는 퍽·대기 원 모두)
+  if (optionPanelOpen()) {
+    if (clock.pausedAt == null) { clock.pausedAt = raw; app.paused = true; pauseIdle(); updateHud(); }
+    return;
+  }
+  if (clock.pausedAt != null) { clock.offset += raw - clock.pausedAt; clock.pausedAt = null; app.paused = false; }
+  const now = raw - clock.offset; // 멈춘 시간을 뺀 게임 시계 (clockNow() 와 같은 기준)
   const video = els.video;
   if (app.mouseMode) stepMouse(now);
   else if (video.readyState < 2) return;
@@ -853,7 +973,8 @@ function loop(now) {
 
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing });
+  updatePuckCover(result, now);
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover });
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
@@ -866,14 +987,19 @@ function loop(now) {
 /** 마우스 모드 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이어도 마지막 자리를 유지) */
 function stepMouse(now) {
   let meas = null;
+  // 마우스 모드의 게임 바닥은 늘 화면 전체 (8자·반응 타겟 등 맵이 비틀리지 않게).
+  // 영역 편집 중에만 네 모서리로 만든 바닥을 보여 줘서 격자가 모서리를 따라 움직인다
+  const q = app.areaEditing && settings.floorMode === 'manual' && settings.manualQuad ? settings.manualQuad : null;
+  const floorMap = q ? makeFloorMapping(q.map(([u, v]) => [u * vision.PW, v * vision.PH])) : null;
   if (mouse.has) {
     meas = pointerToUV(mouse.x, mouse.y, {
+      floorMap, PW: vision.PW, PH: vision.PH,
       view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, flipDepth: settings.flipDepth,
       modeList: els.modeList, modeOpen: !els.panelMode.classList.contains('hidden'),
       choiceTrack: $('#choice-track'), resultOpen: !els.panelResult.classList.contains('hidden'),
     });
   }
-  app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas);
+  app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas, floorMap);
   app.lastFrameAt = now;
   app.frames++;
   if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
@@ -885,6 +1011,26 @@ function stepMouse(now) {
     tracker.pos = { x: meas.u - tracker.vel.x * dt, y: meas.v - tracker.vel.y * dt };
   }
   tracker.update(meas, now);
+}
+
+/**
+ * 퍽 투명도: 플레이 중 카메라 영상에 비치는 진짜 퍽을 둘레 바닥색으로 덮는다 (투명도 100% = 완전히 가림).
+ * 검출이 잠깐 끊겨도(스틱에 가림·흔들림) 예측 위치로 0.6초 동안 계속 덮는다.
+ */
+function updatePuckCover(result, now) {
+  const pa = renderer.puckAlpha;
+  if (!game.running || app.mouseMode || pa >= 0.999 || settings.controller !== 'puck') { app.cover = null; return; }
+  let x = null, y = null;
+  if (result.puck) { x = result.puck.x; y = result.puck.y; }
+  else if (tracker.pos && tracker.state !== 'lost' && result.floor?.mapping) [x, y] = result.floor.mapping.toPx(tracker.pos.x, tracker.pos.y);
+  const prev = app.cover;
+  if (x == null) { if (!(prev && now - prev.at < 600)) app.cover = null; else prev.alpha = 1 - pa; return; }
+  const area = result.puck?.area || settings.puckModel.area || 40;
+  const r = Math.max(3, Math.sqrt(area / Math.PI));
+  const ring = vision.ringColor(x, y, r * 2.2, r * 3.4);
+  const rgb = !ring ? prev?.rgb || { r: 236, g: 233, b: 226 }
+    : prev ? { r: prev.rgb.r + (ring.r - prev.rgb.r) * 0.3, g: prev.rgb.g + (ring.g - prev.rgb.g) * 0.3, b: prev.rgb.b + (ring.b - prev.rgb.b) * 0.3 } : ring;
+  app.cover = { x, y, r: prev ? Math.max(r, prev.r * 0.92) : r, rgb, alpha: 1 - pa, at: now };
 }
 
 function pauseIdle() {
@@ -1154,10 +1300,18 @@ function updateHud(force) {
   els.hudMode.textContent = game.mode.name + (settings.invisible ? ' · 투명' : '') + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
   const ch = game.mode.id === 'free' ? app.challenge : null;
   const sc = game.mode.id !== 'free' ? app.scoreChallenge : null;
-  els.hudInstruction.textContent = game.running ? game.instruction
+  els.hudInstruction.textContent = game.running ? (app.paused ? '일시정지 · 창을 닫으면 이어서 합니다' : game.instruction)
     : !app.started ? '' : ch ? `도전 · ${ch.title}${ch.holder ? ` · 1위 평균 ${ch.holder.avg.toFixed(1)}s` : ''}`
       : sc ? `도전 · ${sc.nick} · ${sc.score}점` : '시작을 누르세요';
   $('#app').classList.toggle('playing', game.running);
+  $('#app').classList.toggle('hide-cursor', !!app.mouseMode && game.running && renderer.puckAlpha < 1);
+  const f8 = game.mode.id === 'figure8' && app.started && !app.areaEditing && !app.setup;
+  $('#f8-dir').classList.toggle('hidden', !f8);
+  if (f8) {
+    const side = settings.figure8Dir[0], rot = f8Rot(settings.figure8Dir);
+    $$('#f8-side button').forEach((b) => { const on = b.dataset.side === side; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); });
+    $$('#f8-rot button').forEach((b) => { const on = b.dataset.rot === rot; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); });
+  }
   if (game.limit > 0) {
     // 여러 훈련을 잇는 모드(와이드)는 지금 훈련의 남은 시간
     const t = Math.ceil(game.mode.stages ? (game.running ? game.stageLeft : game.playSeconds) : game.running ? game.timeLeft : game.limit);
@@ -1227,7 +1381,7 @@ function startRun(opts = {}) {
   tracker.resetStats();
   game.start(tracker, opts);
   if (settings.invisible) toast('투명 모드 — 화면에 내 퍽이 보이지 않습니다. 손의 감각으로!', 2600);
-  else if (settings.puckOpacity < 100) toast(settings.puckOpacity === 0 ? '내 퍽 표시 0% — 화면에 퍽이 보이지 않습니다. 감각으로!' : `내 퍽 표시 ${settings.puckOpacity}%`, 2600);
+  else if (settings.puckTransparency > 0) toast(settings.puckTransparency === 100 ? '내 퍽 투명도 100% — 화면에 퍽이 보이지 않습니다. 감각으로 영역에 들어가세요!' : `내 퍽 투명도 ${settings.puckTransparency}%`, 2600);
   updateHud();
 }
 
@@ -1237,6 +1391,7 @@ game.onEnd = (result) => {
   const isBest = result.mode.id !== 'free' && result.reason !== 'manual' ? saveBest(result.rankKey || result.mode.id, result.score) : false;
   showResult(result, isBest);
   submitResult(result);
+  recordPlay(result);
   renderShare(result);
   updateHud();
 };
@@ -1538,9 +1693,6 @@ function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
-  const [f8Side, f8Turn] = settings.figure8Dir.split('-');
-  $$('#f8-side button').forEach((b) => b.classList.toggle('active', b.dataset.side === f8Side));
-  $$('#f8-turn button').forEach((b) => b.classList.toggle('active', b.dataset.turn === f8Turn));
   els.invisibleToggle.checked = settings.invisible;
   // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(커뮤니티)
   const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'community'];
@@ -1648,13 +1800,14 @@ function bindFloorHandles() {
     h.addEventListener('pointerdown', (e) => {
       e.stopPropagation(); e.preventDefault();
       h.setPointerCapture(e.pointerId);
+      app.cornerDrag = true;
       const move = (ev) => {
         const r = els.view.getBoundingClientRect();
         const u = clamp((ev.clientX - r.left) / r.width, 0, 1), v = clamp((ev.clientY - r.top) / r.height, 0, 1);
         settings.manualQuad[i] = [u, v];
         positionHandles();
       };
-      const up = () => { h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); persist(); };
+      const up = () => { app.cornerDrag = false; h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); persist(); };
       h.addEventListener('pointermove', move); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
     });
   });
@@ -1754,7 +1907,7 @@ function applySettingsToUI() {
   els.invisibleToggle.checked = settings.invisible;
   game.invisible = settings.invisible;
   els.debug.classList.toggle('hidden', !settings.debug);
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckOpacity']) {
+  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
   }
   applyWash();
@@ -1775,7 +1928,7 @@ function applyWash() {
   game.arcade.wash = alpha;
   renderer.wash = alpha;
   // 내 퍽 표시 농도: 플레이 중 화면의 내 퍽을 흐리게/안 보이게 (감각으로 플레이하는 헤드업 훈련). 투명 모드는 항상 0
-  const pa = settings.invisible ? 0 : clamp(settings.puckOpacity / 100, 0, 1);
+  const pa = settings.invisible ? 0 : clamp(1 - settings.puckTransparency / 100, 0, 1);
   game.arcade.puckAlpha = pa;
   renderer.puckAlpha = pa;
 }
@@ -1793,7 +1946,7 @@ function persist() { saveSettings(settings); }
 
 // =============== 유틸 ===============
 function open(panel) { panel.classList.remove('hidden'); els.toast.classList.add('hidden'); } // 창을 열면 떠 있던 안내(토스트)는 치운다
-function close(panel) { panel.classList.add('hidden'); }
+function close(panel) { panel.classList.add('hidden'); if (panel.id === 'panel-login') restoreAuthCard(); }
 function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
 function showSplashError(msg) { els.splashError.textContent = msg; els.splashError.classList.remove('hidden'); }
 

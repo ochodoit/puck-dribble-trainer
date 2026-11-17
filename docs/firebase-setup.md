@@ -11,7 +11,7 @@
 ### 1. 로그인 방식 켜기
 빌드 > **Authentication** > 시작하기 > **로그인 방법** 탭 > **이메일/비밀번호** > 사용 설정 > 저장
 
-게임은 "별명 + 숫자 6자리"로 로그인하지만, 내부적으로 별명을 가상 이메일(`u-xxxx@headsuppuck.firebaseapp.com`)로 바꿔 이메일/비밀번호 방식을 씁니다. 이 도메인은 아무도 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없습니다. 예전 계정은 `u-xxxx@puck-trainer.app` (로그인할 때 자동으로 함께 시도).
+게임은 "별명 + 숫자 6자리"로 로그인하지만, 내부적으로 별명을 가상 이메일(`u-xxxx@headsuppuck.firebaseapp.com`)로 바꿔 이메일/비밀번호 방식을 씁니다. 이 도메인은 아무도 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없습니다. 예전 주소(`u-xxxx@puck-trainer.app`) 계정은 2026-11-17에 모두 새 주소로 옮겼습니다(앱은 로그인할 때 예전 주소도 함께 시도).
 
 ### 2. 사이트 주소 등록
 Authentication > **설정** 탭 > **승인된 도메인** > 도메인 추가 > `puck-trainer.com`, `ochodoit.github.io`
@@ -361,7 +361,7 @@ const firebaseConfig = {
 
 ### 8. 보안 겹 더하기 (권장)
 1. **운영자 비밀번호**: 운영자 화면 > **운영자 비밀번호**에서 12자 이상으로 바꾸기 (숫자만 써도 됨)
-2. **예전 로그인 도메인 사 두기**: 예전 계정은 `@puck-trainer.app` 가상 이메일이라, 그 도메인을 남이 사면 비밀번호 재설정 메일을 받을 수 있음. 도메인 등록 업체에서 `puck-trainer.app` 을 사 두면 막힘
+2. **예전 로그인 도메인**: 예전 `@puck-trainer.app` 가상 이메일 계정은 2026-11-17에 모두 새 주소로 옮겨서 그 도메인을 사 둘 필요 없음. 예전 주소 계정이 다시 생기면: Authentication > 설정 > 사용자 작업 > **이메일 열거 보호**를 잠깐 끄고, 그 계정으로 한 번 로그인한 뒤 다시 켜기
 3. (선택) **API 키 제한**: Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 > Browser key > 애플리케이션 제한 = HTTP 리퍼러, 허용: `https://puck-trainer.com/*`, `https://ochodoit.github.io/*`, `http://localhost/*`, `http://127.0.0.1/*` — 복사한 사이트는 로그인·가입을 못 함
 4. (선택) **App Check**: Firebase 콘솔 > App Check > 웹 앱에 reCAPTCHA v3 등록 → 코드에 App Check 초기화를 넣은 뒤 Firestore·Authentication 적용(enforce). 스크립트·복사 사이트의 접근을 막음
 

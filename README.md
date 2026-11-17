@@ -126,7 +126,7 @@
 
 ### 온라인 랭킹 켜기 (Firebase, 무료 요금제로 충분)
 
-1. https://console.firebase.google.com 에서 프로젝트 생성 → **Authentication > 로그인 방법 > 이메일/비밀번호** 사용 설정 (별명이 내부적으로 `u-<hex>@<프로젝트>.firebaseapp.com` 형태의 가상 이메일로 변환됩니다. 예전 계정은 `@puck-trainer.app`).
+1. https://console.firebase.google.com 에서 프로젝트 생성 → **Authentication > 로그인 방법 > 이메일/비밀번호** 사용 설정 (별명이 내부적으로 `u-<hex>@<프로젝트>.firebaseapp.com` 형태의 가상 이메일로 변환됩니다. 예전 `@puck-trainer.app` 계정은 2026-11-17에 모두 새 주소로 옮김).
 2. **Firestore Database** 생성(프로덕션 모드) → 규칙 탭에 `firestore.rules` 내용을 붙여넣고 게시.
 3. 프로젝트 설정 > 내 앱 > 웹 앱 추가 → 표시되는 `firebaseConfig` 값을 `src/firebase-config.js` 에 붙여넣고 커밋·푸시.
 4. 배포 후 첫 화면 안내문이 "온라인 랭킹"으로 바뀌면 완료. 데이터: `users/{uid}` 프로필(= 정회원), `nicks/{별명}` 고유성, `scores_{모드}/{uid}` 모드별 최고 기록, `posts/{id}` 커뮤니티 글(`records`·`cheers` 하위 컬렉션), `codes/{코드}` 가입 코드, `meta/members` 회원 수(정회원 번호), `config/site` 게스트 안내·베타 종료일, `feedback/{uid}` 개발자에게(본인·운영자만 읽음), `admins/{uid}` 운영자.
@@ -292,7 +292,7 @@ iPadOS에서는 Safari 공유 메뉴 → **홈 화면에 추가**로 전체화�
 | 6. 정리 | 운영자는 글·도전 기록·랭킹 기록·의견을 지울 수 있음. 마우스 모드(운영자 테스트) 기록은 랭킹에 안 올라감 | 규칙 + 운영자 |
 
 알아 둘 한계와 추가로 할 수 있는 것:
-- **예전 계정**(`u-…@puck-trainer.app`)은 그 도메인을 누가 사면 비밀번호 재설정 메일을 받아 계정을 뺏을 수 있습니다. 로그인할 때 새 주소로 옮겨 보지만 Firebase 설정상 안 될 수 있으니, **`puck-trainer.app` 도메인을 직접 사 두는 것**(연 2만 원 안팎)이 가장 확실합니다. 운영자 계정은 비밀번호를 12자 이상으로 바꾸세요.
+- **예전 계정**(`u-…@puck-trainer.app`)은 2026-11-17에 모두 새 주소로 옮겨서 남은 계정이 없습니다. 누가 `puck-trainer.app` 도메인을 사도 계정을 뺏을 수 없으니 사 둘 필요가 없습니다. 예전 주소 계정이 다시 생기면(옛 백업 복원 등) 앱이 로그인할 때 새 주소로 옮기는데, Firebase의 이메일 열거 보호가 켜져 있으면 막히므로 Authentication > 설정 > 사용자 작업 > **이메일 열거 보호**를 잠깐 끄고, 그 계정으로 한 번 로그인한 뒤 다시 켜세요. 운영자 계정은 비밀번호를 12자 이상으로 바꾸세요.
 - 서버 없이 점수를 계산하므로, 마음먹고 조작하는 사람의 가짜 점수를 완전히 막을 수는 없습니다(범위·내림 금지·속도 제한으로 어렵게만 함). 이상한 기록은 운영자가 지웁니다.
 - 일반 회원은 숫자 6자리 비밀번호입니다. Firebase가 틀린 시도를 자동으로 늦추지만, 아래 App Check를 켜면 더 안전합니다.
 - 콘솔에서 더 켤 수 있는 겹(선택): **API 키 HTTP 리퍼러 제한**(Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 > 브라우저 키 > `https://puck-trainer.com/*`, `https://ochodoit.github.io/*`, `http://localhost/*`, `http://127.0.0.1/*`), **App Check**(reCAPTCHA v3, 복사한 사이트·스크립트의 Firebase 접근 차단).

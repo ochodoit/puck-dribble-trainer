@@ -2,6 +2,9 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
+  <!-- 보안: 이 사이트와 Firebase·글꼴 주소의 스크립트만 실행 (글에 HTML이 끼어들어도 스크립트는 못 돈다) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com; frame-src https://headsuppuck.firebaseapp.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#F4F1EA" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -73,11 +76,11 @@
 
       <!-- 영역 편집 바 -->
       <div id="area-bar" class="area-bar hidden">
-        <span class="area-hint"><b id="area-step" class="setup-step hidden">1 / 2 플레이 공간</b>네 모서리를 실제 바닥 모서리에 맞추세요. 뒤쪽(멀리)은 좁게, 앞쪽(카메라)은 넓게 — 원근 격자가 바닥에 붙어 보이면 맞습니다.</span>
+        <span class="area-hint"><b id="area-step" class="setup-step hidden">1 / 2 플레이 공간</b>가운데 틀의 네 모서리를 바깥으로 끌어 실제 바닥 모서리에 맞추세요. 뒤쪽(멀리)은 좁게, 앞쪽(카메라)은 넓게 — 원근 격자가 바닥에 붙어 보이면 맞습니다.</span>
         <div class="area-actions">
           <button id="area-auto" class="btn btn-ghost">흰 바닥 자동</button>
           <button id="area-full" class="btn btn-ghost">화면 전체</button>
-          <button id="area-reset" class="btn btn-ghost">사다리꼴 초기화</button>
+          <button id="area-reset" class="btn btn-ghost">가운데 틀로</button>
           <button id="area-done" class="btn btn-primary">완료</button>
         </div>
       </div>
@@ -117,15 +120,16 @@
           <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="" role="img" aria-label="스틱과 퍽 일러스트" decoding="async" />
         </picture>
         <p class="lead">퍽을 읽는 스틱 핸들링 게임. 당신의 실력을 보여주세요</p>
-        <form id="pin-form" class="pin-form hidden" autocomplete="off">
-          <input id="pin-input" type="password" inputmode="numeric" placeholder="접속 코드" aria-label="접속 코드" />
-          <button type="submit" class="btn btn-primary">확인</button>
-          <p id="pin-error" class="error hidden">코드가 맞지 않습니다</p>
-        </form>
+        <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
+        <div id="invite-card" class="invite-card hidden" role="status">
+          <b id="invite-title"></b>
+          <span id="invite-sub"></span>
+        </div>
         <!-- 로그인 / 회원가입 -->
         <div id="auth-card" class="auth-card hidden">
           <div id="auth-logged" class="auth-logged hidden">
             <span id="auth-who"></span>
+            <button type="button" id="btn-admin" class="btn btn-ghost hidden">운영자</button>
             <button type="button" id="btn-logout" class="btn btn-ghost">로그아웃</button>
           </div>
           <form id="auth-form" autocomplete="off">
@@ -135,12 +139,14 @@
             </div>
             <div class="auth-grid">
               <label>플레이어 별명<input id="auth-nick" type="text" maxlength="12" placeholder="예: 번개손" required /></label>
-              <label>비밀번호 (숫자 6자리)<input id="auth-pin" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" placeholder="••••••" required /></label>
+              <label>비밀번호 (숫자 6자리)<input id="auth-pin" type="password" inputmode="numeric" maxlength="64" placeholder="••••••" required /></label>
+              <label class="reg-only hidden">가입 코드<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="예: K7MP-Q2XD" /></label>
               <label class="reg-only hidden">국가<select id="auth-country"></select></label>
               <label class="reg-only hidden">팀 이름<input id="auth-team" type="text" maxlength="20" placeholder="예: 서울 유스" /></label>
               <label class="reg-only hidden">나이<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="예: 11" /></label>
               <label class="reg-only hidden">등번호 (선택)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="예: 87" /></label>
             </div>
+            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요. 별명은 실명 대신 쓰세요 (랭킹에 공개됩니다).</p>
             <p id="auth-error" class="error hidden"></p>
             <div class="row" style="justify-content:center">
               <button type="submit" id="auth-submit" class="btn btn-primary">로그인</button>
@@ -170,6 +176,7 @@
             <li><span><b>주의</b> — 같은 색 물체를 바닥에 두지 마세요. 화면이 가려지면 추적이 멈춥니다.</span></li>
           </ol>
         </details>
+        <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>무단 복제·배포 금지</span></p>
       </div>
     </div>
 
@@ -183,9 +190,20 @@
             <button type="button" data-min="3">3분</button>
             <button type="button" data-min="5">5분</button>
           </div>
-          <p class="muted">게임 시간 — 아케이드·퍽 피하기에 적용(와이드 드리블은 훈련 3가지를 이 시간씩). 랭킹은 시간별로 따로 집계됩니다.</p>
+          <p class="muted">게임 시간 · 랭킹은 시간별로 따로</p>
         </div>
-        <p id="mode-pick-hint" class="muted pick-hint">퍽을 움직여 고르세요 — 빨간 점이 카드 위에 2초 머물면 선택됩니다.</p>
+        <div class="time-row f8-row">
+          <div id="f8-side" class="seg" role="group" aria-label="8자 드리블: 먼저 갈 콘">
+            <button type="button" data-side="L">왼쪽 먼저</button>
+            <button type="button" data-side="R">오른쪽 먼저</button>
+          </div>
+          <div id="f8-turn" class="seg" role="group" aria-label="8자 드리블: 콘을 도는 방향">
+            <button type="button" data-turn="up">위로 돌기</button>
+            <button type="button" data-turn="down">아래로 돌기</button>
+          </div>
+          <p class="muted">8자 드리블 방향</p>
+        </div>
+        <p id="mode-pick-hint" class="muted pick-hint">퍽을 카드 가운데에 2초 두면 선택</p>
         <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
         <div id="mode-list" class="mode-list"></div>
         <div class="versus-row">
@@ -267,6 +285,7 @@
         </div>
         <div class="row">
           <span id="settings-account" class="muted" style="align-self:center"></span>
+          <button id="btn-settings-admin" class="btn btn-ghost hidden">운영자</button>
           <button id="btn-settings-logout" class="btn btn-ghost hidden">로그아웃</button>
         </div>
         <div class="row">
@@ -330,6 +349,7 @@
         <header><h2 id="result-title">결과</h2><button class="btn btn-ghost btn-close" data-close="panel-result">닫기</button></header>
         <div id="result-body" class="result-body"></div>
         <p id="result-rank" class="result-rank hidden"></p>
+        <div id="result-guest" class="result-guest hidden"></div>
         <div id="result-share" class="result-share hidden"></div>
         <div id="result-choice" class="choice">
           <button id="btn-result-again" class="choice-opt left"><span class="choice-fill"></span><span class="choice-label">한 번 더</span><small>← 퍽을 왼쪽에</small></button>
@@ -341,6 +361,76 @@
           </div>
           <button id="btn-result-mode" class="choice-opt right"><span class="choice-fill"></span><span class="choice-label">모드 선택</span><small>퍽을 오른쪽에 →</small></button>
         </div>
+      </div>
+    </div>
+
+    <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견 -->
+    <div id="panel-admin" class="panel modal hidden">
+      <div class="modal-card admin">
+        <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">닫기</button></header>
+        <p id="adm-error" class="error hidden"></p>
+        <section class="adm-sec">
+          <h3>가입 준비</h3>
+          <p id="adm-members" class="muted"></p>
+          <button type="button" id="adm-init" class="btn btn-primary hidden">가입 준비 (기존 가입자에게 번호 매기기)</button>
+        </section>
+        <section class="adm-sec">
+          <h3>운영자 비밀번호</h3>
+          <p class="muted">운영자 계정은 숫자 6자리 대신 12자 이상 비밀번호를 쓰세요. 휴대폰 로그인 화면은 숫자 키패드라 숫자 12자리 이상이 편합니다.</p>
+          <div class="adm-row">
+            <label>지금 비밀번호<input id="adm-pw-now" type="password" maxlength="64" autocomplete="current-password" /></label>
+            <label>새 비밀번호 (12자 이상)<input id="adm-pw-new" type="password" maxlength="64" autocomplete="new-password" /></label>
+            <label>새 비밀번호 확인<input id="adm-pw-new2" type="password" maxlength="64" autocomplete="new-password" /></label>
+            <button type="button" id="adm-pw-save" class="btn">비밀번호 바꾸기</button>
+          </div>
+        </section>
+        <section class="adm-sec">
+          <h3>1회용 코드</h3>
+          <p class="muted">인스타 플레이 인증을 확인한 게스트에게 DM으로 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
+          <div class="adm-row">
+            <input id="adm-one-note" type="text" maxlength="60" placeholder="메모 (예: 인스타 아이디)" aria-label="메모" />
+            <button type="button" id="adm-one" class="btn btn-primary">만들기</button>
+          </div>
+          <div id="adm-one-out" class="adm-out hidden"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>베타 링크</h3>
+          <p class="muted">여러 명이 같은 링크로 가입합니다. 마감일이 지나면 자동으로 막힙니다.</p>
+          <div class="adm-row">
+            <label>마감일<input id="adm-beta-date" type="date" /></label>
+            <label>인원 상한<input id="adm-beta-max" type="number" min="0" inputmode="numeric" placeholder="0 = 제한 없음" /></label>
+            <input id="adm-beta-note" type="text" maxlength="60" placeholder="메모" aria-label="메모" />
+            <button type="button" id="adm-beta" class="btn btn-primary">만들기</button>
+          </div>
+          <div id="adm-beta-out" class="adm-out hidden"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>게스트 안내</h3>
+          <p class="muted">게스트의 결과 화면에 나오는 정회원 코드 받는 방법입니다. 플레이 영상을 인스타에 올리고 공식 계정으로 DM을 보내도록 안내합니다.</p>
+          <div class="adm-row">
+            <label>공식 인스타 계정<input id="adm-sns" type="text" maxlength="60" placeholder="예: puck.official" /></label>
+            <label>해시태그<input id="adm-hashtag" type="text" maxlength="40" placeholder="예: 퍽드리블챌린지" /></label>
+            <button type="button" id="adm-save-config" class="btn">저장</button>
+          </div>
+        </section>
+        <section class="adm-sec">
+          <h3>베타 기간</h3>
+          <p class="muted">종료일까지 커뮤니티의 [개발자에게]로 의견을 보낸 베타 멤버만 정회원으로 남습니다. 보내지 않은 멤버는 종료일 다음부터 랭킹 등록·글쓰기가 막힙니다.</p>
+          <div class="adm-row">
+            <label>베타 종료일<input id="adm-beta-end" type="date" /></label>
+            <button type="button" id="adm-save-beta-end" class="btn">저장</button>
+          </div>
+          <p id="adm-beta-sum" class="muted"></p>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>번호</th><th>별명</th><th>의견</th><th>상태</th><th></th></tr></thead><tbody id="adm-betas"></tbody></table></div>
+        </section>
+        <section class="adm-sec">
+          <h3>개발자에게 온 의견</h3>
+          <div id="adm-feedback" class="adm-feedback"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>코드 목록</h3>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>코드</th><th>종류</th><th>사용</th><th>마감</th><th>메모</th><th>상태</th><th></th></tr></thead><tbody id="adm-codes"></tbody></table></div>
+        </section>
       </div>
     </div>
 
@@ -360,6 +450,7 @@
             <button type="button" data-sort="cheers">응원순</button>
           </div>
           <button type="button" id="comm-write" class="btn btn-primary">글쓰기</button>
+          <button type="button" id="comm-feedback" class="btn">개발자에게</button>
         </div>
         <p id="comm-note" class="muted"></p>
         <form id="comm-form" class="comm-form hidden" autocomplete="off">
@@ -374,6 +465,18 @@
           <div class="row">
             <button type="submit" id="comm-submit" class="btn btn-primary">올리기</button>
             <button type="button" id="comm-cancel" class="btn btn-ghost">취소</button>
+          </div>
+        </form>
+        <form id="fb-form" class="comm-form fb-form hidden" autocomplete="off">
+          <h3>개발자에게</h3>
+          <p id="fb-intro" class="fb-intro"></p>
+          <label>좋았던 점 <output id="fb-good-count">0/500</output><textarea id="fb-good" rows="3" maxlength="500" placeholder="예: 8자 드리블 방향을 바꿀 수 있어서 좋아요"></textarea></label>
+          <label>고쳤으면 하는 점 <output id="fb-fix-count">0/500</output><textarea id="fb-fix" rows="3" maxlength="500" placeholder="예: 어두운 곳에서 퍽을 자주 놓쳐요"></textarea></label>
+          <p class="muted">개발자만 읽어요. 다시 보내면 고쳐집니다.</p>
+          <p id="fb-error" class="error hidden"></p>
+          <div class="row">
+            <button type="submit" id="fb-submit" class="btn btn-primary">보내기</button>
+            <button type="button" id="fb-cancel" class="btn btn-ghost">취소</button>
           </div>
         </form>
         <div class="comm-main">

@@ -1,4 +1,5 @@
 // 앱 오케스트레이션: 카메라 -> 영상처리 -> 추적 -> 게임 -> 렌더/HUD
+import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨터가 아니면 여기서 멈춤 (복제 사이트·iframe 막기)
 import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
@@ -6,10 +7,9 @@ import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
-import { isLocked, tryUnlock } from './access.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED } from './account.js';
 import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
-import { decideIdle, stepChoice, stepDwell, CHOICE_HOLD_S } from './idle-logic.js';
+import { decideIdle, stepChoice, stepDwell, inCardCore, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAge, canRecordOn, TITLE_MAX } from './community.js';
 import { initCommunity } from './community-ui.js';
@@ -58,12 +58,16 @@ const app = {
   challenge: null,    // 커뮤니티 코스 도전 중: { id, title, sig, holder: {uid, nick, avg, best}|null }
   scoreChallenge: null, // 기록 자랑 글의 '나도 연습하기' 중: { id, title, key, score, nick, author, limit }
   communityStore: null, // Promise<커뮤니티 저장소>
+  invite: null,         // 초대 링크(?c=코드)로 받은 가입 코드
 };
 let community = null;   // 커뮤니티 화면 (initCommunity 반환값)
 const autoCal = new AutoCalibrator(3);
+// init() 안에서 바로 쓰므로 init() 호출보다 위에 둔다 (const는 선언 전에 못 씀)
+const INVITE_KEY = 'puck-trainer.invite.v1';
 
-// 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등)
-window.__puckTrainer = { settings, vision, tracker, game, app, mouse, i18n: { tr, setLang, getLang, missing: i18nMissing } };
+// 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등).
+// 내 컴퓨터(localhost)에서 열었을 때만 만든다. 공개 사이트에서는 콘솔로 게임 상태를 바꿔 기록을 조작하는 데 쓰일 수 있어서
+if (isDevHost(location)) window.__puckTrainer = { settings, vision, tracker, game, app, mouse, i18n: { tr, setLang, getLang, missing: i18nMissing } };
 
 // =============== 초기화 ===============
 init();
@@ -74,13 +78,15 @@ function init() {
   onLangChange(() => { renderModeList(); updateHud(true); refreshCalibUI(); if (!els.panelCommunity.classList.contains('hidden')) community?.refresh(); });
   applySettingsToUI();
   bindUI();
-  setupAccessGate();
+  app.invite = readInvite();
   const accountReady = setupAuth();
   app.communityStore = accountReady.then(() => createCommunityStore(app.account));
   setupCommunity();
+  setupFeedback();
   game.difficulty = settings.difficulty;
   game.playSeconds = settings.playMinutes * 60;
   game.invisible = settings.invisible;
+  game.figure8Dir = settings.figure8Dir;
   game.resetState();
   renderModeList();
   initCourse();
@@ -112,11 +118,60 @@ async function setupAuth() {
   AGE_GROUPS.forEach((g) => { const o = document.createElement('option'); o.value = g; o.textContent = g; els.rankAge.appendChild(o); });
 
   app.account = await createAccountStore();
-  window.__puckTrainer.account = app.account;
+  if (window.__puckTrainer) window.__puckTrainer.account = app.account;
+  app.site = await app.account.getSiteConfig().catch(() => ({})); // 게스트 안내 · 베타 종료일
   els.authNote.textContent = app.account.kind === 'firebase'
     ? '온라인 랭킹 — 모든 기기의 기록이 함께 집계됩니다.'
     : '기록은 이 기기에 저장됩니다. 여러 선수가 같은 기기로 겨룰 수 있어요.';
   refreshAuthUI();
+  setupAdmin();
+  showInvite();
+}
+
+// =============== 초대 링크 · 가입 코드 ===============
+/** 주소의 ?c=코드 를 읽어 기억하고 주소에서는 지운다 (새로고침해도 가입 칸에 남게) */
+function readInvite() {
+  let code = null;
+  try {
+    const url = new URL(location.href);
+    const c = url.searchParams.get('c');
+    if (c) {
+      code = normCode(c);
+      localStorage.setItem(INVITE_KEY, code);
+      url.searchParams.delete('c');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } else code = localStorage.getItem(INVITE_KEY);
+  } catch { /* 저장 불가 */ }
+  return code || null;
+}
+
+function forgetInvite() {
+  app.invite = null;
+  try { localStorage.removeItem(INVITE_KEY); } catch { /* ignore */ }
+  $('#invite-card').classList.add('hidden');
+}
+
+const shortDate = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+
+/** 초대 카드: 코드 상태에 따라 '베타 초대 링크예요' 등. 쓸 수 있으면 회원가입 칸을 열고 코드를 채운다 */
+async function showInvite() {
+  const card = $('#invite-card');
+  card.classList.add('hidden');
+  if (!app.invite || !app.account || app.account.current()) return;
+  const info = await app.account.checkCode(app.invite);
+  const ok = info.status === 'ok';
+  let title, sub;
+  if (ok && info.type === 'beta') { title = '베타 초대 링크예요'; sub = info.expiresAt ? `${shortDate(info.expiresAt)}까지 가입하면 바로 정회원` : '지금 가입하면 바로 정회원'; }
+  else if (ok) { title = '정회원 초대 코드예요'; sub = '가입하면 바로 정회원이 됩니다'; }
+  else {
+    title = info.status === 'expired' ? '마감된 링크예요' : info.status === 'error' ? codeError('error') : info.status === 'full' ? codeError('full', info) : '쓸 수 없는 코드예요';
+    sub = '게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요';
+  }
+  $('#invite-title').textContent = title;
+  $('#invite-sub').textContent = sub;
+  card.classList.toggle('bad', !ok);
+  card.classList.remove('hidden');
+  if (ok) { setAuthTab('register'); $('#auth-code').value = codeLabel(info.code); }
 }
 
 function setAuthTab(tab) {
@@ -124,6 +179,9 @@ function setAuthTab(tab) {
   $$('.auth-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   $$('.reg-only').forEach((e) => e.classList.toggle('hidden', tab !== 'register'));
   els.authSubmit.textContent = tab === 'register' ? '가입하고 시작' : '로그인';
+  // 가입은 숫자 6자리, 로그인은 운영자의 긴 비밀번호(12자 이상)도 받는다
+  const pin = $('#auth-pin');
+  if (tab === 'register') { pin.setAttribute('pattern', '\\d{6}'); pin.maxLength = 6; } else { pin.removeAttribute('pattern'); pin.maxLength = 64; }
   els.authError.classList.add('hidden');
 }
 
@@ -134,8 +192,10 @@ async function onAuthSubmit(e) {
   els.authSubmit.disabled = true;
   try {
     if (app.authTab === 'register') {
-      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value });
-      toast(`환영합니다, ${app.account.current().nick}!`);
+      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value, code: $('#auth-code').value });
+      forgetInvite();
+      $('#auth-code').value = '';
+      toast(`환영합니다, ${app.account.current().nick}! ${memberBadge(app.account.current())}`, 4000);
     } else {
       await app.account.login(nick, pin);
     }
@@ -158,12 +218,27 @@ function refreshAuthUI() {
   const u = app.account?.current();
   els.authLogged.classList.toggle('hidden', !u);
   els.authForm.classList.toggle('hidden', !!u);
-  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)`;
+  if (u) els.authWho.innerHTML = `<b>${esc(u.nick)}</b>${u.number != null ? ` <span class="jersey">${jerseyLabel(u.number)}</span>` : ''} <span class="member-badge">${esc(memberBadge(u))}</span> · ${esc(u.team)} · ${esc(countryLabel(u.country))} · ${esc(u.ageGroup)} (${u.age}세)${betaChipHtml()}`;
   $('#settings-account').textContent = u ? `로그인: ${[u.nick, jerseyLabel(u.number)].filter(Boolean).join(' ')} (${u.team}, ${u.ageGroup})` : '로그인하지 않음 (랭킹 미등록)';
   $('#btn-settings-logout').classList.toggle('hidden', !u);
+  $('#btn-admin').classList.toggle('hidden', !isAdmin(u));
+  $('#btn-settings-admin').classList.toggle('hidden', !isAdmin(u));
   refreshMouseButton();
   if (!u) { setAuthTab(app.authTab); els.authForm.classList.remove('hidden'); }
+  else $('#invite-card').classList.add('hidden');
 }
+
+/** 베타 멤버 상태 칩: 마감 전 '의견 보내고 정회원 유지', 보냈으면 '정회원 유지', 마감까지 못 보냈으면 '베타 종료' */
+function betaChipHtml() {
+  const st = app.account?.memberState?.() || 'guest';
+  const end = app.site?.betaEndsAt;
+  if (st === 'beta' && end) return ` <button type="button" class="beta-chip" data-feedback>의견 보내고 정회원 유지 · ${shortDate(end)}까지</button>`;
+  if (st === 'kept' && end) return ' <span class="beta-chip ok">정회원 유지</span>';
+  if (st === 'lapsed') return ' <button type="button" class="beta-chip bad" data-feedback>베타 종료 · 정회원 유지 안 됨</button>';
+  return '';
+}
+/** 로그인했지만 베타가 끝나 정회원이 유지되지 않은 계정인가 (랭킹·글쓰기 막힘) */
+const lapsedNow = () => !!app.account?.current() && !isActiveMember(app.account.memberState());
 
 function rankFilters() {
   const u = app.account?.current();
@@ -193,7 +268,7 @@ async function renderRank() {
   try {
     const rows = await app.account.leaderboard(mode, rankFilters(), 100);
     els.rankBody.innerHTML = rows.length ? rows.map((r) => `<tr class="${u && r.uid === u.id ? 'me' : ''} ${r.rank <= 3 ? 'top' + r.rank : ''}">
-      <td>${r.rank}</td><td>${esc(r.nick)}${r.number != null ? ` <span class="jersey">${jerseyLabel(r.number)}</span>` : ''}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${r.score}</td></tr>`).join('')
+      <td>${r.rank}</td><td>${esc(r.nick)}${r.number != null ? ` <span class="jersey">${jerseyLabel(r.number)}</span>` : ''}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${num(r.score)}</td></tr>`).join('')
       : '<tr><td colspan="6" class="muted">아직 기록이 없습니다. 게임을 끝까지 플레이하면 등록됩니다.</td></tr>';
     const me = u ? await app.account.myRank(mode, rankFilters()) : null;
     els.rankMe.textContent = u ? (me ? `내 순위: ${me.rank}위 / ${me.total}명 (최고 ${me.score}점)` : '이 조건에 내 기록이 없습니다') : '로그인하면 내 순위가 표시됩니다';
@@ -205,8 +280,12 @@ async function renderRank() {
 /** 게임 종료 시 기록 등록 + 결과 패널에 순위 표시 */
 async function submitResult(result) {
   els.resultRank.classList.add('hidden');
+  $('#result-guest').classList.add('hidden');
   const u = app.account?.current();
-  if (!u || result.mode.id === 'free' || result.reason === 'manual' || app.versus) return;
+  if (result.mode.id === 'free' || result.reason === 'manual' || app.versus) return;
+  if (app.mouseMode) { els.resultRank.textContent = '마우스 모드 기록은 랭킹에 올라가지 않습니다'; els.resultRank.classList.remove('hidden'); return; }
+  if (!u) { renderGuestNotice(result); return; }
+  if (lapsedNow()) { renderGuestNotice(result, true); return; }
   try {
     const key = result.rankKey || result.mode.id;
     const { best, improved } = await app.account.submitScore(key, result.score);
@@ -225,19 +304,179 @@ async function submitResult(result) {
 }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+/** 저장된 숫자 칸을 HTML에 넣을 때: 숫자가 아니면 0 (조작된 문서로 HTML이 끼어들지 못하게) */
+function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-/** 접속 코드 게이트 (공개 호스팅에서 본인만 사용) */
-function setupAccessGate() {
-  const form = $('#pin-form'), input = $('#pin-input'), err = $('#pin-error');
-  if (!isLocked()) return;
-  form.classList.remove('hidden');
-  els.btnCamera.classList.add('hidden');
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const ok = await tryUnlock(input.value);
-    if (ok) { form.classList.add('hidden'); els.btnCamera.classList.remove('hidden'); els.btnCamera.focus(); refreshMouseButton(); }
-    else { err.classList.remove('hidden'); input.value = ''; input.focus(); }
+/**
+ * 게스트 결과 화면: 정회원이었다면 몇 위였을지 + 인스타 플레이 인증 후 DM으로 정회원 코드를 받는 방법.
+ * lapsed: 베타가 끝나 정회원이 유지되지 않은 계정 (기록이 랭킹에 안 올라감 + DM 문의)
+ */
+async function renderGuestNotice(result, lapsed = false) {
+  const box = $('#result-guest');
+  if (!app.account) return;
+  const key = result.rankKey || result.mode.id;
+  const [r, cfg] = await Promise.all([
+    app.account.wouldRank(key, result.score).catch(() => null),
+    app.account.getSiteConfig().catch(() => ({})),
+  ]);
+  if (app.lastResult !== result || (!lapsed && app.account.current())) return; // 그새 다음 게임이 끝났거나 로그인함
+  const tag = String(cfg.hashtag || '').trim().replace(/^#+/, '');
+  const sns = instaId(cfg.snsAccount);
+  const html = [];
+  if (lapsed) {
+    html.push(`<p class="guest-rank"><b>${LAPSED}</b></p>`);
+    html.push('<p>이번 기록은 랭킹에 올라가지 않아요. 정회원 등급은 공식 인스타 DM으로 문의해 주세요.</p>');
+  } else {
+    if (r) html.push(`<p class="guest-rank"><b>정회원이었다면 지금 전체 ${r.rank}위 / ${r.total}명</b></p>`);
+    html.push('<p>플레이 영상을 인스타에 올리고 공식 계정으로 DM을 보내 주세요. 확인되면 정회원 가입 코드를 DM으로 보내 드려요.</p>');
+    if (tag || sns) html.push(`<p class="guest-tags" data-ugc>${[tag && `#${esc(tag)}`, sns && `@${esc(sns)}`].filter(Boolean).join(' ')}</p>`);
+    html.push('<p class="muted">보호자와 함께 해 주세요 · 얼굴 없이 판과 퍽만 나와도 괜찮아요 · 비공개 계정이면 영상이나 캡처를 DM에 함께 보내 주세요</p>');
+  }
+  if (sns) html.push(`<div class="guest-dm"><a class="btn btn-primary" id="guest-dm" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span></div>`);
+  if (!lapsed) html.push('<p class="muted">받은 코드는 첫 화면 회원가입의 가입 코드 칸에 넣으세요.</p>');
+  box.innerHTML = html.join('');
+  box.classList.remove('hidden');
+}
+
+// =============== 운영자 화면 ===============
+function setupAdmin() {
+  const openAdmin = () => { open($('#panel-admin')); renderAdmin(); };
+  $('#btn-admin').addEventListener('click', openAdmin);
+  $('#btn-settings-admin').addEventListener('click', () => { close(els.panelSettings); openAdmin(); });
+  $('#adm-init').addEventListener('click', () => adminDo(async () => {
+    const r = await app.account.initMembers();
+    toast(`가입 준비 완료 · 기존 가입자 ${r.assigned}명에게 번호를 매겼습니다`, 4000);
+    refreshAuthUI();
+  }));
+  $('#adm-pw-save').addEventListener('click', () => adminDo(async () => {
+    const ids = ['#adm-pw-now', '#adm-pw-new', '#adm-pw-new2'];
+    if ($('#adm-pw-new').value !== $('#adm-pw-new2').value) throw new Error('새 비밀번호가 서로 다릅니다');
+    await app.account.changePassword($('#adm-pw-now').value, $('#adm-pw-new').value);
+    ids.forEach((s) => { $(s).value = ''; });
+    toast('운영자 비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요', 4000);
+  }));
+  $('#adm-one').addEventListener('click', () => adminDo(async () => {
+    const c = await app.account.issueCode({ type: 'one', note: $('#adm-one-note').value });
+    $('#adm-one-note').value = '';
+    showIssued($('#adm-one-out'), c);
+  }));
+  $('#adm-beta').addEventListener('click', () => adminDo(async () => {
+    const date = $('#adm-beta-date').value;
+    if (!date) throw new Error('마감일을 고르세요');
+    const c = await app.account.issueCode({ type: 'beta', expiresAt: endOfDay(date), maxUses: $('#adm-beta-max').value, note: $('#adm-beta-note').value });
+    showIssued($('#adm-beta-out'), c);
+  }));
+  $('#adm-save-config').addEventListener('click', () => adminDo(async () => {
+    const raw = $('#adm-sns').value.trim(), sns = instaId(raw);
+    if (raw && !sns) throw new Error('인스타 계정 아이디를 확인하세요 (영문·숫자·밑줄·점)');
+    app.site = await app.account.setSiteConfig({ hashtag: $('#adm-hashtag').value.trim().replace(/^#+/, ''), snsAccount: sns });
+    app.adminConfigLoaded = false;
+    toast('게스트 안내를 저장했습니다');
+  }));
+  $('#adm-save-beta-end').addEventListener('click', () => adminDo(async () => {
+    const date = $('#adm-beta-end').value;
+    app.site = await app.account.setSiteConfig({ betaEndsAt: date ? endOfDay(date) : null });
+    app.adminConfigLoaded = false;
+    refreshAuthUI();
+    toast(date ? `베타 종료일을 ${shortDate(endOfDay(date))}로 저장했습니다` : '베타 종료일을 지웠습니다');
+  }));
+  $('#adm-betas').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (b) adminDo(async () => { await app.account.keepMember(b.closest('tr').dataset.uid, b.dataset.act === 'keep'); refreshAuthUI(); });
   });
+  $('#adm-codes').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const code = b.closest('tr').dataset.code;
+    if (b.dataset.act === 'copy') copyText(inviteLink(code));
+    else if (b.dataset.act === 'code') copyText(codeLabel(code), '코드를 복사했습니다');
+    else adminDo(() => app.account.updateCode(code, { off: b.dataset.act === 'off' }));
+  });
+  $('#adm-codes').addEventListener('change', (e) => {
+    const inp = e.target.closest('input[data-act="expiry"]');
+    if (inp && inp.value) adminDo(() => app.account.updateCode(inp.closest('tr').dataset.code, { expiresAt: endOfDay(inp.value) }));
+  });
+}
+
+/** 운영자 작업 실행 -> 오류는 화면 위에, 끝나면 목록 새로고침 */
+async function adminDo(fn) {
+  const err = $('#adm-error');
+  err.classList.add('hidden');
+  try { await fn(); } catch (e) { err.textContent = e.message || String(e); err.classList.remove('hidden'); }
+  await renderAdmin();
+}
+
+/** 'YYYY-MM-DD' -> 그날 23:59:59 (이 기기 시간대) */
+function endOfDay(date) { const [y, m, d] = date.split('-').map(Number); return new Date(y, m - 1, d, 23, 59, 59, 999).getTime(); }
+const ymd = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const inviteLink = (code) => `${location.origin}${location.pathname}?c=${codeLabel(code)}`;
+
+function copyText(text, msg = '링크를 복사했습니다') {
+  const done = () => toast(msg);
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, () => toast(text, 6000));
+  else toast(text, 6000);
+}
+
+function showIssued(box, c) {
+  const link = inviteLink(c.code);
+  box.innerHTML = `<b>${esc(codeLabel(c.code))}</b> <button type="button" class="btn" data-copy="code">코드 복사</button> <input type="text" readonly value="${esc(link)}" aria-label="초대 링크" /> <button type="button" class="btn" data-copy="link">링크 복사</button>`;
+  box.querySelector('[data-copy="code"]').addEventListener('click', () => copyText(codeLabel(c.code), '코드를 복사했습니다'));
+  box.querySelector('[data-copy="link"]').addEventListener('click', () => copyText(link));
+  box.querySelector('input').addEventListener('focus', (e) => e.target.select());
+  box.classList.remove('hidden');
+}
+
+const STATUS_LABEL = { ok: '사용 가능', off: '꺼짐', expired: '마감', full: '다 씀', missing: '-' };
+const BETA_LABEL = { kept: '유지', beta: '기다리는 중', lapsed: '유지 안 됨' };
+
+/** 운영자: 베타 멤버별 의견·유지 상태, 개발자에게 온 의견 */
+async function renderAdminBeta(a) {
+  const [betas, fbs] = await Promise.all([a.betaMembers(), a.listFeedback()]);
+  const end = app.site?.betaEndsAt ?? null;
+  const st = betas.map((b) => betaState(b, end));
+  const n = (k) => st.filter((x) => x === k).length;
+  $('#adm-beta-sum').textContent = `베타 멤버 ${betas.length}명 · 유지 ${n('kept')}명 · 기다리는 중 ${n('beta')}명 · 유지 안 됨 ${n('lapsed')}명`
+    + (end ? '' : ' · 종료일을 아직 정하지 않았습니다');
+  $('#adm-betas').innerHTML = betas.length ? betas.map((b, i) => {
+    const act = b.kept ? '<button type="button" class="btn btn-ghost" data-act="unkeep">유지 취소</button>'
+      : st[i] !== 'kept' ? '<button type="button" class="btn btn-ghost" data-act="keep">정회원 유지</button>' : '';
+    return `<tr data-uid="${esc(b.id)}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(b.memberNo)}</td><td data-ugc>${esc(b.nick)}</td>
+      <td>${b.feedbackAt ? ymd(b.feedbackAt) : '-'}</td><td>${BETA_LABEL[st[i]] || ''}</td><td class="adm-acts">${act}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="muted">베타 멤버가 없습니다</td></tr>';
+  $('#adm-feedback').innerHTML = fbs.length ? fbs.map((f) => `<article class="fb-item">
+    <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time></header>
+    ${f.good ? `<p><em>좋았던 점</em><span data-ugc>${esc(f.good)}</span></p>` : ''}${f.fix ? `<p><em>고쳤으면 하는 점</em><span data-ugc>${esc(f.fix)}</span></p>` : ''}</article>`).join('')
+    : '<p class="muted">아직 온 의견이 없습니다</p>';
+}
+
+async function renderAdmin() {
+  if (!isAdmin(app.account?.current())) { close($('#panel-admin')); return; }
+  const a = app.account;
+  try {
+    const m = await a.membersInfo();
+    $('#adm-members').textContent = m.ready ? `가입을 받고 있습니다 · 정회원 ${m.count}명` : '아직 가입을 받을 수 없습니다. 아래 버튼을 한 번 눌러 기존 가입자에게 번호를 매기고 가입을 여세요.';
+    $('#adm-init').classList.toggle('hidden', m.ready);
+    if (!app.adminConfigLoaded) {
+      const cfg = await a.getSiteConfig();
+      $('#adm-hashtag').value = cfg.hashtag || ''; $('#adm-sns').value = cfg.snsAccount || '';
+      $('#adm-beta-end').value = cfg.betaEndsAt ? ymd(cfg.betaEndsAt) : '';
+      app.adminConfigLoaded = true;
+    }
+    await renderAdminBeta(a);
+    const rows = await a.listCodes();
+    $('#adm-codes').innerHTML = rows.length ? rows.map((c) => {
+      const st = codeStatus(c);
+      const exp = c.type === 'beta'
+        ? `<input type="date" data-act="expiry" value="${c.expiresAt ? ymd(c.expiresAt) : ''}" aria-label="마감일" />`
+        : (c.expiresAt ? ymd(c.expiresAt) : '-');
+      return `<tr data-code="${esc(c.code)}" class="${st === 'ok' ? '' : 'dim'}"><td><b>${esc(codeLabel(c.code))}</b></td><td>${c.type === 'beta' ? '베타' : '1회용'}</td>
+        <td>${c.uses || 0}/${c.maxUses ? c.maxUses : '∞'}</td><td>${exp}</td><td data-ugc>${esc(c.note || '')}</td><td>${STATUS_LABEL[st]}</td>
+        <td class="adm-acts"><button type="button" class="btn btn-ghost" data-act="code">코드 복사</button><button type="button" class="btn btn-ghost" data-act="copy">링크 복사</button><button type="button" class="btn btn-ghost" data-act="${c.off ? 'on' : 'off'}">${c.off ? '켜기' : '끄기'}</button></td></tr>`;
+    }).join('') : '<tr><td colspan="7" class="muted">아직 만든 코드가 없습니다</td></tr>';
+  } catch (e) {
+    $('#adm-error').textContent = `운영자 정보를 불러오지 못했습니다: ${e.message || e}`;
+    $('#adm-error').classList.remove('hidden');
+  }
 }
 
 function bindUI() {
@@ -245,13 +484,13 @@ function bindUI() {
   $('#btn-mouse').addEventListener('click', startMouse);
   els.btnStart.addEventListener('click', toggleRun);
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
-  els.btnSettings.addEventListener('click', () => open(els.panelSettings));
+  els.btnSettings.addEventListener('click', () => { refreshAuthUI(); open(els.panelSettings); }); // 계정 줄·운영자 버튼은 열 때 새로
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleAreaEdit);
   $('#area-done').addEventListener('click', () => endAreaEdit());
   $('#area-auto').addEventListener('click', () => { settings.floorMode = 'auto'; vision.floorLocked = false; vision.floorAuto = null; $('#set-floorMode').value = 'auto'; applyFloorMode(); persist(); toast('흰 바닥 자동 감지 (사다리꼴). 바닥이 안 잡히면 화면 전체로 동작합니다'); endAreaEdit(false); });
   $('#area-full').addEventListener('click', () => { settings.floorMode = 'full'; $('#set-floorMode').value = 'full'; applyFloorMode(); persist(); toast('카메라 화면 전체가 게임 영역입니다'); endAreaEdit(false); });
-  $('#area-reset').addEventListener('click', () => { settings.manualQuad = defaultTrapezoid(); positionHandles(); persist(); });
+  $('#area-reset').addEventListener('click', () => { settings.manualQuad = centerBox(); positionHandles(); persist(); });
   els.btnFlip.addEventListener('click', flipCamera);
   $$('#time-seg button').forEach((b) => b.addEventListener('click', () => {
     if (game.running) game.stop('manual');
@@ -259,6 +498,15 @@ function bindUI() {
     game.playSeconds = settings.playMinutes * 60; game.resetState();
     renderModeList(); updateHud(); syncScoreChallenge();
   }));
+  // 8자 드리블 방향: 먼저 갈 콘(왼쪽·오른쪽) × 콘을 도는 쪽(위·아래)
+  const setFigure8 = (side, turn) => {
+    if (game.running) game.stop('manual');
+    settings.figure8Dir = `${side}-${turn}`; persist();
+    game.figure8Dir = settings.figure8Dir; game.resetState();
+    renderModeList(); updateHud();
+  };
+  $$('#f8-side button').forEach((b) => b.addEventListener('click', () => setFigure8(b.dataset.side, settings.figure8Dir.split('-')[1])));
+  $$('#f8-turn button').forEach((b) => b.addEventListener('click', () => setFigure8(settings.figure8Dir.split('-')[0], b.dataset.turn)));
   els.invisibleToggle.addEventListener('change', () => {
     if (game.running) game.stop('manual');
     settings.invisible = els.invisibleToggle.checked; persist();
@@ -300,6 +548,7 @@ function bindUI() {
   $('#btn-reset-settings').addEventListener('click', () => {
     const keep = { cameraId: settings.cameraId, p1: settings.p1, p2: settings.p2 };
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS), keep);
+    game.figure8Dir = settings.figure8Dir;
     persist(); applySettingsToUI(); applyMirror(); applyFloorMode(); refreshCalibUI(); toast('설정을 초기화했습니다');
   });
   $('#btn-reset-scores').addEventListener('click', () => { clearScores(); renderModeList(); toast('기록을 초기화했습니다'); });
@@ -665,7 +914,7 @@ function updateResultChoice(dt) {
 
 /**
  * 모드 선택 화면을 퍽으로 고르기: 퍽의 (좌우, 앞뒤) 위치를 카드 목록 위의 빨간 커서로 옮기고,
- * 카드 위에 2초 머물면 그 모드를 선택한다. 창이 열릴 때 커서가 올라가 있던 카드는 한 번 벗어났다가 다시 와야 한다
+ * 카드 안쪽에 2초 머물면 그 모드를 선택한다(테두리 근처는 어느 카드도 아님). 창이 열릴 때 커서가 올라가 있던 카드는 한 번 벗어났다가 다시 와야 한다
  * (결과 화면에서 퍽을 오른쪽에 둔 채 넘어왔을 때 엉뚱한 카드가 바로 선택되는 것을 방지).
  */
 function updateModeChoice(dt) {
@@ -685,7 +934,7 @@ function updateModeChoice(dt) {
     const cx = r.left + u * r.width, cy = r.top + v * r.height;
     cursor.style.left = `${cx}px`; cursor.style.top = `${cy}px`;
     cursor.classList.remove('hidden');
-    const hit = cards.findIndex((card) => { const b = card.getBoundingClientRect(); return cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom; });
+    const hit = cards.findIndex((card) => inCardCore(card.getBoundingClientRect(), cx, cy)); // 테두리 근처는 고르지 않음
     idx = hit >= 0 ? hit : null;
     if (mp.blocked === undefined) mp.blocked = idx;               // 열릴 때 올라가 있던 카드
     else if (mp.blocked !== null && idx !== mp.blocked) mp.blocked = null; // 한 번 벗어나면 해제
@@ -1032,9 +1281,65 @@ function showResult(result, isBest) {
 }
 
 // =============== 커뮤니티 ===============
+// =============== 개발자에게 (커뮤니티) ===============
+// 한 사람당 하나, 다시 보내면 고쳐짐. 베타 멤버는 베타 종료일 전에 보내면 정회원 등급이 유지된다
+function setupFeedback() {
+  const form = $('#fb-form');
+  ['fb-good', 'fb-fix'].forEach((id) => $(`#${id}`).addEventListener('input', () => countFeedback(id)));
+  $('#comm-feedback').addEventListener('click', () => openFeedback());
+  $('#comm-write').addEventListener('click', () => form.classList.add('hidden'));
+  $('#fb-cancel').addEventListener('click', () => form.classList.add('hidden'));
+  els.authWho.addEventListener('click', (e) => { if (e.target.closest('[data-feedback]')) openFeedback(); });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!app.account?.current()) return;
+    const err = $('#fb-error');
+    err.classList.add('hidden');
+    const before = app.account.memberState();
+    $('#fb-submit').disabled = true;
+    try {
+      await app.account.sendFeedback({ good: $('#fb-good').value, fix: $('#fb-fix').value });
+      form.classList.add('hidden');
+      const kept = before === 'beta' && app.account.memberState() === 'kept';
+      toast(kept ? '보내 주셔서 고마워요! 베타가 끝나도 정회원 등급이 유지됩니다' : '보내 주셔서 고마워요!', 4000);
+      refreshAuthUI();
+    } catch (ex) {
+      err.textContent = ex.message || String(ex);
+      err.classList.remove('hidden');
+    } finally { $('#fb-submit').disabled = false; }
+  });
+}
+
+function countFeedback(id) { $(`#${id}-count`).textContent = `${$(`#${id}`).value.length}/${FEEDBACK_MAX}`; }
+
+async function openFeedback() {
+  if (!app.account?.current()) { toast('개발자에게 보내려면 로그인하세요 (첫 화면에서 로그인)'); return; }
+  close(els.panelSettings);
+  await community.open();
+  const st = app.account.memberState(), end = app.site?.betaEndsAt;
+  $('#fb-intro').textContent = {
+    beta: end ? `베타 기간(${shortDate(end)}까지)이 끝나기 전에 보내 주시면 정회원 등급이 그대로 유지돼요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.`
+      : '베타 멤버가 의견을 보내 주시면 베타가 끝나도 정회원 등급이 유지돼요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.',
+    kept: '정회원 등급이 유지됩니다. 언제든 고쳐서 다시 보낼 수 있어요.',
+    lapsed: '베타 기간이 끝나 정회원 등급은 유지되지 않았어요. 의견은 계속 보낼 수 있고, 등급은 공식 인스타 DM으로 문의해 주세요.',
+  }[st] || '좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.';
+  $('#fb-error').classList.add('hidden');
+  let prev = null;
+  try { prev = await app.account.getMyFeedback(); } catch { prev = null; }
+  $('#fb-good').value = prev?.good || '';
+  $('#fb-fix').value = prev?.fix || '';
+  ['fb-good', 'fb-fix'].forEach(countFeedback);
+  $('#fb-submit').textContent = prev ? '고쳐서 보내기' : '보내기';
+  const form = $('#fb-form');
+  form.classList.remove('hidden');
+  form.scrollIntoView({ block: 'nearest' });
+  $('#fb-good').focus();
+}
+
 function setupCommunity() {
   community = initCommunity({
     getUser: () => app.account?.current() || null,
+    blocked: () => (lapsedNow() ? LAPSED : null), // 베타가 끝나 정회원이 유지되지 않은 계정: 글쓰기·응원 막음
     getStore: () => app.communityStore,
     toast,
     modeName: (id) => MODES.find((m) => m.id === id)?.name || id,
@@ -1148,9 +1453,9 @@ async function renderShare(result) {
   const s1 = (v) => `${v.toFixed(1)}s`;
   const u = app.account?.current();
   const openBoard = () => community.open({ filter: 'course', select: ch.id });
-  if (!u) {
+  if (!u || lapsedNow()) {
     const h = ch.holder ? ` <span>1위</span> <b data-ugc>${esc(ch.holder.nick)}</b> <strong>평균 ${s1(ch.holder.avg)}</strong>` : '';
-    show(`<span>이번 기록 평균 ${s1(rec.avg)}</span>${h} <span>로그인하면 기록 게시판에 올라갑니다</span>`, '기록 게시판 보기', openBoard);
+    show(`<span>이번 기록 평균 ${s1(rec.avg)}</span>${h} <span>${u ? LAPSED : '로그인하면 기록 게시판에 올라갑니다'}</span>`, '기록 게시판 보기', openBoard);
     return;
   }
   try {
@@ -1194,9 +1499,9 @@ async function renderScoreChallenge(result, sc, show) {
   const u = app.account?.current();
   const brag = () => community.compose({ type: 'record' });
   const openBoard = () => community.open({ filter: 'record', select: sc.id });
-  const target = `<span>도전</span> <b data-ugc>${esc(sc.nick)}</b> <strong>${sc.score}점</strong>`;
-  if (!u) {
-    show(`${target} <span>로그인하면 도전 기록에 올라갑니다</span>`, '도전 기록 보기', openBoard);
+  const target = `<span>도전</span> <b data-ugc>${esc(sc.nick)}</b> <strong>${num(sc.score)}점</strong>`;
+  if (!u || lapsedNow()) {
+    show(`${target} <span>${u ? LAPSED : '로그인하면 도전 기록에 올라갑니다'}</span>`, '도전 기록 보기', openBoard);
     return;
   }
   try {
@@ -1213,7 +1518,7 @@ async function renderScoreChallenge(result, sc, show) {
     let html;
     if (r.isHolder && r.improved && ph && ph.uid !== u.id) {
       sfx.target?.();
-      html = `<span class="script">New record!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${ph.score}점 → ${result.score}점</strong>`;
+      html = `<span class="script">New record!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${num(ph.score)}점 → ${num(result.score)}점</strong>`;
     } else {
       html = `${target} <span>도전 기록 ${r.rank}위 / ${r.total}명</span>${r.improved ? ' <span>내 최고 기록 갱신</span>' : ''}`;
     }
@@ -1233,6 +1538,9 @@ function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
+  const [f8Side, f8Turn] = settings.figure8Dir.split('-');
+  $$('#f8-side button').forEach((b) => b.classList.toggle('active', b.dataset.side === f8Side));
+  $$('#f8-turn button').forEach((b) => b.classList.toggle('active', b.dataset.turn === f8Turn));
   els.invisibleToggle.checked = settings.invisible;
   // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(커뮤니티)
   const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'community'];
@@ -1243,7 +1551,7 @@ function renderModeList() {
       // 9번: 커뮤니티 (코스·기록 공유). 다른 카드처럼 퍽으로도 고를 수 있다
       const card = document.createElement('button');
       card.className = 'mode-card mode-community';
-      card.innerHTML = `<span class="no">${no}</span><span class="time">Share</span><b>커뮤니티</b><em>Community</em><small>내가 만든 코스와 기록을 공유하고, 다른 사람의 코스에 도전해 기록을 겨뤄 보세요.</small>`;
+      card.innerHTML = `<span class="no">${no}</span><span class="time">Share</span><b>커뮤니티</b><em>Community</em><small>코스와 기록을 공유하고 도전하세요.</small>`;
       card.addEventListener('click', () => { close(els.panelMode); community.open(); });
       els.modeList.appendChild(card);
       return;
@@ -1276,17 +1584,21 @@ function renderModeList() {
 }
 
 // =============== 영역 (원근 사다리꼴) ===============
-function defaultTrapezoid() { return [[0.22, 0.18], [0.78, 0.18], [0.98, 0.96], [0.02, 0.96]]; }
+// 처음 틀: 화면 가운데 적당한 크기의 사각형. 모서리가 화면 끝에 붙어 있으면 찾기·잡기 어려우니 여기서 시작해 바깥으로 넓힌다
+function centerBox() { return [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]; }
+/** 네 모서리가 모두 화면 끝(4%)에서 떨어져 있어 잡기 쉬운가 */
+function grabbable(q, edge = 0.04) {
+  return Array.isArray(q) && q.length === 4 && q.every(([u, v]) => u > edge && u < 1 - edge && v > edge && v < 1 - edge);
+}
 
-/** 현재 영역(자동 감지 결과 포함)을 수동 사다리꼴로 가져와 편집 시작 */
+/** 영역 편집 시작: 자동 감지 결과나 저장된 틀이 잡기 쉬우면 그대로, 화면 끝에 붙어 있거나 없으면 가운데 틀에서 시작 */
 function toggleAreaEdit() {
   if (app.areaEditing) { endAreaEdit(); return; }
   if (game.running) game.stop('manual');
   closeAllPanels();
   const q = app.lastVision?.floor?.quad;
-  if (q && settings.floorMode !== 'manual') {
-    settings.manualQuad = q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]);
-  } else if (!settings.manualQuad) settings.manualQuad = defaultTrapezoid();
+  const from = settings.floorMode !== 'manual' && q ? q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]) : settings.manualQuad;
+  settings.manualQuad = grabbable(from) ? from : centerBox();
   settings.floorMode = 'manual';
   $('#set-floorMode').value = 'manual';
   persist();
@@ -1295,7 +1607,7 @@ function toggleAreaEdit() {
   applyFloorMode();
   $('#area-bar').classList.remove('hidden');
   els.btnFloorLock.classList.add('active');
-  if (app.setup !== 'area') toast('모서리를 드래그해 바닥에 맞추세요 (뒤쪽 좁게, 앞쪽 넓게)', 4000); // 시작 준비 중에는 위 막대가 안내
+  if (app.setup !== 'area') toast('가운데 틀의 모서리를 바깥으로 끌어 바닥에 맞추세요 (뒤쪽 좁게, 앞쪽 넓게)', 4000); // 시작 준비 중에는 위 막대가 안내
 }
 
 function endAreaEdit(announce = true) {
@@ -1311,9 +1623,10 @@ function endAreaEdit(announce = true) {
 function applyFloorMode() {
   const manual = settings.floorMode === 'manual';
   if (manual && !settings.manualQuad) {
-    // 자동 감지 결과(사다리꼴)가 있으면 그대로, 없으면 기본 사다리꼴
+    // 자동 감지 결과(사다리꼴)가 잡기 쉬우면 그대로, 아니면 가운데 틀
     const q = app.lastVision?.floor?.quad;
-    settings.manualQuad = q ? q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]) : defaultTrapezoid();
+    const from = q ? q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]) : null;
+    settings.manualQuad = grabbable(from) ? from : centerBox();
     persist();
   }
   // 핸들은 편집 중에만 표시 (플레이 중 터치 방해 방지)

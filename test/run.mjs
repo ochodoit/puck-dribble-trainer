@@ -66,22 +66,40 @@ const skipSetup = async (page, touch = false) => {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`${base}/index.html`);
-  // 접속 코드 게이트: 틀린 코드는 거부, 맞는 코드(1234)로 해제
-  if (await page.isVisible('#pin-form')) {
-    await page.fill('#pin-input', '0000'); await page.click('#pin-form button');
-    await page.waitForTimeout(200);
-    const rejected = await page.isVisible('#pin-error') && await page.isHidden('#btn-camera');
-    await page.fill('#pin-input', '1234'); await page.click('#pin-form button');
-    await page.waitForSelector('#btn-camera:visible', { timeout: 3000 });
-    const remembered = await page.evaluate(() => !!localStorage.getItem('puck-trainer.access.v1'));
-    console.log(`${rejected && remembered ? 'PASS' : 'FAIL'} access code gate (wrong rejected, right unlocks and is remembered)`);
-    if (!(rejected && remembered)) failed = true;
-  } else { console.log('FAIL access code gate not shown'); failed = true; }
-  // 회원가입 (별명 + 6자리 비밀번호 + 국가/팀/나이)
   await page.waitForFunction(() => window.__puckTrainer?.account);
+  // 접속 코드 화면은 없어짐: 첫 화면에 바로 카메라 시작 버튼
+  const noGate = (await page.$('#pin-form')) === null && await page.isVisible('#btn-camera');
+  console.log(`${noGate ? 'PASS' : 'FAIL'} no access-code gate: camera button is on the first screen`);
+  if (!noGate) failed = true;
+  // 가입 코드 없이는 정회원 가입이 안 됨
+  const fillReg = async (pin = '123456') => {
+    await page.fill('#auth-nick', '번개손'); await page.fill('#auth-pin', pin);
+    await page.selectOption('#auth-country', 'KR'); await page.fill('#auth-team', '서울 유스'); await page.fill('#auth-age', '11'); await page.fill('#auth-number', '87');
+  };
   await page.click('.auth-tabs .tab[data-tab="register"]');
-  await page.fill('#auth-nick', '번개손'); await page.fill('#auth-pin', '12345');
-  await page.selectOption('#auth-country', 'KR'); await page.fill('#auth-team', '서울 유스'); await page.fill('#auth-age', '11'); await page.fill('#auth-number', '87');
+  await fillReg();
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#auth-error:not(.hidden)');
+  const noCodeErr = (await page.textContent('#auth-error')).trim();
+  console.log(`${noCodeErr === '가입 코드가 필요합니다' && await page.isHidden('#auth-logged') ? 'PASS' : 'FAIL'} sign-up without a code is refused (${noCodeErr})`);
+  if (noCodeErr !== '가입 코드가 필요합니다') failed = true;
+  // 초대 링크(?c=코드): 마감된 코드는 안내만, 베타 링크는 회원가입 칸을 열고 코드를 채움. 주소의 ?c= 는 지움
+  await page.evaluate(() => { const a = window.__puckTrainer.account; a._putCode('OLDCODE1', { type: 'one', expiresAt: Date.now() - 1000 }); a._putCode('BETA2026', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 7 * 864e5 }); });
+  const inviteState = () => page.evaluate(() => ({ bad: document.querySelector('#invite-card').classList.contains('bad'), title: document.querySelector('#invite-title').textContent, sub: document.querySelector('#invite-sub').textContent,
+    code: document.querySelector('#auth-code').value, codeShown: !!document.querySelector('#auth-code').offsetParent, search: location.search, reg: document.querySelector('.auth-tabs .tab[data-tab="register"]').classList.contains('active') }));
+  await page.goto(`${base}/index.html?c=oldc-ode1`);
+  await page.waitForSelector('#invite-card:not(.hidden)');
+  const expired = await inviteState();
+  console.log(`${expired.bad && expired.title === '마감된 링크예요' && !expired.reg && expired.search === '' ? 'PASS' : 'FAIL'} expired invite link shows a notice, no sign-up (${JSON.stringify(expired)})`);
+  if (!(expired.bad && expired.title === '마감된 링크예요')) failed = true;
+  await page.goto(`${base}/index.html?c=beta-2026`);
+  await page.waitForSelector('#invite-card:not(.hidden)');
+  const inv = await inviteState();
+  const invOk = !inv.bad && inv.title === '베타 초대 링크예요' && /까지 가입하면 바로 정회원$/.test(inv.sub) && inv.code === 'BETA-2026' && inv.codeShown && inv.reg && inv.search === '';
+  console.log(`${invOk ? 'PASS' : 'FAIL'} beta invite link opens sign-up with the code filled in (${JSON.stringify(inv)})`);
+  if (!invOk) failed = true;
+  // 회원가입 (별명 + 6자리 비밀번호 + 국가/팀/나이 + 가입 코드)
+  await fillReg('12345');
   await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
   await page.waitForTimeout(200);
   const pinErr = await page.isHidden('#auth-logged'); // 5자리는 브라우저 검증(pattern)에서 막혀 가입되지 않아야 함
@@ -89,8 +107,10 @@ const skipSetup = async (page, touch = false) => {
   await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
   await page.waitForSelector('#auth-logged:not(.hidden)');
   const who = await page.textContent('#auth-who');
-  console.log(`${pinErr && who.includes('번개손') && who.includes('U12') && who.includes('#87') ? 'PASS' : 'FAIL'} register with nickname + 6-digit pin + jersey number (${who.trim()})`);
-  if (!(pinErr && who.includes('번개손') && who.includes('#87'))) failed = true;
+  const afterJoin = await page.evaluate(() => ({ card: document.querySelector('#invite-card').classList.contains('hidden'), kept: localStorage.getItem('puck-trainer.invite.v1') }));
+  const joinOk = pinErr && who.includes('번개손') && who.includes('U12') && who.includes('#87') && who.includes('베타 멤버 No.0001') && afterJoin.card && afterJoin.kept === null;
+  console.log(`${joinOk ? 'PASS' : 'FAIL'} register with nickname + 6-digit pin + jersey number + beta code -> beta member No.0001 (${who.trim()})`);
+  if (!joinOk) failed = true;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   // 시작 준비: 1/2 플레이 공간(완료) -> 2/2 퍽 등록(Esc로 건너뛰기) -> 모드 창이 열림(닫기)
@@ -227,8 +247,16 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#btn-mode'); await page.click('#mode-list > :nth-child(1)');
 
   // 영역 편집: 버튼 -> 사다리꼴 핸들 4개 + 편집 바, 완료 -> 저장
+  // 화면 전체 영역(모서리가 화면 끝)에서 편집을 시작하면 가운데 틀(0.3~0.7)에서 시작해 바깥으로 넓힌다
+  await page.evaluate(() => { const s = document.querySelector('#set-floorMode'); s.value = 'full'; s.dispatchEvent(new Event('change')); });
+  await page.waitForTimeout(300);
   await page.click('#btn-floor-lock');
   await page.waitForSelector('#area-bar:not(.hidden)');
+  const startQuad = await page.evaluate(() => JSON.stringify(window.__puckTrainer.settings.manualQuad));
+  const inView = await page.$$eval('#floor-handles .handle', (hs) => { const v = document.querySelector('#view').getBoundingClientRect(); return hs.every((h) => { const r = h.getBoundingClientRect(); return r.left >= v.left && r.right <= v.right && r.top >= v.top && r.bottom <= v.bottom; }); });
+  const centered = startQuad === JSON.stringify([[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]);
+  console.log(`${centered && inView ? 'PASS' : 'FAIL'} area edit from full screen starts with a center frame, handles fully on screen (${startQuad})`);
+  if (!(centered && inView)) failed = true;
   const handlesVisible = await page.$$eval('#floor-handles .handle', (hs) => hs.filter((h) => h.offsetParent !== null).length);
   const h0 = await page.$('#floor-handles .handle[data-i="0"]');
   const hb = await h0.boundingBox();
@@ -241,6 +269,16 @@ const skipSetup = async (page, touch = false) => {
   const handlesHidden = await page.$$eval('#floor-handles .handle', (hs) => hs.every((h) => h.offsetParent === null));
   console.log(`${handlesHidden ? 'PASS' : 'FAIL'} handles hidden after done`);
   if (!handlesHidden) failed = true;
+  // 다시 열면 맞춰 둔 틀을 그대로 쓰고, '가운데 틀로'는 가운데 틀로 되돌린다
+  await page.click('#btn-floor-lock');
+  await page.waitForSelector('#area-bar:not(.hidden)');
+  const kept = await page.evaluate(() => window.__puckTrainer.settings.manualQuad[0][0]);
+  await page.click('#area-reset');
+  const reset = await page.evaluate(() => JSON.stringify(window.__puckTrainer.settings.manualQuad));
+  await page.click('#area-done');
+  const keptOk = Math.abs(kept - savedQuad.manualQuad[0][0]) < 1e-6 && reset === JSON.stringify([[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]);
+  console.log(`${keptOk ? 'PASS' : 'FAIL'} area edit keeps the fitted frame; reset returns to the center frame (${kept.toFixed(3)})`);
+  if (!keptOk) failed = true;
 
   // 배경 투명도 슬라이더 -> 아케이드·퍽 피하기 배경 불투명도에 반영되고 저장됨
   await page.click('#btn-settings');
@@ -305,9 +343,80 @@ const skipSetup = async (page, touch = false) => {
   // 로그아웃 후 로그인
   await page.click('#btn-settings'); await page.click('#btn-settings-logout'); await page.click('[data-close="panel-settings"]');
   const loggedOut = await page.evaluate(() => !window.__puckTrainer.account.current());
-  const relogin = await page.evaluate(async () => { try { await window.__puckTrainer.account.login('번개손', '123456'); return !!window.__puckTrainer.account.current(); } catch { return false; } });
+  // 게스트 결과: 정회원이었다면 몇 위 + 인스타 플레이 인증 안내 + 공식 계정 DM 버튼 (운영자가 저장한 안내)
+  await page.evaluate(() => localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ hashtag: '퍽챌린지', snsAccount: 'puck.official' })));
+  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 9, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 9]] }); });
+  await page.waitForSelector('#result-guest:not(.hidden)');
+  const guest = await page.evaluate(() => ({ text: document.querySelector('#result-guest').textContent, dm: document.querySelector('#guest-dm')?.getAttribute('href') || '', rank: !document.querySelector('#result-rank').classList.contains('hidden') }));
+  const guestOk = guest.text.includes('정회원이었다면 지금 전체 2위 / 2명') && guest.text.includes('#퍽챌린지 @puck.official') && guest.text.includes('보호자와 함께') && guest.text.includes('DM') && guest.dm === 'https://ig.me/m/puck.official' && !guest.rank;
+  console.log(`${guestOk ? 'PASS' : 'FAIL'} guest result: would-be rank + share play on Instagram, DM the official account for a code (${guest.dm} ${guest.text.slice(0, 60)}…)`);
+  if (!guestOk) failed = true;
+  await page.click('[data-close="panel-result"]');
+  // 운영자 화면 (관리자 별명): 1회용 코드 만들기 -> 목록, 끄기
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ nick: 'test123', pin: '123456', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' }); });
+  await page.click('#btn-settings');
+  const adminBtn = await page.isVisible('#btn-settings-admin');
+  await page.click('#btn-settings-admin');
+  await page.waitForSelector('#panel-admin:not(.hidden)');
+  await page.fill('#adm-one-note', '인스타 @abc');
+  await page.click('#adm-one');
+  await page.waitForSelector('#adm-one-out:not(.hidden)');
+  const issued = await page.evaluate(() => ({ code: document.querySelector('#adm-one-out b').textContent, link: document.querySelector('#adm-one-out input').value, rows: document.querySelectorAll('#adm-codes tr').length, members: document.querySelector('#adm-members').textContent }));
+  await page.click(`#adm-codes tr[data-code="${issued.code.replace('-', '')}"] button[data-act="off"]`);
+  await page.waitForFunction((c) => document.querySelector(`#adm-codes tr[data-code="${c}"]`)?.textContent.includes('꺼짐'), issued.code.replace('-', ''));
+  const adminOk = adminBtn && /^[2-9A-Z]{4}-[2-9A-Z]{4}$/.test(issued.code) && issued.link.endsWith(`/index.html?c=${issued.code}`) && issued.rows === 3 && issued.members.includes('정회원 2명');
+  console.log(`${adminOk ? 'PASS' : 'FAIL'} operator panel: issue a one-time code link, list codes, turn one off (${JSON.stringify(issued)})`);
+  if (!adminOk) failed = true;
+  // 베타 종료일 -> 베타 멤버에게 '의견 보내고 정회원 유지' 칩 -> [개발자에게] 보내면 '정회원 유지', 운영자 화면에 의견이 보임
+  const endDay = await page.evaluate(() => { const d = new Date(Date.now() + 7 * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  await page.fill('#adm-beta-end', endDay);
+  await page.click('#adm-save-beta-end');
+  await page.waitForFunction(() => document.querySelector('#adm-beta-sum').textContent.includes('기다리는 중 2명'));
+  const betaRows = await page.evaluate(() => document.querySelectorAll('#adm-betas tr[data-uid]').length);
+  await page.click('[data-close="panel-admin"]');
+  const chip1 = await page.evaluate(() => document.querySelector('#auth-who [data-feedback]')?.textContent || '');
+  await page.evaluate(() => document.querySelector('#auth-who [data-feedback]').click());
+  await page.waitForSelector('#fb-form:not(.hidden)');
+  const intro = await page.textContent('#fb-intro');
+  await page.fill('#fb-good', '8자 방향을 고를 수 있어서 좋아요');
+  await page.fill('#fb-fix', '어두우면 퍽을 놓쳐요');
+  await page.click('#fb-submit');
+  await page.waitForSelector('#fb-form.hidden', { state: 'attached' });
+  const toastFb = await page.textContent('#toast');
+  const chip2 = await page.evaluate(() => document.querySelector('#auth-who .beta-chip')?.textContent || '');
+  await page.click('[data-close="panel-community"]');
+  await page.click('#btn-settings'); await page.click('#btn-settings-admin');
+  await page.waitForFunction(() => document.querySelector('#adm-feedback').textContent.includes('어두우면 퍽을 놓쳐요'));
+  const sum2 = await page.textContent('#adm-beta-sum');
+  await page.click('[data-close="panel-admin"]');
+  const fbOk = betaRows === 2 && chip1.includes('의견 보내고 정회원 유지') && intro.includes('끝나기 전에 보내 주시면') && toastFb.includes('정회원 등급이 유지됩니다')
+    && chip2 === '정회원 유지' && sum2.includes('유지 1명') && sum2.includes('기다리는 중 1명');
+  console.log(`${fbOk ? 'PASS' : 'FAIL'} beta end date -> beta member sends [To the developer] feedback -> membership kept, operator reads it (${JSON.stringify({ betaRows, chip1, chip2, toastFb, sum2 })})`);
+  if (!fbOk) failed = true;
+  const relogin = await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); try { await a.login('번개손', '123456'); return !!a.current(); } catch { return false; } });
   console.log(`${loggedOut && relogin ? 'PASS' : 'FAIL'} logout and login again`);
   if (!(loggedOut && relogin)) failed = true;
+  // 베타 종료일이 지났는데 의견을 안 보낸 베타 멤버(번개손): 결과가 랭킹에 안 올라가고 안내 + 프로필 줄에 '베타 종료'
+  await page.evaluate(() => { const k = 'puck-trainer.site.v1'; localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k)), betaEndsAt: Date.now() - 1000 })); });
+  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 99, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 99]] }); });
+  await page.waitForSelector('#result-guest:not(.hidden)');
+  const lapsed = await page.evaluate(() => ({ text: document.querySelector('#result-guest').textContent, rank: !document.querySelector('#result-rank').classList.contains('hidden'),
+    best: JSON.parse(localStorage.getItem('puck-trainer.scores-ranked.v1')).filter((x) => x.mode === 'wide@60' && x.nick === '번개손').map((x) => x.score) }));
+  await page.click('[data-close="panel-result"]');
+  await page.click('#btn-settings'); await page.click('[data-close="panel-settings"]');
+  const chip3 = await page.evaluate(() => document.querySelector('#auth-who .beta-chip')?.textContent || '');
+  const lapsedOk = lapsed.text.includes('베타 기간이 끝나 정회원 등급이 유지되지 않았습니다') && lapsed.text.includes('인스타 DM') && !lapsed.rank && !lapsed.best.includes(99) && chip3.includes('베타 종료');
+  console.log(`${lapsedOk ? 'PASS' : 'FAIL'} beta ended without feedback: score not ranked, notice + Instagram DM, profile says beta ended (${JSON.stringify({ ...lapsed, text: lapsed.text.slice(0, 40), chip3 })})`);
+  if (!lapsedOk) failed = true;
+  await page.evaluate(() => { const k = 'puck-trainer.site.v1'; const c = JSON.parse(localStorage.getItem(k)); delete c.betaEndsAt; localStorage.setItem(k, JSON.stringify(c)); });
+  // 8자 드리블 방향: 모드 창 위에서 고르면 저장되고, 고른 방향의 코스가 시작 전에 미리 보인다
+  await page.click('#btn-mode');
+  await page.click('#f8-side [data-side="R"]'); await page.click('#f8-turn [data-turn="down"]');
+  await page.click('#mode-list > :nth-child(4)'); // 8자 드리블
+  const f8 = await page.evaluate(() => { const g = window.__puckTrainer.game; return { saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).figure8Dir, mode: g.mode.id, first: g.waypoints[1], dir: g.figure8Dir }; });
+  const f8Ok = f8.saved === 'R-down' && f8.dir === 'R-down' && f8.mode === 'figure8' && f8.first?.x === 0.7 && f8.first?.y === 0.78;
+  console.log(`${f8Ok ? 'PASS' : 'FAIL'} figure 8 direction picked in the mode window (right first, around the bottom) and previewed (${JSON.stringify(f8)})`);
+  if (!f8Ok) failed = true;
 
   // 아케이드 모드: 시작 -> 카운트다운 화면
   await page.click('#btn-mode');
@@ -363,6 +472,13 @@ const skipSetup = async (page, touch = false) => {
   // 다른 카드로 옮겨 2초 머물면 그 모드가 선택됨. (기본 방향: 카메라 쪽으로 밀면 위 -> v 0.9 = 맨 윗줄)
   const forceUV = (u, v) => page.evaluate(([uu, vv]) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: vv }, now); }; }, [u, v]);
   const cursorShown = await page.isVisible('#mode-cursor');
+  // 두 카드 사이 테두리(맨 윗줄 1번과 2번 사이)에 머물면 아무 카드도 골라지지 않음
+  await forceUV(0.333, 0.9);
+  await page.waitForTimeout(2500);
+  const edge = await page.evaluate(() => ({ open: !document.querySelector('#panel-mode').classList.contains('hidden'), hover: document.querySelectorAll('#mode-list .mode-card.hover').length }));
+  const edgeOk = edge.open && edge.hover === 0;
+  console.log(`${edgeOk ? 'PASS' : 'FAIL'} mode panel: puck on the border between two cards picks nothing (${JSON.stringify(edge)})`);
+  if (!edgeOk) failed = true;
   await forceUV(0.85, 0.9); // 맨 윗줄 세 번째 카드 = 와이드 드리블
   await page.waitForTimeout(900);
   const dwell = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelectorAll('#mode-list .mode-card')[2]).getPropertyValue('--dwell')) || 0);
@@ -391,7 +507,6 @@ const skipSetup = async (page, touch = false) => {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`${base}/index.html`);
-  if (await page.isVisible('#pin-form')) { await page.fill('#pin-input', '1234'); await page.tap('#pin-form button'); await page.waitForSelector('#btn-camera:visible'); }
   await page.waitForFunction(() => window.__puckTrainer?.account);
   await page.tap('#auth-guest');
   await page.tap('#btn-camera');
@@ -426,7 +541,6 @@ const skipSetup = async (page, touch = false) => {
   });
   const page = await context.newPage();
   await page.goto(`${base}/index.html`);
-  if (await page.isVisible('#pin-form')) { await page.fill('#pin-input', '1234'); await page.click('#pin-form button'); await page.waitForSelector('#btn-camera:visible'); }
   await page.waitForFunction(() => window.__puckTrainer?.account);
   await page.click('#auth-guest');
   await page.click('#btn-camera');
@@ -468,24 +582,23 @@ const skipSetup = async (page, touch = false) => {
   });
   await page.goto(`${base}/index.html`);
   await tick();
-  const first = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, ph: document.querySelector('#pin-input').placeholder, on: document.querySelector('.lang-row [data-lang].active')?.dataset.lang, visible: !!document.querySelector('.lang-row [data-lang="ko"]').offsetParent }));
-  ok(first.lang === 'en' && /stickhandling/.test(first.lead) && first.ph === 'Access code' && first.on === 'en' && first.visible, 'English browser opens in English with language buttons on the first screen', JSON.stringify(first));
+  const first = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, cam: document.querySelector('#btn-camera').textContent, ph: document.querySelector('#auth-code').placeholder, on: document.querySelector('.lang-row [data-lang].active')?.dataset.lang, visible: !!document.querySelector('.lang-row [data-lang="ko"]').offsetParent }));
+  ok(first.lang === 'en' && /stickhandling/.test(first.lead) && first.cam === 'Start camera' && first.ph === 'e.g. K7MP-Q2XD' && first.on === 'en' && first.visible, 'English browser opens in English with language buttons on the first screen', JSON.stringify(first));
   await page.click('.lang-row [data-lang="ko"]'); await tick();
-  const ko = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, ph: document.querySelector('#pin-input').placeholder, btn: document.querySelector('#pin-form button').textContent }));
-  ok(ko.lang === 'ko' && /스틱 ?핸들링/.test(ko.lead) && ko.ph === '접속 코드' && ko.btn === '확인', '한국어 button restores the Korean screen', JSON.stringify(ko));
+  const ko = await page.evaluate(() => ({ lang: document.documentElement.lang, lead: document.querySelector('.lead').textContent, cam: document.querySelector('#btn-camera').textContent, tab: document.querySelector('.auth-tabs .tab[data-tab="register"]').textContent }));
+  ok(ko.lang === 'ko' && /스틱 ?핸들링/.test(ko.lead) && ko.cam === '카메라 시작' && ko.tab === '회원가입', '한국어 button restores the Korean screen', JSON.stringify(ko));
   await page.click('.lang-row [data-lang="en"]'); await tick();
   await page.reload(); await tick();
-  ok(await page.evaluate(() => document.documentElement.lang === 'en' && document.querySelector('#pin-form button').textContent === 'OK'), 'language choice is remembered after reload');
-  await page.fill('#pin-input', '1234'); await page.click('#pin-form button');
-  await page.waitForSelector('#btn-camera:visible');
+  ok(await page.evaluate(() => document.documentElement.lang === 'en' && document.querySelector('#btn-camera').textContent === 'Start camera'), 'language choice is remembered after reload');
   await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.evaluate(() => { const a = window.__puckTrainer.account; a._putCode('ACE12345', { type: 'one' }); a._putCode('TEAMBETA', { type: 'beta', maxUses: 0 }); });
   await page.click('.auth-tabs .tab[data-tab="register"]');
-  await page.fill('#auth-nick', 'Ace'); await page.fill('#auth-pin', '123456');
+  await page.fill('#auth-nick', 'Ace'); await page.fill('#auth-pin', '123456'); await page.fill('#auth-code', 'ace1-2345');
   await page.selectOption('#auth-country', 'US'); await page.fill('#auth-team', 'Blades'); await page.fill('#auth-age', '25');
   await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
   await page.waitForSelector('#auth-logged:not(.hidden)'); await tick();
   const who = await page.textContent('#auth-who');
-  ok(/Ace/.test(who) && /USA/.test(who) && /Adult \(age 25\)/.test(who), 'profile line is shown in English', who.trim());
+  ok(/Ace/.test(who) && /USA/.test(who) && /Adult \(age 25\)/.test(who) && /Member No\.0001/.test(who), 'profile line is shown in English', who.trim());
   ok((await leftover()).length === 0, 'no Korean left on the English first screen', JSON.stringify(await leftover()));
   await page.click('#btn-camera');
   await page.waitForFunction(() => window.__puckTrainer.app.started && window.__puckTrainer.app.lastVision, null, { timeout: 15000 });
@@ -547,7 +660,7 @@ const skipSetup = async (page, touch = false) => {
   const resel = await page.evaluate(() => document.querySelectorAll('#comm-detail .detail-board li').length);
   ok(unsel.sel === 0 && /Tap a post to see/.test(unsel.empty || '') && resel === 1, 'tapping a post toggles its top 5 panel', JSON.stringify({ unsel, resel }));
   // 다른 선수가 같은 코스로 기록을 갈아치움
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Bee', pin: '654321', country: 'CA', team: 'Hive', age: 12 }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Bee', pin: '654321', country: 'CA', team: 'Hive', age: 12, code: 'TEAMBETA' }); });
   await page.click('#comm-list .post[data-id="starter-wide"] [data-act="practice"]'); await tick(200);
   const holder = await page.evaluate(() => window.__puckTrainer.app.challenge.holder);
   const run2 = await finish(Array(9).fill(1));
@@ -641,11 +754,11 @@ const skipSetup = async (page, touch = false) => {
     && /Brag updated with the new record/.test(replaced.toast) && replaced.posts.length === 1 && replaced.posts[0].id === bragId && replaced.posts[0].score === 1500 && replaced.posts[0].cheers === 0 && replaced.first === 'Even better',
   'only one brag per mode: posting again replaces it', JSON.stringify({ own, replPv, replaced }));
   // 나이 규칙: 글쓴이(12세)보다 많은 선수는 플레이만, 같거나 어린 선수만 도전 기록에 오른다
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Old', pin: '111111', country: 'US', team: 'Elders', age: 30 }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Old', pin: '111111', country: 'US', team: 'Elders', age: 30, code: 'TEAMBETA' }); });
   await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
   const oldToast = await page.textContent('#toast');
   const oldRun = await playArcade(2000);
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Kid', pin: '222222', country: 'KR', team: 'Cubs', age: 10 }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Kid', pin: '222222', country: 'KR', team: 'Cubs', age: 10, code: 'TEAMBETA' }); });
   await page.click('#btn-share-2'); await page.waitForSelector('#panel-community:not(.hidden)'); await tick(200);
   await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
   const kidRun = await playArcade(900);

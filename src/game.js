@@ -5,19 +5,19 @@ import { C } from './theme.js';
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
   { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true,
-    desc: '검정 퍽이 내려옵니다. 좌우로 자주 쳐서(터치) 피하고, coin을 많이 먹을수록 점수가 높아집니다.' },
+    desc: '내려오는 퍽을 좌우로 쳐서 피하고 coin을 모으세요.' },
   { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
-    desc: '평면 경기장의 네 변에서 직선으로 날아오는 빨간 퍽을 피하세요. 시간이 갈수록 늘어납니다. 충돌은 감점.' },
+    desc: '네 변에서 날아오는 빨간 퍽을 피하세요.' },
   { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 0, timed: true, stages: 3,
-    desc: '3가지 훈련을 고른 시간만큼 이어서: ① 좌우 끝 ② 양 끝 짧은 터치 (1-2-1-10-9-10) ③ 양 끝과 가운데 (1-2-1-6-5-6-5-10-9-10-5-6-5-6). 판 왼쪽 끝이 1, 오른쪽 끝이 10. 훈련마다 퍽을 가운데에 3초 두면 시작' },
+    desc: '좌우 끝까지 넓게, 3가지 훈련을 이어서.' },
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
-    desc: '두 콘 사이를 8자로 돌며 게이트 통과. 진한 빨간 원이 다음, 옅은 원이 그다음. 콘을 치면 감점.' },
+    desc: '두 콘 사이를 8자로 돌며 게이트 통과.' },
   { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 20,
-    desc: '가운데 박스 안에서 최대한 빠르게 좌우로 퍽을 움직이세요.' },
+    desc: '가운데 박스 안에서 빠르게 좌우로.' },
   { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
-    desc: '무작위로 나타나는 타겟으로 퍽을 최대한 빨리 이동. 평균 반응 시간 측정.' },
+    desc: '나타나는 타겟으로 최대한 빨리 이동.' },
   { id: 'free', name: '자유 연습', en: 'Free · course', duration: 0,
-    desc: '번호 1~10을 끌어다 놓아 나만의 코스를 만들고, 순서대로 퍽을 가져다 놓는 연습. 기록 없음.' },
+    desc: '번호를 놓아 나만의 코스로 연습.' },
 ];
 
 export const PLAY_MINUTES = [1, 3, 5];
@@ -49,9 +49,29 @@ export const laneX = (n) => (n - 0.5) / WIDE_LANES;
 export const PUCK_R = 0.025;
 const CONE_R = 0.045;
 // 목표 지점 크기 (바닥 폭 단위): 예전의 절반. 판정 반경은 그린 원보다 조금 넉넉하게
-const TARGET_R = 0.0425;          // 반응 타겟 (그린 원 = 판정 반경)
-const WAYPOINT_R = 0.045;         // 8자 게이트 판정 반경
-export const GATE_DRAW_R = 0.0375; // 8자 게이트 그린 원 반지름
+export const TARGET_DRAW_R = 0.02125; // 반응 타겟 그린 원 반지름 (예전의 절반)
+const TARGET_HIT_R = 0.026;       // 반응 타겟 판정 반경 (그린 원보다 조금 넉넉하게)
+const REACT_APPROACH = 0.4;       // 타겟 쪽으로 이만큼(폭/초) 빠르게 다가가기 시작하면 '반응'
+const WAYPOINT_R = 0.0225;        // 8자 게이트 판정 반경 (그린 원보다 조금 넉넉하게)
+export const GATE_DRAW_R = 0.01875; // 8자 게이트 그린 원 반지름 (예전의 절반)
+const F8_CONES = [0.3, 0.7];       // 두 콘의 가로 위치 (세로는 가운데)
+
+/** 반응 타겟 하나 (무작위 자리, 판정 반경은 그린 원보다 조금 넉넉) */
+const newTarget = () => ({ x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_DRAW_R, hitR: TARGET_HIT_R, born: performance.now(), lastD: null, lastAt: 0, approachN: 0, approachAt: 0 });
+
+/** 8자 방향: 가운데에서 어느 콘으로 먼저 가는지(L/R) × 콘을 위·아래 어느 쪽부터 도는지(up/down) */
+export const FIGURE8_DIRS = ['L-up', 'L-down', 'R-up', 'R-down'];
+/**
+ * 8자 코스의 게이트 순서. 가운데에서 출발해 첫 콘을 위(또는 아래)부터 한 바퀴 돌고 가운데로,
+ * 가운데를 엇갈려 지나 반대쪽 콘도 같은 쪽(위 또는 아래)부터 돌아 가운데로 = 8자 한 바퀴
+ */
+export function figure8Waypoints(dir = 'L-up') {
+  const [side, turn] = FIGURE8_DIRS.includes(dir) ? dir.split('-') : ['L', 'up'];
+  const [first, second] = turn === 'down' ? [0.78, 0.22] : [0.22, 0.78];
+  const loop = (cx, end) => [{ x: 0.5, y: 0.5 }, { x: cx, y: first }, { x: end, y: 0.5 }, { x: cx, y: second }];
+  const left = loop(F8_CONES[0], 0.1), right = loop(F8_CONES[1], 0.9);
+  return side === 'R' ? [...right, ...left] : [...left, ...right];
+}
 
 const DIFF = {
   // flyMin~flyMax: 날아오는 퍽의 속도 범위(평면 폭/초). 퍽마다 이 안에서 무작위로 정해지고 이후 일정
@@ -65,6 +85,12 @@ const FLYER_MARGIN = 0.12;         // 바닥 바깥 출발/소멸 여유
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+/** 선분 a-b 와 점 p 의 거리 (빠르게 지나가 프레임 사이에 원을 건너뛰어도 통과로 본다) */
+const segDist = (a, b, p) => {
+  const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
+  const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
+  return Math.hypot(a.x + dx * t - p.x, a.y + dy * t - p.y);
+};
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 /** 점과 콘 사이 거리. 움직이는 콘은 좌우 이동 범위(선분) 전체를 차지하는 것으로 계산 */
 const coneDist = (p, c) => {
@@ -81,6 +107,7 @@ export class Game {
     this.difficulty = 'normal';
     this.playSeconds = 60;   // 시간제 모드의 제한 시간 (60 | 180 | 300)
     this.invisible = false;  // 투명 모드: 플레이 중 내 퍽을 숨김 (랭킹 키가 따로)
+    this.figure8Dir = 'L-up'; // 8자 방향 (FIGURE8_DIRS)
     // 퍽 피하기의 평면: 가로 1 × 세로 A (같은 단위). flip = 카메라 쪽으로 밀면 위로. main이 화면에 맞춰 설정
     this.plane = { A: 1, flip: false };
     this.me = null;          // 평면 위의 내 퍽 위치
@@ -119,6 +146,14 @@ export class Game {
     this.invulnUntil = 0;
     this.lastTickSec = -1;
     this._puckTouchesBase = 0;
+    this._f8Prev = null;
+    if (this.mode?.id === 'figure8') this._figure8Course(); // 시작 전에도 코스와 첫 방향(점선)을 미리 보여 준다
+  }
+
+  _figure8Course() {
+    this.cones = F8_CONES.map((x) => ({ x, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }));
+    this.waypoints = figure8Waypoints(this.figure8Dir);
+    this.wpIndex = 0;
   }
 
   setMode(id) {
@@ -152,12 +187,7 @@ export class Game {
         if (opts.handsFree) { this.wide.hold = null; this._wideZones(); }
         break;
       case 'figure8':
-        this.cones = [{ x: 0.3, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }, { x: 0.7, y: 0.5, r: CONE_R, moving: false, hitUntil: 0 }];
-        this.waypoints = [
-          { x: 0.5, y: 0.5 }, { x: 0.3, y: 0.22 }, { x: 0.1, y: 0.5 }, { x: 0.3, y: 0.78 },
-          { x: 0.5, y: 0.5 }, { x: 0.7, y: 0.22 }, { x: 0.9, y: 0.5 }, { x: 0.7, y: 0.78 },
-        ];
-        this.wpIndex = 0;
+        this._figure8Course();
         this.stats = { laps: 0, gates: 0, hits: 0 };
         this.instruction = '진한 빨간 원으로 · 옅은 원이 그다음';
         break;
@@ -316,7 +346,9 @@ export class Game {
       case 'figure8': {
         if (pp && tracked) {
           const wp = this.waypoints[this.wpIndex];
-          if (dist(pp, wp) < WAYPOINT_R) {
+          const prev = this._f8Prev && dist(this._f8Prev, pp) < 0.15 ? this._f8Prev : pp; // 추적이 튄 큰 점프는 선분으로 보지 않음
+          this._f8Prev = { x: pp.x, y: pp.y };
+          if (segDist(prev, pp, wp) < WAYPOINT_R) {
             this.stats.gates++; this.score += 1;
             this._ring(wp.x, wp.y, GATE_DRAW_R, now); // 숫자 대신 지나간 자리에 퍼지는 고리
             this.sfx?.rep();
@@ -348,8 +380,15 @@ export class Game {
       case 'reaction': {
         const t = this.targets[0];
         if (t && !t.spawnedAt) t.spawnedAt = now;
-        // 반응 시간 = 타겟 출현 후 퍽이 처음 움직이기 시작할 때까지 (이동 시간과 분리)
-        if (t && !t.movedAt && tracked && puck.speed > 0.4) t.movedAt = now;
+        // 반응 시간 = 타겟 출현 후 퍽이 그 타겟 쪽으로 움직이기 시작할 때까지 (이동 시간과 분리).
+        // 도착하자마자 다음 타겟이 나오므로 '움직이는 중'이 아니라 '새 타겟 쪽으로 방향을 잡았는가'로 본다 (2프레임 연속)
+        if (t && !t.movedAt && tracked && pp) {
+          const d = dist(pp, t);
+          const v = t.lastD != null && now > t.lastAt ? (t.lastD - d) / ((now - t.lastAt) / 1000) : 0;
+          if (v > REACT_APPROACH) { t.approachAt = t.approachAt || t.lastAt; if (++t.approachN >= 2) t.movedAt = t.approachAt; }
+          else { t.approachN = 0; t.approachAt = 0; }
+          t.lastD = d; t.lastAt = now;
+        }
         if (pp && tracked) {
           this._checkTargets(pp, (t) => {
             const total = (now - t.spawnedAt) / 1000;
@@ -359,14 +398,10 @@ export class Game {
             this.score += Math.max(1, Math.round(10 - rt * 8));
             this._pop(t.x, t.y, `반응 ${rt.toFixed(2)}s`, C.ink);
             this.sfx?.target();
-            this.targets = [];
-            this.nextSpawn = now + rand(500, 1400); // 예측 못 하게 랜덤 지연
+            // 도착 즉시 다음 타겟을 무작위 자리에 (기다림 없음)
+            this._spawnTarget(pp, 0.3, 0.5);
+            this.targets[0].spawnedAt = now;
           });
-        }
-        if (!this.targets.length && this.nextSpawn && now >= this.nextSpawn) {
-          this._spawnTarget(pp || { x: 0.5, y: 0.5 }, 0.3, 0.5);
-          this.targets[0].spawnedAt = now;
-          this.nextSpawn = 0;
         }
         break;
       }
@@ -435,7 +470,7 @@ export class Game {
 
   _spawnTarget(avoid, minDist = 0.25, maxDist = Infinity) {
     for (let tries = 0; tries < 80; tries++) {
-      const t = { x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_R, born: performance.now() };
+      const t = newTarget();
       const dd = dist(t, avoid);
       if (dd < minDist || dd > maxDist) continue;
       if (this.cones.some((c) => coneDist(t, c) < c.r + t.r + 0.04)) continue;
@@ -445,7 +480,7 @@ export class Game {
     // 빈자리를 못 찾으면 콘에서 가장 먼 후보를 사용
     let bestT = null, bestD = -1;
     for (let i = 0; i < 40; i++) {
-      const t = { x: rand(0.12, 0.88), y: rand(0.15, 0.85), r: TARGET_R, born: performance.now() };
+      const t = newTarget();
       const dmin = Math.min(dist(t, avoid), ...this.cones.map((c) => coneDist(t, c)));
       if (dmin > bestD) { bestD = dmin; bestT = t; }
     }
@@ -454,7 +489,7 @@ export class Game {
 
   _checkTargets(pp, onHit) {
     for (const t of [...this.targets]) {
-      if (dist(pp, t) < t.r) { onHit(t); return; }
+      if (dist(pp, t) < (t.hitR || t.r)) { onHit(t); return; }
     }
   }
 

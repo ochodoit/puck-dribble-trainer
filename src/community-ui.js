@@ -5,6 +5,8 @@ import { boardFor, challengerCount, postAge, bragKey, BOARD_TOP, TITLE_MAX, BODY
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sec = (v) => `${Number(v).toFixed(1)}s`;
+/** 저장된 숫자 칸을 HTML에 넣을 때: 숫자가 아니면 0 (조작된 글로 HTML이 끼어들지 못하게) */
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 
 export function timeAgo(at, now = Date.now()) {
   const m = Math.floor((now - at) / 60000);
@@ -20,13 +22,13 @@ export function courseSvg(points, w = 132, h = 92) {
   const pts = [...(points || [])].sort((a, b) => a.n - b.n);
   const X = (p) => (10 + p.x * (w - 20)).toFixed(1), Y = (p) => (10 + p.y * (h - 20)).toFixed(1);
   const path = pts.length > 1 ? `<polygon class="cs-line" points="${pts.map((p) => `${X(p)},${Y(p)}`).join(' ')}" />` : '';
-  const dots = pts.map((p, i) => `<circle class="cs-dot${i === 0 ? ' first' : ''}" cx="${X(p)}" cy="${Y(p)}" r="7.5" /><text class="cs-n${i === 0 ? ' first' : ''}" x="${X(p)}" y="${Y(p)}">${p.n}</text>`).join('');
+  const dots = pts.map((p, i) => `<circle class="cs-dot${i === 0 ? ' first' : ''}" cx="${X(p)}" cy="${Y(p)}" r="7.5" /><text class="cs-n${i === 0 ? ' first' : ''}" x="${X(p)}" y="${Y(p)}">${num(p.n)}</text>`).join('');
   return `<svg class="course-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="코스 미리보기"><rect class="cs-field" x="1" y="1" width="${w - 2}" height="${h - 2}" rx="8" />${path}${dots}</svg>`;
 }
 
 /**
  * host: {
- *   getUser(), getStore(): Promise<store>, toast(msg), modeName(id), countryLabel(code), modes: [{id, name}],
+ *   getUser(), blocked(): 막힌 이유 | null (베타 종료 등), getStore(): Promise<store>, toast(msg), modeName(id), countryLabel(code), modes: [{id, name}],
  *   shareDraft(): { course: {points, cycles, record}|null, result: {modeId, seconds, score, invisible}|null },
  *   onPractice(post), onChallengeMode(post), onOpen()
  * }
@@ -61,9 +63,9 @@ export function initCommunity(host) {
     if (!bp) return '<p class="post-sum"><span>원본 코스 기록 보기</span><i>›</i></p>';
     const rows = boardFor(bp), n = challengerCount(bp);
     const top = rows[0];
-    const lead = top ? `<span>1위</span> <b data-ugc>${esc(top.nick)}</b> <strong>${bp.type === 'record' ? `${top.score}점` : `평균 ${sec(top.avg)}`}</strong>` : '<span>아직 기록 없음</span>';
+    const lead = top ? `<span>1위</span> <b data-ugc>${esc(top.nick)}</b> <strong>${bp.type === 'record' ? `${num(top.score)}점` : `평균 ${sec(top.avg)}`}</strong>` : '<span>아직 기록 없음</span>';
     const limit = bp.type === 'record' ? postAge(bp) : null;
-    return `<p class="post-sum"><span class="cnt">도전 ${n}명</span>${lead}${limit !== null ? `<span class="age">${limit}세 이하 기록</span>` : ''}<i>상위 ${BOARD_TOP}위 ›</i></p>`;
+    return `<p class="post-sum"><span class="cnt">도전 ${n}명</span>${lead}${limit !== null ? `<span class="age">${num(limit)}세 이하 기록</span>` : ''}<i>상위 ${BOARD_TOP}위 ›</i></p>`;
   }
 
   /** 상위 5위 기록 (글을 눌렀을 때) */
@@ -72,7 +74,7 @@ export function initCommunity(host) {
     const bp = boardPost(p);
     const me = host.getUser();
     const tag = p.type === 'course' ? 'Course' : p.type === 'beat' ? 'New record' : 'Record';
-    const sub = p.type === 'record' ? modeLabel(p) : bp?.course ? `${bp.course.length} 포인트 · ${bp.cycles} 사이클` : '';
+    const sub = p.type === 'record' ? modeLabel(p) : bp?.course ? `${num(bp.course.length)} 포인트 · ${num(bp.cycles)} 사이클` : '';
     const head = `<div class="detail-head"><span class="post-tag">${tag}</span><h4${p.official ? '' : ' data-ugc'}>${esc(bp && bp !== p ? bp.title : p.title)}</h4>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
     if (!bp) return `${head}<p class="post-empty">원본 코스 글을 찾을 수 없습니다 (지워졌을 수 있습니다)</p>`;
     const rows = boardFor(bp), n = challengerCount(bp);
@@ -81,7 +83,7 @@ export function initCommunity(host) {
     const rule = bp.type === 'record' ? `<p class="detail-rule">${ruleText}</p>` : '';
     const items = rows.slice(0, BOARD_TOP).map((r) => `<li class="${r.rank === 1 ? 'holder' : ''}${me && r.uid === me.id ? ' me' : ''}">
       <span class="rk">${r.rank}</span><b data-ugc>${esc(r.nick)}</b>${jersey(r.number)}${r.author ? '<em>글쓴이</em>' : '<em class="sp"></em>'}${bp.type === 'record'
-        ? `<span class="t">${r.score}점</span><small></small>`
+        ? `<span class="t">${num(r.score)}점</span><small></small>`
         : `<span class="t">평균 ${sec(r.avg)}</span><small>최고 ${sec(r.best)}</small>`}</li>`).join('');
     const board = rows.length ? `<ol class="detail-board">${items}</ol>` : '<p class="post-empty">아직 기록이 없습니다 — 첫 기록의 주인공이 되어 보세요</p>';
     const top = rows[0];
@@ -104,7 +106,7 @@ export function initCommunity(host) {
     } else {
       const beat = p.type === 'beat' && p.ref
         ? `<p class="beat-line"><span>갈아치운 기록</span> <b data-ugc>${esc(p.ref.nick)}</b><strong>평균 ${sec(p.ref.avg)} → ${sec(p.record.avg)}</strong></p>` : '';
-      main = `<div class="course-box">${courseSvg(p.course)}<div class="post-meta"><span class="post-size">${p.course.length} 포인트 · ${p.cycles} 사이클</span>${beat}</div></div>`;
+      main = `<div class="course-box">${courseSvg(p.course)}<div class="post-meta"><span class="post-size">${num(p.course.length)} 포인트 · ${num(p.cycles)} 사이클</span>${beat}</div></div>`;
     }
     const act = p.type === 'record'
       ? '<button type="button" class="btn btn-primary" data-act="mode">나도 연습하기</button>'
@@ -212,6 +214,8 @@ export function initCommunity(host) {
   /** 글쓰기 열기. preset: { type, title, ref, course, result } (없으면 현재 코스/최근 결과로) */
   function compose(preset = {}) {
     if (!host.getUser()) { host.toast('글을 쓰려면 로그인하세요 (첫 화면에서 로그인)'); return false; }
+    const why = host.blocked?.();
+    if (why) { host.toast(why); return false; }
     const base = host.shareDraft();
     state.draft = {
       type: preset.type || (base.course ? 'course' : base.result ? 'record' : 'course'),
@@ -272,6 +276,8 @@ export function initCommunity(host) {
       } else if (btn.dataset.act === 'mode') host.onChallengeMode(post);
       else if (btn.dataset.act === 'cheer') {
         if (!u) { host.toast('응원하려면 로그인하세요 (첫 화면에서 로그인)'); return; }
+        const why = host.blocked?.();
+        if (why) { host.toast(why); return; }
         await store.cheer(u, id);
         await refresh();
       } else if (btn.dataset.act === 'delete') {

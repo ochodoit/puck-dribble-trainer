@@ -13,9 +13,10 @@
   import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
   import { C } from '../src/theme.js';
   import { alphaLayer } from '../src/theme.js';
-  import { rankKey, FLYER_R, WIDE_DRILLS, laneX } from '../src/game.js';
-  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf } from '../src/account.js';
-  import { decideIdle, stepChoice, stepDwell, choiceSide, CHOICE_HOLD_S } from '../src/idle-logic.js';
+  import { rankKey, FLYER_R, WIDE_DRILLS, laneX, figure8Waypoints, FIGURE8_DIRS, GATE_DRAW_R, TARGET_DRAW_R } from '../src/game.js';
+  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword } from '../src/account.js';
+  import { siteAllowed, isDevHost, OFFICIAL_URL } from '../src/guard.js';
+  import { decideIdle, stepChoice, stepDwell, choiceSide, inCardCore, CARD_INSET, CHOICE_HOLD_S } from '../src/idle-logic.js';
   import { LocalCommunityStore, buildPost, boardOf, courseSig, betterRecord, STARTER_POSTS } from '../src/community.js';
   import { timeAgo, courseSvg } from '../src/community-ui.js';
   import { tr, setLang, getLang, detectLang, initI18n } from '../src/i18n.js';
@@ -270,18 +271,29 @@
     for (let i = 0; i < 3; i++) { drawScene({ puck: { x: 300, y: 320 }, glare: true }); r = vision.process(scene, settings); }
     check('R6 glare-split puck merged', r.puck && r.puck.area > 35 && Math.abs(r.puck.x - 300 * 0.375) < 2, r.puck && [r.puck.x, r.puck.area]);
 
-    // R7) 반응 모드: 반응 시간(첫 움직임)과 이동 시간 분리, 타겟은 일정 거리 범위
+    // R7) 반응 모드: 반응 시간(새 타겟 쪽으로 움직이기 시작)과 이동 시간 분리, 타겟은 일정 거리 범위
     const g2 = new Game(null); g2.setMode('reaction');
     const tr2 = new Tracker(); tr2.pos = { x: 0.5, y: 0.5 }; tr2.state = 'tracked'; tr2.speed = 0; tr2.frames = 10; tr2.trackedFrames = 9;
     let t2 = 5000; g2.start(tr2);
     const tg = g2.targets[0];
     const dd = Math.hypot(tg.x - 0.5, tg.y - 0.5);
     check('R7 target within distance band', dd >= 0.3 && dd <= 0.5, dd);
+    const moveTo = (to, frames) => { const from = { ...tr2.pos }; for (let i = 1; i <= frames; i++) { tr2.pos = { x: from.x + (to.x - from.x) * i / frames, y: from.y + (to.y - from.y) * i / frames }; tr2.speed = 1; g2.update(0.033, tr2, t2); t2 += 33; } };
     for (let i = 0; i < 15; i++) { g2.update(0.033, tr2, t2); t2 += 33; } // 0.5초 정지 (반응 중)
-    tr2.speed = 1.0; g2.update(0.033, tr2, t2); t2 += 33;   // 움직이기 시작
-    for (let i = 0; i < 30; i++) { g2.update(0.033, tr2, t2); t2 += 33; } // 1초 이동
-    tr2.pos = { x: tg.x, y: tg.y }; g2.update(0.033, tr2, t2); t2 += 33;
-    check('R7 reaction excludes travel time', g2.stats.times.length === 1 && g2.stats.times[0] > 0.45 && g2.stats.times[0] < 0.6 && g2.stats.travel[0] > 0.9, g2.stats);
+    moveTo(tg, 15); // 0.5초 동안 타겟으로
+    check('R7 reaction excludes travel time', g2.stats.times.length === 1 && g2.stats.times[0] > 0.45 && g2.stats.times[0] < 0.6 && g2.stats.travel[0] > 0.4, g2.stats);
+    // R8) 도착하자마자 다음 타겟이 무작위 자리에 (기다림 없음), 크기는 예전의 절반.
+    //     퍽이 아직 반대쪽으로 움직이는 동안은 반응이 아니고, 새 타겟 쪽으로 방향을 잡은 순간까지가 반응 시간
+    const nx = g2.targets[0];
+    const nd = nx ? Math.hypot(nx.x - tr2.pos.x, nx.y - tr2.pos.y) : 0;
+    // 거리는 퍽이 타겟에 닿은 자리 기준(0.3~0.5)이라, 타겟 한가운데까지 간 지금 자리에서 재면 닿는 반경(약 0.026)만큼 차이 날 수 있음
+    check('R8 next target appears right away at a new spot, half size', g2.targets.length === 1 && nx !== tg && t2 - nx.spawnedAt <= 66 && nd >= 0.27 && nd <= 0.53
+      && nx.r === TARGET_DRAW_R && Math.abs(TARGET_DRAW_R - 0.02125) < 1e-9, { nd, r: nx?.r, spawnedAt: nx?.spawnedAt, t: t2 - 33 });
+    const away = { x: tr2.pos.x - (nx.x - tr2.pos.x) / nd * 0.12, y: tr2.pos.y - (nx.y - tr2.pos.y) / nd * 0.12 };
+    moveTo(away, 9);  // 0.3초 동안 계속 반대쪽으로 (관성)
+    moveTo(nx, 12);   // 방향을 잡아 새 타겟으로
+    const rt2 = g2.stats.times[1];
+    check('R8 reaction = time until heading to the new target (moving away does not count)', g2.stats.times.length === 2 && rt2 > 0.27 && rt2 < 0.4, g2.stats);
     const res2 = g2.stop('manual');
     check('R7 result includes track rate', res2.items.some(([k]) => k === '퍽 추적률'), res2.items);
 
@@ -592,9 +604,10 @@
     check('C1 validation: nick length/age range', !!validateProfile({ nick: 'a', pin: '123456', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: 'ok', pin: '123456', country: 'KR', team: 'A', age: 150 }));
     const base = { nick: '번개손', pin: '123456', country: 'KR', team: 'A', age: 11 };
     check('C1 jersey number optional, 0..99 integer', !validateProfile(base) && !validateProfile({ ...base, number: '' }) && !validateProfile({ ...base, number: '0' }) && !validateProfile({ ...base, number: 99 }) && !!validateProfile({ ...base, number: '100' }) && !!validateProfile({ ...base, number: '-1' }) && !!validateProfile({ ...base, number: '8.5' }) && jerseyOf('') === null && jerseyOf(' 07 ') === 7);
-    const u1 = await acc.register({ nick: '번개손', pin: '123456', country: 'KR', team: '서울 유스', age: 11, number: '87' });
+    acc._putCode('TESTBETA', { type: 'beta', maxUses: 0 }); // 테스트용 베타 코드 (여러 명)
+    const u1 = await acc.register({ nick: '번개손', pin: '123456', country: 'KR', team: '서울 유스', age: 11, number: '87', code: 'test-beta' });
     check('C2 register logs in with age group and jersey number', u1.nick === '번개손' && u1.ageGroup === 'U12' && u1.number === 87 && acc.current()?.id === '번개손');
-    let dup = null; try { await acc.register({ nick: ' 번개손 ', pin: '000000', country: 'US', team: 'X', age: 30 }); } catch (e) { dup = e.message; }
+    let dup = null; try { await acc.register({ nick: ' 번개손 ', pin: '000000', country: 'US', team: 'X', age: 30, code: 'TESTBETA' }); } catch (e) { dup = e.message; }
     check('C2 duplicate nick rejected (case/space-insensitive)', /사용 중/.test(dup || ''), dup);
     acc.logout();
     let wrong = null; try { await acc.login('번개손', '654321'); } catch (e) { wrong = e.message; }
@@ -608,7 +621,7 @@
     check('C3 best score kept, plays counted', r1.improved && !r2.improved && r2.best === 500 && r3.improved && r3.best === 900 && r3.entry.plays === 3 && r3.entry.number === 87, { r1, r2, r3 });
     // 다른 선수들 등록 (연령대/국가/팀 다양)
     const others = [['민준', 'KR', '서울 유스', 10, 1200], ['Ava', 'US', 'Boston Jr', 11, 700], ['Hana', 'KR', '부산 키즈', 14, 1500], ['Coach', 'KR', '서울 유스', 35, 2000], ['Liam', 'CA', 'Toronto', 9, 400]];
-    for (const [nick, country, team, age, score] of others) { acc.logout(); await acc.register({ nick, pin: '111111', country, team, age }); await acc.submitScore('arcade', score); await acc.submitScore('wide', score / 100); }
+    for (const [nick, country, team, age, score] of others) { acc.logout(); await acc.register({ nick, pin: '111111', country, team, age, code: 'TESTBETA' }); await acc.submitScore('arcade', score); await acc.submitScore('wide', score / 100); }
     acc.logout(); await acc.login('번개손', '123456');
     const all = await acc.leaderboard('arcade');
     check('C4 leaderboard sorted desc with ranks', all.length === 6 && all[0].nick === 'Coach' && all[0].rank === 1 && all[5].rank === 6 && all.every((r, i) => i === 0 || all[i - 1].score >= r.score), all.map((r) => [r.nick, r.score]));
@@ -622,6 +635,176 @@
     const wide = await acc.leaderboard('wide');
     check('C4 per-mode separation', wide.length === 5 && !wide.some((r) => r.nick === '번개손'), wide.length);
     check('C4 no scores for guest', await (async () => { acc.logout(); try { await acc.submitScore('arcade', 1); return false; } catch { return true; } })());
+    check('C4 guest would-be rank (ties go first)', JSON.stringify(rankAmong([{ score: 10 }, { score: 5 }], 7)) === '{"rank":2,"total":3}' && rankAmong([{ score: 10 }], 10).rank === 1
+      && JSON.stringify(await acc.wouldRank('arcade', 1300)) === '{"rank":3,"total":7}', await acc.wouldRank('arcade', 1300));
+
+    // ===== 정회원 · 가입 코드 =====
+    {
+      check('M1 code format: normalize, label, no look-alike letters', normCode(' k7mp-q2xd ') === 'K7MPQ2XD' && codeLabel('k7mpq2xd') === 'K7MP-Q2XD'
+        && Array.from({ length: 300 }, makeCode).every((c) => c.length === 8 && [...c].every((ch) => CODE_CHARS.includes(ch))) && !/[01ILO]/.test(CODE_CHARS));
+      const now = Date.now();
+      check('M1 code status: missing / off / expired / full / ok', codeStatus(null) === 'missing' && codeStatus({ off: true, maxUses: 0 }) === 'off'
+        && codeStatus({ expiresAt: now - 1, maxUses: 0 }) === 'expired' && codeStatus({ maxUses: 1, uses: 1 }) === 'full'
+        && codeStatus({ maxUses: 0, uses: 99, expiresAt: now + 1e6 }) === 'ok' && codeStatus({ expiresAt: { toMillis: () => now - 1 }, maxUses: 0 }) === 'expired');
+      const ms = new LocalAccountStore(mem());
+      const reg = async (nick, code) => { try { return await ms.register({ nick, pin: '123456', country: 'KR', team: 'T', age: 12, code }); } catch (e) { return e.message; } };
+      ms._putCode('BETA0001', { type: 'beta', maxUses: 2 });
+      ms._putCode('ONE00001', { type: 'one' });
+      ms._putCode('OLD00001', { type: 'one', expiresAt: now - 1000 });
+      ms._putCode('OFF00001', { type: 'one', off: true });
+      const noCode = await reg('aa', ''), badCode = await reg('aa', 'ZZZZ9999'), oldCode = await reg('aa', 'OLD0-0001'), offCode = await reg('aa', 'OFF00001');
+      check('M2 sign-up needs a usable code', noCode === '가입 코드가 필요합니다' && badCode === '없는 코드입니다' && oldCode === '마감된 코드입니다' && offCode === '쓸 수 없는 코드입니다' && !ms.current(), { noCode, badCode, oldCode, offCode });
+      const b1 = await reg('beta1', 'beta-0001'); ms.logout();
+      const b2 = await reg('beta2', 'BETA0001'); ms.logout();
+      const b3 = await reg('beta3', 'BETA0001');
+      const o1 = await reg('one1', 'ONE0-0001'); ms.logout();
+      const o2 = await reg('one2', 'ONE00001');
+      check('M2 beta link: many people up to the cap, numbered in order, beta badge', b1.memberNo === 1 && b1.beta && b2.memberNo === 2 && memberBadge(b2) === '베타 멤버 No.0002' && b3 === '인원이 다 찬 코드입니다', { b1, b2, b3 });
+      check('M2 one-time code: one person only, member badge', o1.memberNo === 3 && !o1.beta && o1.via === 'one' && memberBadge(o1) === '정회원 No.0003' && o2 === '이미 사용된 코드입니다', { o1, o2 });
+      const info = await ms.checkCode('beta-0001');
+      check('M2 code check for the invite card (no operator note)', info.status === 'full' && info.type === 'beta' && info.uses === 2 && !('note' in info) && (await ms.checkCode('x')).status === 'format', info);
+      // 운영자
+      let denied = null; try { await ms.issueCode({ type: 'one' }); } catch (e) { denied = e.message; }
+      ms.logout();
+      ms._putCode('ADMIN001', { type: 'one' });
+      const admin = await reg('test123', 'ADMIN001');
+      const one = await ms.issueCode({ type: 'one', note: '인스타 @abc' });
+      const beta = await ms.issueCode({ type: 'beta', maxUses: '50', expiresAt: now + 864e5 });
+      await ms.updateCode(one.code, { off: true });
+      const list = await ms.listCodes();
+      check('M3 operator: only admins issue codes; one-time = 1 use, beta = cap + deadline; turn off', denied === '운영자만 할 수 있습니다' && admin.admin === true
+        && one.maxUses === 1 && one.code.length === 8 && beta.maxUses === 50 && beta.expiresAt === now + 864e5
+        && codeStatus(list.find((c) => c.code === one.code)) === 'off' && list.length === 7 && list[0].createdAt >= list[list.length - 1].createdAt, { denied, one, beta, n: list.length });
+      await ms.setSiteConfig({ snsAccount: 'puck.official', hashtag: '퍽챌린지' });
+      ms.logout();
+      let cfgDenied = null; try { await ms.setSiteConfig({ hashtag: 'x' }); } catch (e) { cfgDenied = e.message; }
+      check('M3 guest notice settings: anyone reads, only admins save', (await ms.getSiteConfig()).snsAccount === 'puck.official' && cfgDenied === '운영자만 할 수 있습니다');
+      const ids = ['@puck.official', 'https://www.instagram.com/puck_official/', 'instagram.com/abc?hl=ko', 'bad id!', ''].map(instaId);
+      check('M3 guest Instagram DM link: account ID cleaned, DM opens ig.me', ids.join('|') === 'puck.official|puck_official|abc||'
+        && instaDmLink('@puck.official') === 'https://ig.me/m/puck.official' && instaDmLink('bad id!') === '', ids);
+      // 예전 계정(코드 없이 가입) -> 가입 준비: 가입 순서대로 번호 + 베타 멤버
+      const ls = mem();
+      const legacy = { aa: ['Old2', 20], bb: ['test123', 10], cc: ['Old3', 30] };
+      const users = {};
+      for (const [id, [nick, at]] of Object.entries(legacy)) users[nick.toLowerCase()] = { id: nick.toLowerCase(), nick, pinHash: await hashPin(nick, '123456'), country: 'KR', team: 'T', age: 20, ageGroup: '성인', createdAt: at };
+      ls.setItem('puck-trainer.users.v1', JSON.stringify(users));
+      const la = new LocalAccountStore(ls);
+      await la.login('test123', '123456');
+      const before = { info: await la.membersInfo(), badge: memberBadge(la.current()) };
+      const r = await la.initMembers();
+      const after = Object.values(JSON.parse(ls.getItem('puck-trainer.users.v1'))).sort((x, y) => x.memberNo - y.memberNo).map((u) => `${u.nick}:${u.memberNo}:${u.beta}`).join(',');
+      const again = await la.initMembers();
+      check('M4 open sign-up: number old accounts by join order as beta members, once', !before.info.ready && before.badge === '베타 멤버' && r.assigned === 3 && r.count === 3
+        && after === 'test123:1:true,Old2:2:true,Old3:3:true' && memberBadge(la.current()) === '베타 멤버 No.0001' && again.assigned === 0, { before, r, after, again });
+    }
+
+    // ===== 베타 종료: [개발자에게] 의견을 마감 전에 보낸 베타 멤버만 정회원 유지 =====
+    {
+      const end = 1000, b = { beta: true, code: 'X' };
+      const st = [
+        betaState(null, end, 500), betaState({ beta: false, code: 'X' }, end, 5000), betaState(b, null, 5000), betaState(b, end, 500),
+        betaState({ ...b, feedbackAt: 900 }, end, 5000), betaState({ ...b, feedbackAt: 1200 }, end, 5000), betaState(b, end, 1000),
+        betaState({ ...b, kept: true }, end, 5000), betaState({ beta: true }, end, 5000),
+      ].join(',');
+      check('M5 beta state: before end / feedback in time / late / operator keep / legacy', st === 'guest,member,beta,beta,kept,lapsed,lapsed,kept,lapsed'
+        && isActiveMember('kept') && isActiveMember('beta') && isActiveMember('member') && !isActiveMember('lapsed') && !isActiveMember('guest'), st);
+      check('M5 feedback text: at least one box, 500 chars max', validateFeedback({}) && validateFeedback({ good: ' ', fix: '' })
+        && validateFeedback({ good: 'x'.repeat(501) }) && validateFeedback({ good: '좋아요' }) === null && validateFeedback({ fix: '고쳐 주세요' }) === null);
+
+      const ls = mem();
+      const st5 = new LocalAccountStore(ls);
+      st5._putCode('BETA5000', { type: 'beta', maxUses: 0 });
+      st5._putCode('ADMIN500', { type: 'one' });
+      const P = { pin: '123456', country: 'KR', team: 'T', age: 12 };
+      await st5.register({ nick: 'test123', ...P, code: 'ADMIN500' });
+      const past = Date.now() + 60000; // 지금은 마감 1분 전
+      await st5.setSiteConfig({ betaEndsAt: past });
+      st5.logout();
+      await st5.register({ nick: 'early', ...P, code: 'BETA5000' });
+      const s0 = st5.memberState();
+      let fbErr = null; try { await st5.sendFeedback({ good: '' }); } catch (e) { fbErr = e.message; }
+      const f1 = await st5.sendFeedback({ good: '8자 방향 좋아요', fix: '' });
+      const s1 = st5.memberState();
+      const f2 = await st5.sendFeedback({ good: '8자 방향 좋아요', fix: '어두우면 놓쳐요' });
+      st5.logout();
+      await st5.register({ nick: 'late', ...P, code: 'BETA5000' });
+      const lateBefore = st5.memberState();
+      const sLate = st5.memberState(past + 1); // 마감이 지난 시점으로 판단
+      // 마감을 지난 시각으로 바꿔 실제 동작 확인
+      const endAt = f1.at + 2; // early 의 의견 바로 뒤가 마감
+      await new Promise((r) => setTimeout(r, 15));
+      ls.setItem('puck-trainer.site.v1', JSON.stringify({ ...JSON.parse(ls.getItem('puck-trainer.site.v1')), betaEndsAt: endAt }));
+      let blocked = null; try { await st5.submitScore('arcade@60', 10); } catch (e) { blocked = e.message; }
+      st5.logout();
+      await st5.login('early', '123456');
+      const sEarly = st5.memberState();
+      const earlyScore = await st5.submitScore('arcade@60', 20);
+      const mine = await st5.getMyFeedback();
+      let listDenied = null; try { await st5.listFeedback(); } catch (e) { listDenied = e.message; }
+      st5.logout();
+      await st5.login('test123', '123456');
+      const fbs = await st5.listFeedback();
+      const betas = (await st5.betaMembers()).map((u) => `${u.nick}:${betaState(u, endAt)}`).join(',');
+      const lateUid = (await st5.betaMembers()).find((u) => u.nick === 'late').id;
+      await st5.keepMember(lateUid, true);
+      const kept = (await st5.betaMembers()).map((u) => `${u.nick}:${betaState(u, endAt)}`).join(',');
+      check('M5 send feedback before the end: membership kept, edits keep the first time', s0 === 'beta' && fbErr === '좋았던 점이나 고쳤으면 하는 점을 적어 주세요'
+        && s1 === 'kept' && f2.at === f1.at && f2.fix === '어두우면 놓쳐요' && mine.good === '8자 방향 좋아요', { s0, s1, f1, f2, fbErr });
+      check('M5 no feedback by the end: lapsed, score not ranked; sender still ranks', lateBefore === 'beta' && sLate === 'lapsed' && blocked === LAPSED
+        && sEarly === 'kept' && earlyScore.best === 20, { lateBefore, sLate, blocked, sEarly });
+      check('M5 operator reads feedback, sees beta members, keeps a late one', listDenied === '운영자만 할 수 있습니다' && fbs.length === 1 && fbs[0].nick === 'early'
+        && betas === 'early:kept,late:lapsed' && kept === 'early:kept,late:kept', { listDenied, betas, kept });
+    }
+
+    // ===== 보안: 운영자처럼 보이는 별명 금지, 운영자 비밀번호(12자 이상) 바꾸기, 공식 주소에서만 실행 =====
+    {
+      const P = { pin: '123456', country: 'KR', team: 'T', age: 12 };
+      const bad = ['운영자', 'Admin7', 'puck trainer', '퍽트레이너', 'official_1'].map((nick) => validateProfile({ nick, ...P }));
+      check('S1 nicknames that look like the operator are refused', bad.every((e) => e && e.includes('운영자')) && validateProfile({ nick: '번개손', ...P }) === null && RESERVED_NICK_RE.test('ADMIN'), bad);
+      const pw = ['123456', 'aaaaaaaaaaaa', '1234567890123', 'x'.repeat(65), '483920175562', 'Puck-Trainer-2026!'].map((p) => (validateStrongPassword(p) === null ? 1 : 0)).join('');
+      check('S2 operator password: 12-64 characters, not one repeated character or a plain sequence', pw === '000011', pw);
+      const st = new LocalAccountStore(mem());
+      st._putCode('SECURE00', { type: 'one' });
+      await st.register({ nick: 'boss', ...P, code: 'SECURE00' });
+      let wrong = null; try { await st.changePassword('000000', '483920175562'); } catch (e) { wrong = e.message; }
+      let weak = null; try { await st.changePassword('123456', '1234'); } catch (e) { weak = e.message; }
+      await st.changePassword('123456', '483920175562');
+      st.logout();
+      let oldPin = null; try { await st.login('boss', '123456'); } catch (e) { oldPin = e.message; }
+      const back = await st.login('boss', '483920175562');
+      check('S3 change password: needs the current one, then only the new one logs in', wrong === '지금 비밀번호가 맞지 않습니다' && weak === '새 비밀번호는 12~64자'
+        && !!oldPin && back?.nick === 'boss', { wrong, weak, oldPin });
+      const sites = ['https://ochodoit.github.io/puck-dribble-trainer/', 'https://ochodoit.github.io/puck-dribble-trainer/index.html?c=AB', 'https://ochodoit.github.io/semple/',
+        'http://127.0.0.1:8080/', 'http://localhost:5173/x', 'https://evil.example/puck-dribble-trainer/', 'http://ochodoit.github.io/puck-dribble-trainer/',
+        'https://ochodoit.github.io/other/', 'https://ochodoit.github.io/puck-dribble-trainer-copy/',
+        'https://192.168.0.12:8443/', 'https://10.0.0.5:8443/', 'https://172.20.1.2:8443/', 'https://172.32.0.1/', 'https://192.169.0.1/'].map((u) => (siteAllowed(new URL(u)) ? 1 : 0)).join('');
+      check('S4 runs only on the official address, this computer or the same Wi-Fi', sites === '11111000011100' && OFFICIAL_URL.endsWith('/puck-dribble-trainer/')
+        && isDevHost(location) && !isDevHost(new URL('https://ochodoit.github.io/')), sites);
+    }
+
+    // ===== 8자 드리블: 방향 4가지, 게이트 원은 예전의 절반 =====
+    {
+      const f = (d) => figure8Waypoints(d).map((p) => [p.x, p.y]);
+      const old = [[0.5, 0.5], [0.3, 0.22], [0.1, 0.5], [0.3, 0.78], [0.5, 0.5], [0.7, 0.22], [0.9, 0.5], [0.7, 0.78]];
+      const shape = FIGURE8_DIRS.map((d) => { const w = f(d); return `${d}:${w[1][0] < 0.5 ? 'L' : 'R'}${w[1][1] < 0.5 ? 'up' : 'down'}/${w[5][0] < 0.5 ? 'L' : 'R'}${w[5][1] < 0.5 ? 'up' : 'down'}`; }).join(' ');
+      const mirror = JSON.stringify(f('R-down')) === JSON.stringify(f('L-up').map(([x, y]) => [Math.round((1 - x) * 100) / 100, Math.round((1 - y) * 100) / 100]));
+      check('F8 directions: left/right cone first x around the top/bottom; default = old course', JSON.stringify(f('L-up')) === JSON.stringify(old) && mirror
+        && shape === 'L-up:Lup/Rup L-down:Ldown/Rdown R-up:Rup/Lup R-down:Rdown/Ldown' && JSON.stringify(f('bogus')) === JSON.stringify(old), shape);
+      check('F8 gate circles are half the old size', Math.abs(GATE_DRAW_R - 0.01875) < 1e-9);
+      const g8 = new Game(null); g8.figure8Dir = 'R-down'; g8.setMode('figure8');
+      const preview = g8.waypoints.length === 8 && g8.cones.length === 2 && g8.waypoints[1].x === 0.7 && g8.waypoints[1].y === 0.78 && !g8.running;
+      const fp8 = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
+      let t8 = 500000;
+      const at = (x, y) => { fp8.pos = { x, y }; g8.update(0.033, fp8, t8); t8 += 33; };
+      g8.start(fp8);
+      at(0.5, 0.5);
+      const g1 = g8.stats.gates;
+      at(0.66, 0.72); at(0.74, 0.84); // 다음 게이트(0.7, 0.78)를 한 프레임 사이에 건너뜀 -> 선분으로 통과 인정
+      const g2 = g8.stats.gates;
+      at(0.9, 0.2); at(0.9, 0.8);     // 추적이 크게 튄 점프(0.6)는 선분으로 보지 않음 -> 다음 게이트(0.9, 0.5) 통과 아님
+      const g3 = g8.stats.gates;
+      check('F8 start: course preview before start in the chosen direction; fast pass through a small gate still counts', preview && g1 === 1 && g2 === 2 && g3 === 2, { preview, g1, g2, g3 });
+    }
 
     // ===== 아무 바닥·아무 물체: 자동 지정 + 전체 화면 폴백 =====
     const v2 = new Vision(240); v2.mirror = false; v2.setSourceSize(640, 480);
@@ -710,6 +893,10 @@
       // 모드 카드 머무름: 같은 카드 2초 -> 선택, 카드가 바뀌면 처음부터, 카드 밖(null)은 세지 않음
       const d = { key: null, hold: 0 }; let fd = null;
       for (let i = 0; i < 40; i++) fd = stepDwell(d, 2, 0.033) ?? fd;
+      // 카드 테두리 근처는 어느 카드도 아님 (카드 사이를 지나갈 때 엉뚱한 카드가 골라지지 않게)
+      const rc = { left: 100, top: 50, width: 200, height: 100 };
+      const core = [[200, 100], [100 + 200 * (CARD_INSET + 0.01), 100], [100 + 200 * (CARD_INSET - 0.01), 100], [200, 50 + 100 * (1 - CARD_INSET + 0.01)], [101, 51], [299, 149], [200, 100.5 + 100]].map(([x, y]) => (inCardCore(rc, x, y) ? 1 : 0)).join('');
+      check('U4 mode card picks only near its middle, not at the border', core === '1100000' && CARD_INSET >= 0.1 && CARD_INSET <= 0.2, core);
       for (let i = 0; i < 40; i++) fd = stepDwell(d, 4, 0.033) ?? fd;
       check('F3d dwell resets when the card changes', fd === null && d.key === 4);
       for (let i = 0; i < 30; i++) fd = stepDwell(d, 4, 0.033) ?? fd;
@@ -832,7 +1019,7 @@
       check('L3 multi-line camera help is fully translated', !/[가-힣]/.test(camMsg) && camMsg.includes('(NotAllowedError: Permission denied)') && camMsg.includes('\n'), camMsg);
       // DOM: 새로 들어온 글자·속성도 따라가며 번역, 사용자가 쓴 글(data-ugc)은 그대로, 한국어로 돌리면 원문 복원
       const box = document.createElement('div');
-      box.innerHTML = '<p id="l-a">설정</p><input id="l-b" placeholder="접속 코드"><b id="l-c" data-ugc>설정</b><span id="l-d"></span>';
+      box.innerHTML = '<p id="l-a">설정</p><input id="l-b" placeholder="가입 코드"><b id="l-c" data-ugc>설정</b><span id="l-d"></span>';
       document.body.appendChild(box);
       await new Promise((r) => setTimeout(r, 30));
       const d1 = [box.querySelector('#l-a').textContent, box.querySelector('#l-b').placeholder, box.querySelector('#l-c').textContent];
@@ -841,7 +1028,7 @@
       const d2 = box.querySelector('#l-d').textContent;
       setLang('ko');
       const d3 = [box.querySelector('#l-a').textContent, box.querySelector('#l-b').placeholder, box.querySelector('#l-d').textContent];
-      check('L4 DOM text and attributes follow the language, user content untouched', d1.join('|') === 'Settings|Access code|설정' && d2 === 'Ranking' && d3.join('|') === '설정|접속 코드|랭킹' && document.documentElement.lang === 'ko', { d1, d2, d3 });
+      check('L4 DOM text and attributes follow the language, user content untouched', d1.join('|') === 'Settings|Sign-up code|설정' && d2 === 'Ranking' && d3.join('|') === '설정|가입 코드|랭킹' && document.documentElement.lang === 'ko', { d1, d2, d3 });
       box.remove();
     }
 

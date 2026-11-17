@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = {
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
   flipDepth: true,                            // 앞뒤 방향(아케이드·퍽 피하기·자유 연습 공통): true = 카메라 쪽으로 밀면 화면 위로
   puckOpacity: 100,                           // 플레이 중 내 퍽 표시 농도(%): 100 = 또렷이, 0 = 안 보임 (10 단위, 헤드업 훈련)
+  figure8Dir: 'L-up',                         // 8자 드리블 방향: L|R(어느 콘 먼저) - up|down(콘을 위·아래 어느 쪽부터)
   invisible: false,                           // 투명 모드: 플레이 중 내 퍽을 아예 숨김 (손의 감각으로만). 랭킹·자랑은 일반과 따로
   courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
   course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (평면 경기장 비율)
@@ -67,6 +68,7 @@ export function sanitizeSettings(s) {
   s.difficulty = ['easy', 'normal', 'hard'].includes(s.difficulty) ? s.difficulty : d.difficulty;
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
+  s.figure8Dir = ['L-up', 'L-down', 'R-up', 'R-down'].includes(s.figure8Dir) ? s.figure8Dir : d.figure8Dir;
   s.flipDepth = typeof s.flipDepth === 'boolean' ? s.flipDepth : d.flipDepth;
   s.bgTransparency = num(s.bgTransparency, 0, 100, d.bgTransparency);
   s.invisible = s.invisible === true;

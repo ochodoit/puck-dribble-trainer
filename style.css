@@ -176,6 +176,10 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .hero-art { display: block; width: min(360px, 74%); height: auto; max-height: 26vh; object-fit: contain; margin: clamp(10px, 2.4vh, 28px) auto clamp(6px, 1.6vh, 14px); }
 .lead { display: inline-block; border: var(--line) solid var(--ink); border-radius: 28px; padding: 9px 24px; font-size: clamp(13px, 2.2vw, 15.5px); margin: 0 0 18px; max-width: 100%; text-wrap: balance; }
 .howto { text-align: left; margin: 18px auto 0; max-width: 620px; border-top: 1px solid var(--ink); }
+.copyright { margin: 14px auto 0; font-size: 11px; color: var(--ink-soft); letter-spacing: .02em; }
+/* 공식 주소가 아닐 때 (src/guard.js) */
+.guard-stop { max-width: 520px; margin: 20vh auto 0; padding: 0 16px; text-align: center; font-size: 16px; line-height: 1.6; }
+.guard-stop a { word-break: break-all; }
 .howto summary { cursor: pointer; list-style: none; padding: 12px 2px; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
 .howto summary::-webkit-details-marker { display: none; }
 .howto summary::after { content: "+"; font-family: var(--display); font-size: 22px; line-height: 1; }
@@ -185,11 +189,22 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .tips li::before { content: counter(tip, decimal-leading-zero); font-family: var(--display); font-weight: 900; color: var(--ink); font-size: 15px; }
 .tips b { color: var(--ink); font-weight: 600; }
 
-.pin-form { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 6px 0 14px; }
-.pin-form input { font-family: var(--display); font-weight: 900; font-size: 24px; letter-spacing: 0.35em; text-align: center; width: 220px; padding: 10px; border-radius: 999px;
-  border: var(--line) solid var(--ink); background: var(--paper); }
-.pin-form input::placeholder { font-family: var(--sans); font-weight: 500; font-size: 15px; letter-spacing: 0.04em; color: var(--mute); }
-.pin-form .error { width: 100%; margin: 4px 0 0; }
+/* 초대 링크(?c=코드)로 들어왔을 때 */
+.invite-card { display: flex; flex-direction: column; gap: 4px; max-width: 620px; margin: 4px auto 14px; padding: 12px 18px; text-align: left;
+  border: var(--line) solid var(--red); border-radius: var(--radius); background: var(--paper); }
+.invite-card b { font-family: var(--display); font-weight: 900; font-variation-settings: "SOFT" 100; font-size: 22px; line-height: 1.15; color: var(--red); }
+.invite-card span { font-size: 14px; color: var(--ink-soft); }
+.invite-card.bad { border-color: var(--ink); }
+.invite-card.bad b { color: var(--ink); }
+.auth-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--mute); }
+/* 정회원 배지: '베타 멤버 No.0007' */
+.member-badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; line-height: 1.5; color: var(--paper); background: var(--red);
+  border-radius: 999px; padding: 1px 9px; margin-left: 4px; vertical-align: 3px; white-space: nowrap; }
+/* 베타 상태 칩: 의견 보내고 정회원 유지 / 정회원 유지 / 베타 종료 (누르면 개발자에게) */
+.beta-chip { display: inline-block; font: inherit; font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--red); background: transparent;
+  border: 1.5px dashed var(--red); border-radius: 999px; padding: 0 9px; margin-left: 6px; vertical-align: 2px; white-space: nowrap; cursor: pointer; }
+.beta-chip.ok { border-style: solid; color: var(--ink-soft); border-color: var(--ink-soft); cursor: default; }
+.beta-chip.bad { border-style: solid; color: var(--paper); background: var(--ink-soft); border-color: var(--ink-soft); }
 
 .auth-card { text-align: left; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 14px 2px; margin: 0 auto 18px; max-width: 620px; }
 .auth-card .muted { margin: 10px 0 0; font-size: 12px; }
@@ -202,7 +217,8 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .auth-grid label, .settings-grid label, .diag label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }
 .auth-grid input, .auth-grid select, .settings-grid select, .rank-filters select, .diag select, .versus-names input, .comm-mode {
   font-size: 15px; font-weight: 500; letter-spacing: 0; padding: 10px 14px; border-radius: 12px; border: var(--line) solid var(--ink); background: var(--paper); color: var(--ink); width: 100%; }
-.auth-logged { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--ink-soft); }
+.auth-logged { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 14px; color: var(--ink-soft); }
+.auth-logged #auth-who { flex: 1 1 260px; }
 .auth-logged b { font-family: var(--display); font-weight: 900; font-size: 22px; color: var(--ink); margin-right: 6px; }
 
 .diag { text-align: left; border: var(--line) solid var(--red); border-radius: var(--radius); padding: 14px 16px; margin: 14px auto 0; max-width: 620px; }
@@ -222,14 +238,21 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .time-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .time-row .muted { margin: 0; }
 /* 3×3 배치: 가운데(5번)는 퍽이 대기하는 자리라 비워 둔다. 9번은 Coming soon */
-.mode-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.mode-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 10px; } /* 모든 칸 같은 높이 */
 .mode-wait, .mode-soon { border-radius: var(--radius); min-height: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--mute); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
 .mode-wait i { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--mute); }
 .mode-soon { border: 1px solid rgba(22, 22, 22, 0.22); align-items: flex-start; justify-content: flex-start; padding: 14px 16px; text-transform: none; letter-spacing: 0; }
 .mode-soon .no { font-family: var(--display); font-weight: 900; font-size: 14px; }
 .mode-soon b { font-family: var(--script); font-weight: 700; font-size: 30px; line-height: 1; color: var(--red); margin-top: 10px; transform: rotate(-4deg); }
 .mode-card { position: relative; text-align: left; background: var(--paper); border: var(--line) solid var(--ink); border-radius: var(--radius); padding: 14px 16px 16px; cursor: pointer;
-  display: grid; grid-template-columns: 1fr auto; row-gap: 2px; transition: background 0.15s, color 0.15s; }
+  display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto auto 1fr auto; align-content: stretch; align-items: start; row-gap: 2px; transition: background 0.15s, color 0.15s; }
+/* 번호·시간 / 제목 / 영문 / 설명 / best 를 모든 카드에서 같은 줄에 */
+.mode-card .no { grid-row: 1; grid-column: 1; }
+.mode-card .time { grid-row: 1; grid-column: 2; }
+.mode-card b { grid-row: 2; }
+.mode-card em { grid-row: 3; }
+.mode-card small { grid-row: 4; }
+.mode-card .best { grid-row: 5; align-self: end; }
 .mode-card { overflow: hidden; }
 .mode-card:hover, .mode-card.hover { background: var(--paper-2); }
 .mode-card.selected.hover { background: var(--ink); }
@@ -488,3 +511,42 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .jersey { font-family: var(--display); font-weight: 900; font-variant-numeric: tabular-nums; color: var(--red); margin-left: 4px; font-size: 0.95em; }
 .rank-table .jersey { font-size: 13px; }
 #btn-logout { white-space: nowrap; flex-shrink: 0; }
+
+/* 게스트 결과: 정회원이었다면 몇 위 + 플레이 인증으로 코드 받기 */
+.result-guest { margin: 14px 0 0; padding: 12px 16px; border: var(--line) dashed var(--red); border-radius: var(--radius); font-size: 14px; color: var(--ink-soft); }
+.result-guest p { margin: 0 0 6px; }
+.result-guest p:last-child { margin-bottom: 0; }
+.result-guest .guest-rank b { font-family: var(--display); font-weight: 900; font-variation-settings: "SOFT" 100; font-size: 20px; color: var(--ink); }
+.result-guest .guest-tags { font-weight: 700; color: var(--red); }
+.result-guest .muted { font-size: 12px; }
+.guest-dm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 6px; }
+.guest-dm .btn { text-decoration: none; }
+
+/* 개발자에게 (커뮤니티) */
+.fb-form h3 { font-size: 20px; margin: 0; }
+.fb-form .fb-intro { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink); }
+.fb-form .muted { margin: 0; font-size: 12px; }
+
+/* 운영자 화면 */
+.adm-sec { padding: 12px 0 14px; border-top: 1px solid rgba(22, 22, 22, 0.18); }
+.adm-sec:first-of-type { border-top: 0; padding-top: 0; }
+.adm-sec h3 { font-size: 20px; margin-bottom: 4px; }
+.adm-sec .muted { margin: 0 0 10px; font-size: 12.5px; }
+.adm-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.adm-row label { display: flex; flex-direction: column; gap: 5px; flex: 1 1 160px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }
+.adm-row input, .adm-out input, .adm-table input { font-size: 15px; padding: 9px 12px; border-radius: 12px; border: var(--line) solid var(--ink); background: var(--paper); color: var(--ink); min-width: 0; }
+.adm-row > input { flex: 1 1 200px; }
+.adm-out { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.adm-out b { font-family: var(--display); font-weight: 900; font-size: 22px; letter-spacing: 0.04em; }
+.adm-out input { flex: 1 1 240px; font-size: 13px; }
+.adm-table td { vertical-align: middle; }
+.adm-table tr.dim td { color: var(--mute); }
+.adm-table input { font-size: 13px; padding: 4px 8px; border-radius: 8px; }
+.adm-acts { white-space: nowrap; }
+.adm-acts .btn { min-height: 30px; padding: 3px 10px; font-size: 12px; }
+.adm-feedback { display: grid; gap: 10px; max-height: 420px; overflow: auto; }
+.fb-item { padding: 10px 12px; border: 1px solid rgba(22, 22, 22, 0.25); border-radius: 12px; font-size: 13.5px; }
+.fb-item header { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.fb-item header span, .fb-item header time { font-size: 11.5px; color: var(--mute); }
+.fb-item p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fb-item em { display: block; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--red); }

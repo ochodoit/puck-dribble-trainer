@@ -38,6 +38,16 @@ export const CHOICE_RIGHT = 0.67;    // u > 0.67 = 오른쪽 영역
 export function choiceSide(u) { return u < CHOICE_LEFT ? 'L' : u > CHOICE_RIGHT ? 'R' : null; }
 
 /**
+ * 퍽 커서가 카드의 '안쪽'에 있는가. 테두리 가까이(가로 inset·세로 inset 비율)는 어느 카드도 아닌 것으로 본다
+ * (카드 사이를 지나갈 때 테두리에 걸려 엉뚱한 카드가 골라지는 것을 막음). rect: {left, top, width, height}
+ */
+export const CARD_INSET = 0.14;
+export function inCardCore(rect, x, y, inset = CARD_INSET) {
+  const ix = rect.width * inset, iy = rect.height * inset;
+  return x >= rect.left + ix && x <= rect.left + rect.width - ix && y >= rect.top + iy && y <= rect.top + rect.height - iy;
+}
+
+/**
  * 범용 머무름 판정: 같은 key(카드 번호 등) 위에 holdS초 머물면 그 key를 반환. key가 바뀌거나 null이면 처음부터.
  * c: { key, hold }
  */

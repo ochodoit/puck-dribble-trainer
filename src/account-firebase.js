@@ -1,14 +1,24 @@
 // 온라인 계정·랭킹 (Firebase Auth + Firestore). firebase-config.js 가 채워졌을 때만 로드됨.
-// 별명 -> 가상 이메일(u-<hex>@puck-trainer.app), 6자리 비밀번호 -> Firebase Auth 비밀번호.
-// 컬렉션: users/{uid} 프로필, nicks/{nickLower} 별명 고유성, scores_{mode}/{uid} 모드별 최고 기록.
-import { validateProfile, ageGroupOf, matches, jerseyOf } from './account.js';
+// 별명 -> 가상 이메일(u-<hex>@<이 프로젝트의 Firebase 도메인>), 6자리 비밀번호 -> Firebase Auth 비밀번호.
+// 예전 계정은 u-<hex>@puck-trainer.app (로그인할 때 두 번째로 시도하고, 되면 새 주소로 옮겨 본다).
+// 컬렉션: users/{uid} 프로필(= 정회원), nicks/{nickLower} 별명 고유성, scores_{mode}/{uid} 모드별 최고 기록,
+//         codes/{CODE} 가입 코드, meta/members 회원 수(정회원 번호), config/site 게스트 안내·베타 종료일, admins/{uid} 운영자(콘솔에서 만듦),
+//         feedback/{uid} 개발자에게 (베타 마감 전에 보내면 정회원 유지)
+import {
+  validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, rankAmong, NOT_READY,
+  betaState, isActiveMember, LAPSED, validateFeedback, validateStrongPassword,
+} from './account.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
 const normNick = (n) => String(n).trim().toLowerCase();
-const nickEmail = (nick) => `u-${[...new TextEncoder().encode(normNick(nick))].map((b) => b.toString(16).padStart(2, '0')).join('')}@puck-trainer.app`;
+const nickLocal = (nick) => `u-${[...new TextEncoder().encode(normNick(nick))].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+// 예전 로그인 주소의 도메인. 우리가 가진 도메인이 아니라서(누구나 살 수 있음) 새 계정에는 쓰지 않는다.
+// 새 계정은 이 프로젝트의 Firebase 도메인(authDomain)을 쓴다: 아무도 그 주소로 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없다.
+const LEGACY_DOMAIN = 'puck-trainer.app';
+const BAD_LOGIN = ['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong-password', 'auth/invalid-login-credentials', 'auth/invalid-email'];
 
 export class FirebaseAccountStore {
-  constructor(config) { this.kind = 'firebase'; this.config = config; this.user = null; }
+  constructor(config) { this.kind = 'firebase'; this.config = config; this.user = null; this.site = {}; }
 
   async ready() {
     const [{ initializeApp }, auth, fs] = await Promise.all([
@@ -18,45 +28,113 @@ export class FirebaseAccountStore {
     this.app = initializeApp(this.config);
     this.auth = auth.getAuth(this.app);
     this.db = fs.getFirestore(this.app);
+    await this.getSiteConfig(); // 베타 종료일 (정회원 유지 판단)
     await new Promise((resolve) => { const un = auth.onAuthStateChanged(this.auth, async (u) => { un(); if (u) await this._loadProfile(u.uid); resolve(); }); });
     return this;
   }
 
   current() { return this.user; }
+  _doc(...path) { return this.F.doc(this.db, ...path); }
+  /** 별명 -> 로그인용 가상 이메일 (legacy = 예전 도메인) */
+  _email(nick, legacy = false) { return `${nickLocal(nick)}@${legacy || !this.config.authDomain ? LEGACY_DOMAIN : this.config.authDomain}`; }
 
   async _loadProfile(uid) {
-    const snap = await this.F.getDoc(this.F.doc(this.db, 'users', uid));
-    this.user = snap.exists() ? { id: uid, ...snap.data() } : null;
+    const snap = await this.F.getDoc(this._doc('users', uid));
+    if (!snap.exists()) { this.user = null; return null; }
+    let admin = false, feedbackAt = null;
+    try { admin = (await this.F.getDoc(this._doc('admins', uid))).exists(); } catch { admin = false; }
+    try { const fb = await this.F.getDoc(this._doc('feedback', uid)); feedbackAt = fb.exists() ? toMs(fb.data().at) : null; } catch { feedbackAt = null; }
+    this.user = { id: uid, ...snap.data(), feedbackAt, admin };
     return this.user;
   }
 
-  async register({ nick, pin, country, team, age, number }) {
+  /** 지금 로그인한 계정의 정회원 등급 상태 (account.js betaState 참고) */
+  memberState(now = Date.now()) { return betaState(this.user, this.site.betaEndsAt, now); }
+
+  async checkCode(code) {
+    const key = normCode(code);
+    if (!CODE_RE.test(key)) return { code: key, status: 'format' };
+    try {
+      const snap = await this.F.getDoc(this._doc('codes', key));
+      return codeInfo(key, snap.exists() ? snap.data() : null);
+    } catch { return { code: key, status: 'error' }; }
+  }
+
+  /** 가입 = 정회원. 쓸 수 있는 코드가 있어야 하며, 코드 사용·회원 번호·프로필·별명을 한 트랜잭션으로 쓴다 (규칙이 함께 검사) */
+  async register({ nick, pin, country, team, age, number, code }) {
     const err = validateProfile({ nick, pin, country, team, age, number });
     if (err) throw new Error(err);
+    const ckey = normCode(code);
+    if (!ckey) throw new Error(codeError('none'));
+    if (!CODE_RE.test(ckey)) throw new Error(codeError('format'));
     const key = normNick(nick);
-    const nickRef = this.F.doc(this.db, 'nicks', key);
+    const nickRef = this._doc('nicks', key), codeRef = this._doc('codes', ckey), metaRef = this._doc('meta', 'members');
     if ((await this.F.getDoc(nickRef)).exists()) throw new Error('이미 사용 중인 별명입니다');
+    const info = await this.checkCode(ckey);
+    if (info.status !== 'ok') throw new Error(codeError(info.status, info));
+    if (!(await this.F.getDoc(metaRef)).exists()) throw new Error(NOT_READY);
     let cred;
-    try { cred = await this.A.createUserWithEmailAndPassword(this.auth, nickEmail(nick), pin); }
+    try { cred = await this.A.createUserWithEmailAndPassword(this.auth, this._email(nick), pin); }
     catch (e) { throw new Error(e.code === 'auth/email-already-in-use' ? '이미 사용 중인 별명입니다' : `가입 실패 (${e.code || e.message})`); }
     const uid = cred.user.uid;
-    const profile = { nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: Date.now() };
-    await this.F.setDoc(this.F.doc(this.db, 'users', uid), profile);
-    await this.F.setDoc(nickRef, { uid });
-    this.user = { id: uid, ...profile };
-    return this.user;
+    try {
+      const profile = await this.F.runTransaction(this.db, async (tx) => {
+        const [m, c, n] = await Promise.all([tx.get(metaRef), tx.get(codeRef), tx.get(nickRef)]);
+        if (n.exists()) throw new Error('이미 사용 중인 별명입니다');
+        if (!m.exists()) throw new Error(NOT_READY);
+        const cd = c.exists() ? c.data() : null;
+        const st = codeStatus(cd);
+        if (st !== 'ok') throw new Error(codeError(st, cd));
+        const no = (m.data().count || 0) + 1, now = Date.now();
+        const p = {
+          nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), createdAt: now,
+          code: ckey, via: cd.type, beta: cd.type === 'beta', memberNo: no, joinedAt: now,
+        };
+        tx.set(this._doc('users', uid), p);
+        tx.set(nickRef, { uid });
+        tx.update(codeRef, { uses: (cd.uses || 0) + 1, lastAt: this.F.serverTimestamp() });
+        tx.update(metaRef, { count: no });
+        return p;
+      });
+      this.user = { id: uid, ...profile, feedbackAt: null, admin: false };
+      return this.user;
+    } catch (e) {
+      // 프로필을 못 만들었으면 방금 만든 로그인 계정도 지운다 (같은 별명으로 다시 가입할 수 있게)
+      try { await this.A.deleteUser(cred.user); } catch { this.A.signOut(this.auth); }
+      throw new Error(e.code === 'permission-denied' ? codeError('format') : e.message || String(e));
+    }
   }
 
   async login(nick, pin) {
-    try { await this.A.signInWithEmailAndPassword(this.auth, nickEmail(nick), pin); }
+    let legacy = false;
+    try { await this.A.signInWithEmailAndPassword(this.auth, this._email(nick), pin); }
     catch (e) {
-      if (['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong-password', 'auth/invalid-login-credentials'].includes(e.code)) throw new Error('별명 또는 비밀번호가 맞지 않습니다');
-      throw new Error(`로그인 실패 (${e.code || e.message})`);
+      if (!BAD_LOGIN.includes(e.code) || this._email(nick) === this._email(nick, true)) {
+        throw new Error(BAD_LOGIN.includes(e.code) ? '별명 또는 비밀번호가 맞지 않습니다' : `로그인 실패 (${e.code || e.message})`);
+      }
+      // 예전 주소(@puck-trainer.app)로 만든 계정
+      try { await this.A.signInWithEmailAndPassword(this.auth, this._email(nick, true), pin); legacy = true; }
+      catch (e2) { throw new Error(BAD_LOGIN.includes(e2.code) ? '별명 또는 비밀번호가 맞지 않습니다' : `로그인 실패 (${e2.code || e2.message})`); }
     }
+    // 예전 주소로 들어왔으면 새 주소로 옮겨 본다 (프로젝트 설정상 안 되면 그대로 두고, 다음에도 예전 주소로 로그인됨)
+    if (legacy) { try { await this.A.updateEmail(this.auth.currentUser, this._email(nick)); } catch { /* 그대로 */ } }
     return this._loadProfile(this.auth.currentUser.uid);
   }
 
   logout() { this.user = null; this.A.signOut(this.auth); }
+
+  /** 비밀번호 바꾸기 (운영자 화면): 지금 비밀번호로 다시 확인한 뒤 새 비밀번호(12자 이상)로 */
+  async changePassword(current, next) {
+    const cu = this.auth.currentUser;
+    if (!this.user || !cu) throw new Error('로그인이 필요합니다');
+    const err = validateStrongPassword(next);
+    if (err) throw new Error(err);
+    try { await this.A.reauthenticateWithCredential(cu, this.A.EmailAuthProvider.credential(cu.email, String(current))); }
+    catch (e) { throw new Error(BAD_LOGIN.includes(e.code) ? '지금 비밀번호가 맞지 않습니다' : `확인 실패 (${e.code || e.message})`); }
+    try { await this.A.updatePassword(cu, String(next)); }
+    catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }
+    return true;
+  }
 
   async updateProfile({ country, team, age, number }) {
     if (!this.user) throw new Error('로그인이 필요합니다');
@@ -66,17 +144,18 @@ export class FirebaseAccountStore {
     if (country) patch.country = country;
     if (team) patch.team = String(team).trim();
     if (age !== undefined) { patch.age = Number(age); patch.ageGroup = ageGroupOf(age); }
-    await this.F.updateDoc(this.F.doc(this.db, 'users', this.user.id), patch);
+    await this.F.updateDoc(this._doc('users', this.user.id), patch);
     Object.assign(this.user, patch);
     return this.user;
   }
 
   async submitScore(mode, score) {
     if (!this.user) throw new Error('로그인이 필요합니다');
-    const ref = this.F.doc(this.db, `scores_${mode}`, this.user.id);
+    if (!isActiveMember(this.memberState())) throw new Error(LAPSED);
+    const ref = this._doc(`scores_${mode}`, this.user.id);
     const prev = await this.F.getDoc(ref);
     const u = this.user;
-    const entry = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1 };
+    const entry = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1, t: this.F.serverTimestamp() }; // t: 서버 시간 (규칙이 2초에 한 번만 받음)
     let improved = true;
     if (prev.exists()) {
       const p = prev.data();
@@ -100,5 +179,129 @@ export class FirebaseAccountStore {
     const rows = await this.leaderboard(mode, filters, 300);
     const me = rows.find((r) => r.uid === this.user.id);
     return me ? { rank: me.rank, total: rows.length, score: me.score } : null;
+  }
+
+  async wouldRank(mode, score) { return rankAmong(await this.leaderboard(mode, {}, 300), score); }
+
+  // ---- 운영자 (규칙이 admins/{uid} 로 다시 검사) ----
+  _needAdmin() { if (!this.user?.admin) throw new Error('운영자만 할 수 있습니다'); }
+  _expiry(ms) { return ms == null ? null : this.F.Timestamp.fromMillis(ms); }
+
+  async issueCode({ type = 'one', maxUses = 0, expiresAt = null, note = '' } = {}) {
+    this._needAdmin();
+    for (let i = 0; i < 6; i++) {
+      const code = makeCode();
+      const ref = this._doc('codes', code);
+      if ((await this.F.getDoc(ref)).exists()) continue;
+      const data = { type, uses: 0, maxUses: type === 'one' ? 1 : Math.max(0, Math.floor(Number(maxUses) || 0)), expiresAt: this._expiry(expiresAt), off: false, note: String(note || '').slice(0, 60), createdAt: Date.now(), by: this.user.id };
+      await this.F.setDoc(ref, data);
+      return { code, ...data, expiresAt: toMs(data.expiresAt) };
+    }
+    throw new Error('코드를 만들지 못했습니다. 다시 시도하세요');
+  }
+
+  async listCodes() {
+    this._needAdmin();
+    const snap = await this.F.getDocs(this.F.query(this.F.collection(this.db, 'codes'), this.F.orderBy('createdAt', 'desc'), this.F.limit(100)));
+    return snap.docs.map((d) => ({ code: d.id, ...d.data(), expiresAt: toMs(d.data().expiresAt), lastAt: toMs(d.data().lastAt) }));
+  }
+
+  async updateCode(code, patch) {
+    this._needAdmin();
+    const p = {};
+    if ('off' in patch) p.off = !!patch.off;
+    if ('note' in patch) p.note = String(patch.note || '').slice(0, 60);
+    if ('expiresAt' in patch) p.expiresAt = this._expiry(patch.expiresAt);
+    if ('maxUses' in patch) p.maxUses = Math.max(0, Math.floor(Number(patch.maxUses) || 0));
+    await this.F.updateDoc(this._doc('codes', normCode(code)), p);
+    return { code: normCode(code), ...patch };
+  }
+
+  async membersInfo() {
+    const snap = await this.F.getDoc(this._doc('meta', 'members'));
+    return { ready: snap.exists(), count: snap.exists() ? snap.data().count || 0 : 0 };
+  }
+
+  /** 가입 준비(처음 한 번): 코드 없이 가입했던 예전 계정에 가입 순서대로 번호를 매기고 베타 멤버로 표시, 회원 수 문서를 만든다 */
+  async initMembers() {
+    this._needAdmin();
+    const metaRef = this._doc('meta', 'members');
+    if ((await this.F.getDoc(metaRef)).exists()) return { assigned: 0, ...(await this.membersInfo()) };
+    const snap = await this.F.getDocs(this.F.collection(this.db, 'users'));
+    const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    let no = Math.max(0, ...all.map((u) => (Number.isInteger(u.memberNo) ? u.memberNo : 0)));
+    const legacy = all.filter((u) => !Number.isInteger(u.memberNo)).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    for (let i = 0; i < legacy.length; i += 400) {
+      const batch = this.F.writeBatch(this.db);
+      for (const u of legacy.slice(i, i + 400)) batch.update(this._doc('users', u.id), { memberNo: ++no, beta: true });
+      await batch.commit();
+    }
+    await this.F.setDoc(metaRef, { count: no });
+    if (this.user) await this._loadProfile(this.user.id);
+    return { assigned: legacy.length, ready: true, count: no };
+  }
+
+  async getSiteConfig() {
+    try {
+      const snap = await this.F.getDoc(this._doc('config', 'site'));
+      const d = snap.exists() ? snap.data() : {};
+      this.site = { ...d, betaEndsAt: toMs(d.betaEndsAt) };
+      return this.site;
+    } catch { return this.site || {}; }
+  }
+
+  async setSiteConfig(patch) {
+    this._needAdmin();
+    const p = { ...patch };
+    if ('betaEndsAt' in p) p.betaEndsAt = this._expiry(p.betaEndsAt);
+    await this.F.setDoc(this._doc('config', 'site'), p, { merge: true });
+    return this.getSiteConfig();
+  }
+
+  // ---- 개발자에게 (한 사람당 문서 하나, 다시 보내면 고쳐짐. 처음 보낸 시각(at)은 서버 시간으로 남고 바뀌지 않음) ----
+  _fb(d) { return { ...d, at: toMs(d.at), updatedAt: toMs(d.updatedAt) }; }
+
+  async getMyFeedback() {
+    if (!this.user) return null;
+    const snap = await this.F.getDoc(this._doc('feedback', this.user.id));
+    return snap.exists() ? this._fb(snap.data()) : null;
+  }
+
+  async sendFeedback({ good, fix }) {
+    if (!this.user) throw new Error('로그인이 필요합니다');
+    const err = validateFeedback({ good, fix });
+    if (err) throw new Error(err);
+    const u = this.user, ref = this._doc('feedback', u.id);
+    const data = { uid: u.id, nick: u.nick, memberNo: Number.isInteger(u.memberNo) ? u.memberNo : null, good: String(good || '').trim(), fix: String(fix || '').trim(), updatedAt: this.F.serverTimestamp() };
+    if ((await this.F.getDoc(ref)).exists()) await this.F.updateDoc(ref, data);
+    else await this.F.setDoc(ref, { ...data, at: this.F.serverTimestamp() });
+    const out = this._fb((await this.F.getDoc(ref)).data());
+    this.user.feedbackAt = out.at;
+    return out;
+  }
+
+  async listFeedback() {
+    this._needAdmin();
+    const snap = await this.F.getDocs(this.F.query(this.F.collection(this.db, 'feedback'), this.F.orderBy('updatedAt', 'desc'), this.F.limit(300)));
+    return snap.docs.map((d) => this._fb(d.data()));
+  }
+
+  /** 운영자: 베타 멤버 목록 (의견 보낸 시각·유지 여부 포함) */
+  async betaMembers() {
+    this._needAdmin();
+    const [us, fb] = await Promise.all([
+      this.F.getDocs(this.F.query(this.F.collection(this.db, 'users'), this.F.where('beta', '==', true), this.F.limit(1000))),
+      this.listFeedback(),
+    ]);
+    const at = new Map(fb.map((f) => [f.uid, f.at]));
+    return us.docs.map((d) => ({ id: d.id, ...d.data(), feedbackAt: at.get(d.id) ?? null })).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
+  }
+
+  /** 운영자: 의견을 못 보낸 베타 멤버도 정회원으로 유지 */
+  async keepMember(uid, kept = true) {
+    this._needAdmin();
+    await this.F.updateDoc(this._doc('users', uid), { kept: !!kept });
+    if (this.user?.id === uid) this.user.kept = !!kept;
+    return { id: uid, kept: !!kept };
   }
 }

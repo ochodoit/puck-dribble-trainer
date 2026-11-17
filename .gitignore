@@ -5,3 +5,7 @@ test/screenshot.png
 test/arcade-demo.png
 test/screenshot-phone.png
 test/screenshot-course.png
+
+# 디버그 로그 (개인정보가 들어 있을 수 있음)
+firebase-debug.log
+*-debug.log

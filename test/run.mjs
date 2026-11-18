@@ -313,6 +313,31 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${tpOk ? 'PASS' : 'FAIL'} settings preview shows the live camera under the background wash while the game is paused ${JSON.stringify({ tp0, tp100 })}`);
   if (!tpOk) failed = true;
   await page.click('[data-close="panel-settings"]');
+  // 휴대폰: 투명도 슬라이더를 끄는 동안만 설정 창 대신 실제 게임 화면 (끄는 슬라이더 한 줄만 남고, 배경 투명도가 바로 보인다)
+  const modeWas = await page.evaluate(() => window.__puckTrainer.game.mode.id);
+  await page.evaluate(() => window.__puckTrainer.game.setMode('reaction'));
+  await page.evaluate(() => document.querySelectorAll('.panel.modal:not(.hidden) .btn-close').forEach((x) => x.click()));
+  await page.click('#btn-settings');
+  const peekSt = () => page.evaluate(() => {
+    const P = document.querySelector('#panel-settings'), c = document.querySelector('#overlay'), x = c.getContext('2d');
+    const a = [[0.35, 0.35], [0.4, 0.65], [0.6, 0.35], [0.65, 0.65]].map(([u, v]) => x.getImageData(Math.round(c.width * u), Math.round(c.height * v), 1, 1).data[3]);
+    return { peek: P.classList.contains('tp-peek'), card: getComputedStyle(P.querySelector('.modal-card')).visibility, label: getComputedStyle(document.querySelector('#set-bgTransparency').closest('label')).visibility, other: getComputedStyle(document.querySelector('#set-puckTransparency').closest('label')).visibility, a, paused: window.__puckTrainer.app.paused };
+  });
+  const bgWas2 = await page.evaluate(() => document.querySelector('#set-bgTransparency').value);
+  await page.evaluate(() => document.querySelector('#set-bgTransparency').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+  await setTp('bgTransparency', 0); await page.waitForTimeout(250); const pk0 = await peekSt();
+  await setTp('bgTransparency', 100); await page.waitForTimeout(250); const pk100 = await peekSt();
+  await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup')));
+  await page.waitForTimeout(100); const pkUp = await peekSt();
+  await setTp('bgTransparency', bgWas2);
+  await page.click('[data-close="panel-settings"]');
+  await page.evaluate((m) => window.__puckTrainer.game.setMode(m), modeWas);
+  await page.evaluate(() => document.querySelectorAll('.panel.modal:not(.hidden) .btn-close').forEach((x) => x.click()));
+  const pkOk = pk0.peek && pk0.card === 'hidden' && pk0.label === 'visible' && pk0.other === 'hidden' && pk0.paused
+    && pk0.a.every((v) => v >= 250) && pk100.a.filter((v) => v <= 10).length >= 2
+    && !pkUp.peek && pkUp.card === 'visible' && pkUp.other === 'visible';
+  console.log(`${pkOk ? 'PASS' : 'FAIL'} dragging a transparency slider hides the settings card and shows the real game screen behind it ${JSON.stringify({ pk0, pk100, pkUp })}`);
+  if (!pkOk) failed = true;
   const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '1' && sliderAttr.value === '0' && Math.abs(po.a - 0.27) < 1e-9 && po.saved === 73 && po.out === '73';
   console.log(`${poOk ? 'PASS' : 'FAIL'} puck transparency slider 0..100 step 1 (73% -> alpha ${po.a})`);
   if (!poOk) failed = true;

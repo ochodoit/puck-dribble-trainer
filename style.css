@@ -307,6 +307,14 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .tp-preview canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: var(--line) solid var(--ink); border-radius: 10px; background: var(--paper-2); }
 .tp-preview figcaption { font-size: 11px; color: var(--mute); text-align: center; }
 @media (max-width: 560px) { .tp-group { grid-template-columns: 1fr; } .tp-preview { max-width: 320px; width: 100%; justify-self: center; } }
+/* 투명도 슬라이더를 끄는 동안: 설정 창을 비우고 끄는 슬라이더 한 줄만 남겨 뒤의 실제 게임 화면을 보여 준다.
+   자리·크기는 그대로(손가락 밑 슬라이더가 움직이지 않게) — 테두리·바탕은 box-shadow 로만 */
+#panel-settings.tp-peek { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+#panel-settings.tp-peek .modal-card { visibility: hidden; background: transparent; border-color: transparent; }
+/* 끄는 줄도 글자는 숨기고(자리는 그대로) 숫자와 막대만 작은 종이 띠로 — 세로 화면에서 작은 경기장을 덜 가리게 */
+#panel-settings.tp-peek label.peeking { visibility: visible; color: transparent; }
+#panel-settings.tp-peek label.peeking output { align-self: flex-start; color: var(--ink); background: var(--paper); border-radius: 8px; padding: 0 8px; box-shadow: 0 0 0 1px var(--ink); }
+#panel-settings.tp-peek label.peeking input { filter: drop-shadow(0 0 1.5px var(--paper)) drop-shadow(0 0 3px var(--paper)); }
 .settings-grid output { float: right; margin-left: 6px; font-family: var(--display); font-weight: 900; font-size: 14px; color: var(--ink); letter-spacing: 0; }
 input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
 

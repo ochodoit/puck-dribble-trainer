@@ -52,6 +52,7 @@ export class Arcade {
     this.flipY = true;     // true: 카메라 쪽으로 밀면 화면 위로(퍽들이 내려오는 쪽), 몸쪽으로 당기면 아래로
     this.wash = 0.88;      // 경기장 종이 배경의 불투명도 (1 = 카메라 영상 완전히 가림, 0 = 영상 그대로)
     this.puckAlpha = 1;    // 플레이 중 내 퍽 표시 농도 (1 = 또렷이, 0 = 안 보임: 화면이 아닌 감각으로 플레이)
+    this.peek = false;     // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중 농도로 미리 보여 줌
     this.phase = 'idle';   // idle | countdown | play
     this.reset();
   }
@@ -353,7 +354,7 @@ export class Arcade {
     for (const p of this.pickups) drawCoin(ctx, p.x * S, p.y * S, p.r * S, hair);
 
     // 내 퍽: 플레이 중에는 설정한 농도로 (카운트다운 동안은 항상 또렷이 — 원 안에 놓아야 하므로)
-    alphaLayer(ctx, this.phase === 'play' ? this.puckAlpha : 1, (c) => this._drawAvatar(c, S, now, puck, false, hair));
+    alphaLayer(ctx, this.phase === 'play' || this.peek ? this.puckAlpha : 1, (c) => this._drawAvatar(c, S, now, puck, false, hair));
 
     // 이펙트
     for (const e of this.effects) {

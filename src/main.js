@@ -803,6 +803,14 @@ function bindUI() {
   for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
     const input = $('#set-' + key), out = $('#out-' + key);
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); drawTransparencyPreview(app.lastVision); });
+    if (key === 'bgTransparency' || key === 'puckTransparency') {
+      // 끄는 동안만 설정 창 대신 실제 화면 (손을 떼면 다시 설정 창)
+      const label = input.closest('label'), on = () => setTpPeek(true, label), off = () => setTpPeek(false);
+      input.addEventListener('pointerdown', on);
+      input.addEventListener('touchstart', on, { passive: true });
+      for (const ev of ['pointerup', 'touchend', 'touchcancel', 'change']) input.addEventListener(ev, off);
+      for (const ev of ['pointerup', 'touchend']) window.addEventListener(ev, off); // 슬라이더 밖에서 손을 떼도
+    }
   }
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
@@ -1131,7 +1139,7 @@ function loop(raw) {
   // 설정·운영자·보정·랭킹·로그인·커뮤니티 창이 떠 있으면 뒤의 모든 것을 멈춘다 (게임 시간·날아오는 퍽·대기 원 모두)
   if (optionPanelOpen()) {
     if (clock.pausedAt == null) { clock.pausedAt = raw; app.paused = true; pauseIdle(); updateHud(); }
-    previewWhilePaused();
+    previewWhilePaused(raw - clock.offset);
     return;
   }
   if (clock.pausedAt != null) { clock.offset += raw - clock.pausedAt; clock.pausedAt = null; app.paused = false; }
@@ -1240,12 +1248,13 @@ function stepMouse(now) {
  * 퍽 투명도: 플레이 중 카메라 영상에 비치는 진짜 퍽을 둘레 바닥색으로 덮는다 (투명도 100% = 완전히 가림).
  * 검출이 잠깐 끊겨도(스틱에 가림·흔들림) 예측 위치로 0.6초 동안 계속 덮는다.
  */
-function updatePuckCover(result, now) {
+function updatePuckCover(result, now, force = false) {
   const pa = renderer.puckAlpha;
-  if (!game.running || app.mouseMode || pa >= 0.999 || settings.controller !== 'puck') { app.cover = null; return; }
+  if ((!game.running && !force) || app.mouseMode || pa >= 0.999 || settings.controller !== 'puck') { app.cover = null; return; }
   let x = null, y = null;
   if (result.puck) { x = result.puck.x; y = result.puck.y; }
-  else if (tracker.pos && tracker.state !== 'lost' && result.floor?.mapping) [x, y] = result.floor.mapping.toPx(tracker.pos.x, tracker.pos.y);
+  // 멈춘 동안(설정 미리보기)은 추적기가 멈춰 있으니 그 자리로 덮지 않는다 — 검출만, 끊기면 아래 0.6초 유지
+  else if (!force && tracker.pos && tracker.state !== 'lost' && result.floor?.mapping) [x, y] = result.floor.mapping.toPx(tracker.pos.x, tracker.pos.y);
   const prev = app.cover;
   if (x == null) { if (!(prev && now - prev.at < 600)) app.cover = null; else prev.alpha = 1 - pa; return; }
   const area = result.puck?.area || settings.puckModel.area || 40;
@@ -2212,7 +2221,7 @@ function drawTransparencyPreview(result) {
 }
 
 /** 설정 창이 열려 모든 것이 멈춘 동안에도 투명도 미리보기는 실시간으로: 영상에서 퍽만 찾고, 게임·추적·대기 원은 그대로 멈춰 둔다 */
-function previewWhilePaused() {
+function previewWhilePaused(now) {
   if (els.panelSettings.classList.contains('hidden')) return;
   const video = els.video;
   if (!app.mouseMode && video.readyState >= 2 && video.currentTime !== app.lastVideoTime) {
@@ -2220,6 +2229,35 @@ function previewWhilePaused() {
     app.lastVision = vision.process(video, settings);
   }
   drawTransparencyPreview(app.lastVision);
+  if (app.tpPeek) drawPeek(now);
+}
+
+/**
+ * 투명도 슬라이더를 끄는 동안 (휴대폰에서 손가락으로 드래그할 때): 설정 창은 비우고 끄는 슬라이더 한 줄만 남긴 채,
+ * 뒤의 실제 게임 화면을 바뀐 투명도로 그린다. 게임 시계·추적은 멈춘 그대로 두고, 내 퍽 자리는 영상에서 바로 찾는다
+ */
+function setTpPeek(on, label = null) {
+  if (!!app.tpPeek === on) return;
+  app.tpPeek = on;
+  els.panelSettings.classList.toggle('tp-peek', on);
+  $$('#panel-settings .tp-sliders label').forEach((l) => l.classList.toggle('peeking', on && l === label));
+  game.arcade.peek = on;
+  if (on) requestAnimationFrame(() => { if (app.tpPeek) drawPeek(performance.now() - clock.offset); }); // 카메라 전에도 한 번
+}
+
+function drawPeek(now) {
+  const result = app.lastVision;
+  if (!result) return;
+  const m = result.floor?.mapping, obj = settings.controller === 'stick' ? result.stick : result.puck;
+  let pos = null;
+  if (m && obj) { const [u, v] = m.toUV(obj.x, obj.y); if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) pos = { x: clamp(u, 0, 1), y: clamp(v, 0, 1) }; }
+  // 검출이 잠깐 끊겨도(스틱에 가림·흔들림) 0.6초 동안은 마지막 자리 (게임 중 퍽 가리기와 같은 기준)
+  if (pos) app.peekPos = { pos, at: now };
+  const held = !pos && app.peekPos && now - app.peekPos.at < 600 ? app.peekPos.pos : null;
+  const puck = { pos: pos || held || tracker.pos, state: pos ? 'tracked' : 'predicted', trail: [], speed: 0, touches: 0 };
+  if (game.mode.id === 'arcade' && puck.pos) game.arcade.avatar = game.arcade.toZone(puck.pos.x, puck.pos.y);
+  updatePuckCover(result, now, true);
+  renderer.draw({ vision: result, puck, game, procSize: { PW: vision.PW, PH: vision.PH }, now, cover: app.cover, peek: true });
 }
 
 /** 배경 투명도 설정 -> 아케이드·평면 판 게임의 종이 배경 불투명도 (와이드 드리블·퀵 핸즈는 카메라 그대로) */

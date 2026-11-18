@@ -32,8 +32,9 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false }) {
     const { ctx, canvas } = this;
+    this.peek = peek; // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중처럼 (내 퍽 투명도 적용)
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
     const sx = W / procSize.PW, sy = H / procSize.PH;
@@ -53,7 +54,7 @@ export class Renderer {
     const fs = Math.max(11 * this.dpr, unit * 0.03);        // 본문 글자 (CSS 11px 이상)
     const hair = Math.max(this.dpr, unit * 0.0014);   // 헤어라인 (화면상 약 1px)
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    const pa = game.running ? this.puckAlpha : 1; // 내 퍽 표시 농도: 대기·등록 화면에서는 항상 또렷이
+    const pa = game.running || peek ? this.puckAlpha : 1; // 내 퍽 표시 농도: 대기·등록 화면에서는 항상 또렷이
     // 지금 그리는 화면: 'setup'(영역·등록·움직여 보기) · 'arcade' · 'floor'(바닥 위에 원근대로) · 'flat'(평면 판)
     const playing = mapping && !areaEditing && !(calib?.active && calib.circle) && !setupTest;
     const view = !playing ? 'setup' : game.mode.id === 'arcade' ? 'arcade' : FLOOR_MODES.has(game.mode.id) ? 'floor' : 'flat';
@@ -161,7 +162,7 @@ export class Renderer {
    */
   _drawMe(ctx, game, puck, now, { P, S, hair }, before = null) {
     const me = puck.pos ? game.toPlane(puck.pos.x, puck.pos.y) : null;
-    alphaLayer(ctx, game.running ? this.puckAlpha : 1, (ctx) => {
+    alphaLayer(ctx, game.running || this.peek ? this.puckAlpha : 1, (ctx) => {
       if (before) before(ctx, me);
       if (puck.trail.length > 1) {
         ctx.lineWidth = hair;
@@ -269,7 +270,7 @@ export class Renderer {
   /** 바닥 위 경기장의 내 퍽: 카메라 속 진짜 퍽 자리에 잉크 정원 (그 자리의 바닥 축척대로 — 먼 쪽은 작게). 궤적은 헤어라인 */
   _drawMeFloor(ctx, game, puck, now, { hair }, uvToC) {
     if (!puck.pos) return;
-    alphaLayer(ctx, game.running ? this.puckAlpha : 1, (ctx) => {
+    alphaLayer(ctx, game.running || this.peek ? this.puckAlpha : 1, (ctx) => {
       if (puck.trail.length > 1) {
         ctx.lineWidth = hair;
         for (let i = 1; i < puck.trail.length; i++) {

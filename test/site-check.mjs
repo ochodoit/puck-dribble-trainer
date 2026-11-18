@@ -48,7 +48,7 @@ export async function checkSite() {
   const app = JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(home)[1])['@graph'].find((x) => x['@type'] === 'WebApplication');
   check('SEO3 structured data: free web app (price 0) with 7 games, FAQ page answers every question', app?.offers?.price === '0' && app?.featureList?.length === 7 && app?.isAccessibleForFree === true
     && faqPage?.mainEntity?.length === PAGES.find((p) => p.slug === 'faq').ko.faq.length && faqPage.mainEntity.every((q) => q.acceptedAnswer.text.length > 20), { app: app?.name, faq: faqPage?.mainEntity?.length });
-  check('SEO4 search engine ownership tags on the home page and the Google file', home.includes(`name="google-site-verification" content="${VERIFY.google}"`) && home.includes(`name="msvalidate.01" content="${VERIFY.bing}"`)
+  check('SEO4 search engine ownership tags on the home page and the Google file', home.includes(`name="google-site-verification" content="${VERIFY.google}"`) && home.includes(`name="msvalidate.01" content="${VERIFY.bing}"`) && home.includes(`name="naver-site-verification" content="${VERIFY.naver}"`)
     && (await readFile(join(ROOT, VERIFY.googleFile), 'utf8')).trim() === `google-site-verification: ${VERIFY.googleFile}`);
 
   const sm = await readFile(join(ROOT, 'sitemap.xml'), 'utf8'), robots = await readFile(join(ROOT, 'robots.txt'), 'utf8'), llms = await readFile(join(ROOT, 'llms.txt'), 'utf8');

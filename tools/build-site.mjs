@@ -95,6 +95,7 @@ function pageLd(lang, page) {
 const verifyTags = [
   `<meta name="google-site-verification" content="${VERIFY.google}" />`,
   `<meta name="msvalidate.01" content="${VERIFY.bing}" />`,
+  `<meta name="naver-site-verification" content="${VERIFY.naver}" />`,
 ];
 
 function homeSeo(lang) {

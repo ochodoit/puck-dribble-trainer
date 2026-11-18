@@ -5,9 +5,9 @@ import { C } from './theme.js';
 
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
-  { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true,
+  { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true, levels: true,
     desc: '내려오는 퍽을 좌우로 쳐서 피하고 coin을 모으세요.' },
-  { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true,
+  { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true, levels: true,
     desc: '네 변에서 날아오는 빨간 퍽을 피하세요.' },
   { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 0, timed: true, stages: 3,
     desc: '좌우 끝까지 넓게, 3가지 훈련을 이어서.' },
@@ -23,10 +23,20 @@ export const MODES = [
 
 export const PLAY_MINUTES = [1, 3, 5];
 export const DODGE_HIT_PENALTY = 50;
-/** 랭킹 키: 시간제 모드는 시간별로, 투명 모드는 일반과 따로 집계 (예: arcade@60, arcade@60-inv). community.js 의 bragKey 와 같은 규칙 */
-export const rankKey = (modeId, seconds, invisible = false) => {
+/** 난이도 (levels: true 인 모드 = 아케이드·퍽 피하기만 난이도가 있다) */
+export const LEVELS = [['easy', '쉬움'], ['normal', '보통'], ['hard', '어려움']];
+export const levelLabel = (lv) => (LEVELS.find(([k]) => k === lv) || LEVELS[1])[1];
+/** 이 모드의 난이도 ('normal' | 'easy' | 'hard'). 난이도가 없는 모드는 항상 'normal' */
+export const modeLevel = (modeId, level) => (MODES.find((x) => x.id === modeId)?.levels && (level === 'easy' || level === 'hard') ? level : 'normal');
+/**
+ * 랭킹 키: 시간제 모드는 시간별로, 투명 모드는 일반과 따로, 난이도는 쉬움·어려움만 따로 집계
+ * (예: arcade@60, arcade@60-inv, arcade@60-hard, arcade@60-inv-easy). 보통은 예전 키 그대로라 기존 기록이 이어진다.
+ * community.js 의 bragKey 는 보통 난이도 기록만 쓴다
+ */
+export const rankKey = (modeId, seconds, invisible = false, level = 'normal') => {
   const m = MODES.find((x) => x.id === modeId);
-  return (m?.timed ? `${modeId}@${seconds}` : modeId) + (invisible ? '-inv' : '');
+  const lv = modeLevel(modeId, level);
+  return (m?.timed ? `${modeId}@${seconds}` : modeId) + (invisible ? '-inv' : '') + (lv === 'normal' ? '' : `-${lv}`);
 };
 
 /**
@@ -672,7 +682,7 @@ export class Game {
   _pop(x, y, text, color = C.ink, style = 'display') { this.effects.push({ type: 'pop', x, y, text, color, style, t0: clockNow(), dur: 900, age: 0 }); }
 
   _buildResult(reason) {
-    const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, limit: this.limit, seconds: this.mode.timed ? this.playSeconds : 0, invisible: this.invisible, rankKey: rankKey(this.mode.id, this.playSeconds, this.invisible), items: [] };
+    const r = { mode: this.mode, score: this.score, reason, elapsed: this.elapsed, limit: this.limit, seconds: this.mode.timed ? this.playSeconds : 0, invisible: this.invisible, level: modeLevel(this.mode.id, this.difficulty), rankKey: rankKey(this.mode.id, this.playSeconds, this.invisible, this.difficulty), items: [] };
     const minutes = `${Math.round(this.playSeconds / 60)}분`;
     const s = this.stats;
     switch (this.mode.id) {

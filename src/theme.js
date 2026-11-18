@@ -43,8 +43,17 @@ export function text(ctx, str, x, y, size, { family = F.sans, weight = 600, colo
 export function pill(ctx, str, x, y, size, { bg = C.paper, fg = C.ink, border = C.ink, weight = 600, family = F.sans, align = 'center', alpha = 0.94 } = {}) {
   str = tr(str);
   ctx.font = font(family, size, weight);
-  const w = ctx.measureText(str).width + size * 1.5, h = size * 1.9;
-  const left = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  // 좁은 화면(휴대폰 세로·작은 창)에서 글자가 화면 밖으로 나가지 않게: 넓으면 글자를 줄이고, 알약을 화면 안으로 민다
+  const CW = ctx.canvas.width, CH = ctx.canvas.height;
+  let tw = ctx.measureText(str).width;
+  if (tw + size * 1.5 > CW * 0.96) {
+    size = Math.max(size * 0.6, size * (CW * 0.96) / (tw + size * 1.5));
+    ctx.font = font(family, size, weight); tw = ctx.measureText(str).width;
+  }
+  const w = tw + size * 1.5, h = size * 1.9;
+  let left = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  if (w < CW - 4) left = Math.min(Math.max(left, 2), CW - w - 2);
+  if (h < CH - 4) y = Math.min(Math.max(y, h / 2 + 2), CH - h / 2 - 2);
   ctx.beginPath(); ctx.roundRect(left, y - h / 2, w, h, h / 2);
   ctx.fillStyle = bg === C.paper ? rgba(C.paper, alpha) : bg; ctx.fill();
   if (border) { ctx.lineWidth = Math.max(1.2, size * 0.09); ctx.strokeStyle = border; ctx.stroke(); }

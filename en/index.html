@@ -111,20 +111,35 @@
       <button id="btn-replace-puck" class="btn btn-primary btn-replace hidden">Use this object as the puck (3 s)</button>
 
       <!-- 영역 편집 바 -->
+      <!-- 시작 준비: 1/3 영역 -> 2/3 퍽 등록 -> 3/3 움직여 보기 -> 모드 선택. 안내는 한 줄, 화면 맨 위 -->
       <div id="area-bar" class="area-bar hidden">
-        <span class="area-hint"><b id="area-step" class="setup-step hidden">1 / 2 Play area</b>Drag the four corners of the center frame outward to the real floor corners. Narrow at the back (far), wide at the front (camera) — it is right when the grid looks glued to the floor.</span>
+        <b id="area-step" class="setup-step hidden">1 / 3 Area</b>
+        <span class="area-hint">Drag the four corners onto the floor</span>
         <div class="area-actions">
-          <button id="area-auto" class="btn btn-ghost">Auto white floor</button>
-          <button id="area-full" class="btn btn-ghost">Full view</button>
-          <button id="area-reset" class="btn btn-ghost">Back to center frame</button>
+          <button id="area-reset" class="btn btn-ghost">Reset</button>
           <button id="area-done" class="btn btn-primary">Done</button>
         </div>
       </div>
-      <!-- 시작 준비 2단계: 퍽 등록 -->
       <div id="setup-bar" class="area-bar hidden">
-        <span class="area-hint"><b class="setup-step">2 / 2 Register puck</b>Place the puck (ball, lid or puck) in the center circle and wait 3 s. Once registered you will pick a game.</span>
-        <div class="area-actions"><button id="setup-skip" class="btn btn-ghost hidden">Skip (use registered puck)</button></div>
+        <b class="setup-step">2 / 3 Puck</b>
+        <span class="area-hint">Puck in the center circle for 3 s</span>
+        <div class="area-actions">
+          <button id="setup-back" class="btn btn-ghost">Redo area</button>
+          <button id="setup-skip" class="btn btn-ghost hidden">Use registered puck</button>
+        </div>
       </div>
+      <div id="test-bar" class="area-bar hidden">
+        <b class="setup-step">3 / 3 Test move</b>
+        <span id="test-hint" class="area-hint">Take the puck to the four corner targets</span>
+        <b id="test-count" class="test-count">0 / 4</b>
+        <div class="area-actions">
+          <button id="test-repuck" class="btn btn-ghost">Redo puck</button>
+          <button id="test-area" class="btn btn-ghost">Redo area</button>
+          <button id="test-skip" class="btn btn-ghost">Skip</button>
+        </div>
+      </div>
+      <!-- 세로 휴대폰: 가로로 돌리라는 안내 (화면을 가리지 않는 작은 띠) -->
+      <p id="rotate-hint" class="rotate-hint" aria-hidden="true">Turn sideways for a wider view</p>
 
       <!-- 인식 상태 -->
       <div id="status" class="status">
@@ -158,6 +173,18 @@
           <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="" role="img" aria-label="Stick and puck illustration" decoding="async" />
         </picture>
         <p class="lead">The stickhandling game that reads your puck. Show us your skills</p>
+        <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
+        <button id="btn-mouse" class="btn btn-mouse hidden" title="Test admin only">Start with mouse (no camera)</button>
+        <p id="splash-error" class="error hidden"></p>
+        <div id="splash-diag" class="diag hidden">
+          <label>Choose camera <select id="diag-camera"></select></label>
+          <div class="row" style="justify-content:center">
+            <button type="button" id="btn-retry-camera" class="btn btn-primary">Try again</button>
+            <button type="button" id="btn-copy-diag" class="btn btn-ghost">Copy diagnostics</button>
+          </div>
+          <pre id="diag-info" class="diag-info"></pre>
+        </div>
+        <p class="start-note">Without logging in you start as a guest (not ranked)</p>
         <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
         <div id="invite-card" class="invite-card hidden" role="status">
           <b id="invite-title"></b>
@@ -195,30 +222,19 @@
             <p id="auth-error" class="error hidden"></p>
             <div class="row" style="justify-content:center">
               <button type="submit" id="auth-submit" class="btn btn-primary">Log in</button>
-              <button type="button" id="auth-guest" class="btn btn-ghost">Play as guest (not ranked)</button>
+              <button type="button" id="auth-guest" class="btn btn-ghost">Start as guest (not ranked)</button>
             </div>
           </form>
           <p id="auth-store-note" class="muted"></p>
-        </div>
-        <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
-        <button id="btn-mouse" class="btn btn-mouse hidden" title="Test admin only">Start with mouse (no camera)</button>
-        <p id="splash-error" class="error hidden"></p>
-        <div id="splash-diag" class="diag hidden">
-          <label>Choose camera <select id="diag-camera"></select></label>
-          <div class="row" style="justify-content:center">
-            <button type="button" id="btn-retry-camera" class="btn btn-primary">Try again</button>
-            <button type="button" id="btn-copy-diag" class="btn btn-ghost">Copy diagnostics</button>
-          </div>
-          <pre id="diag-info" class="diag-info"></pre>
         </div>
         <details class="howto">
           <summary>First time? — How to play</summary>
           <ol class="tips">
             <li><span><b>Set up</b> — Stand your phone, iPad or laptop on a stand so the front camera sees you and the floor.</span></li>
-            <li><span><b>Register puck</b> — A ball, a lid or a puck: hold it in the center circle for 3 s and it is recognized. It only needs a different color from the background.</span></li>
-            <li><span><b>Start</b> — Hold the registered puck in the circle 3 s more to start hands-free. Restart the same way when a game ends.</span></li>
-            <li><span><b>Area</b> — If the floor looks narrower at the back, fit the four corners with the "Area" button to correct the perspective.</span></li>
-            <li><span><b>Note</b> — Keep other objects of the same color off the floor. Tracking stops when the screen is covered.</span></li>
+            <li><span><b>Area</b> — Drag the four corners onto the floor. Next time the saved area is used as is.</span></li>
+            <li><span><b>Register puck</b> — A ball, lid or puck: hold it in the center circle for 3 s. Anything works if its color differs from the background.</span></li>
+            <li><span><b>Test move</b> — Take the puck to the four corner targets to check it is tracked everywhere, then pick a game.</span></li>
+            <li><span><b>Start</b> — Hold the registered puck in the circle for 3 s to start hands-free. You can also mirror your phone to a TV.</span></li>
           </ol>
         </details>
         <p class="about">Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.</p>
@@ -231,16 +247,21 @@
     <!-- 모드 선택 -->
     <div id="panel-mode" class="panel modal hidden">
       <div class="modal-card">
-        <header><h2>Mode</h2><button class="btn btn-ghost btn-close" data-close="panel-mode">Close</button></header>
-        <div class="time-row">
-          <div id="time-seg" class="seg" role="group" aria-label="Game time">
-            <button type="button" data-min="1">1 min</button>
-            <button type="button" data-min="3">3 min</button>
-            <button type="button" data-min="5">5 min</button>
+        <header class="mode-head"><h2>Mode</h2>
+          <div class="mode-opts">
+            <div id="time-seg" class="seg" role="group" aria-label="Game time">
+              <button type="button" data-min="1">1 min</button>
+              <button type="button" data-min="3">3 min</button>
+              <button type="button" data-min="5">5 min</button>
+            </div>
+            <div id="level-seg" class="seg" role="group" aria-label="Difficulty (Arcade, Puck Dodge)">
+              <button type="button" data-level="easy">Easy</button>
+              <button type="button" data-level="normal">Normal</button>
+              <button type="button" data-level="hard">Hard</button>
+            </div>
           </div>
-          <p class="muted">Game time · ranked separately per time</p>
-        </div>
-        <p id="mode-pick-hint" class="muted pick-hint">Hold the puck in the middle of a card for 2 s to pick it</p>
+          <button class="btn btn-ghost btn-close" data-close="panel-mode">Close</button></header>
+        <p class="muted pick-hint"><span id="mode-pick-hint">Hold the puck in the middle of a card for 2 s to pick it</span> <span>Separate rankings per time and difficulty (difficulty: Arcade, Puck Dodge)</span></p>
         <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
         <div id="mode-list" class="mode-list"></div>
         <div class="versus-row">
@@ -266,60 +287,50 @@
             <select id="sel-camera"></select>
           </label>
           <label class="switch"><input type="checkbox" id="set-mirror" checked /><span>Mirror left/right</span></label>
-          <label class="switch"><input type="checkbox" id="set-debug" /><span>Show detection mask (debug)</span></label>
           <label class="switch"><input type="checkbox" id="set-sound" checked /><span>Sound effects</span></label>
           <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>Hands-free start (puck in the circle for 3 s)</span></label>
           <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>Push toward the camera = up on screen (Arcade, Puck Dodge, Wide Dribble, Free Practice)</span></label>
-
-          <label>Floor brightness threshold <output id="out-whiteV"></output>
-            <input type="range" id="set-whiteV" min="80" max="240" step="1" />
-          </label>
-          <label>Floor saturation tolerance <output id="out-whiteC"></output>
-            <input type="range" id="set-whiteC" min="10" max="120" step="1" />
-          </label>
-          <label>Puck color tolerance <output id="out-puckTol"></output>
-            <input type="range" id="set-puckTol" min="20" max="200" step="1" />
-          </label>
-          <label>Stick color tolerance <output id="out-stickTol"></output>
-            <input type="range" id="set-stickTol" min="20" max="200" step="1" />
-          </label>
-          <label>Play area
-            <select id="set-floorMode">
-              <option value="auto">Auto-detect white floor</option>
-              <option value="manual">Manual (drag the corners)</option>
-              <option value="full">Whole camera view (best for laptop webcams)</option>
-            </select>
-          </label>
-          <label>Detection resolution
-            <select id="set-procWidth">
-              <option value="240">Normal (240px, fast)</option>
-              <option value="320">High (320px)</option>
-              <option value="400">Highest (400px, when the puck looks small)</option>
-            </select>
-          </label>
           <label>Control with
             <select id="set-controller">
               <option value="puck">Puck</option>
               <option value="stick">Stick blade (practice without a puck)</option>
             </select>
           </label>
-          <label>My puck transparency % (0 clear · 100 hidden — play by feel) <output id="out-puckTransparency"></output>
-            <input type="range" id="set-puckTransparency" min="0" max="100" step="10" />
+          <label>My puck transparency % (0 clear · 100 invisible) <output id="out-puckTransparency"></output>
+            <input type="range" id="set-puckTransparency" min="0" max="100" step="1" />
           </label>
-          <label>Background transparency % (how much camera shows through in Arcade · Puck Dodge) <output id="out-bgTransparency"></output>
+          <label>Background transparency % (Arcade, Puck Dodge) <output id="out-bgTransparency"></output>
             <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
           </label>
           <label>Real width of the play area (m) <output id="out-floorWidthM"></output>
             <input type="range" id="set-floorWidthM" min="0.5" max="6" step="0.1" />
           </label>
-          <label>Difficulty
-            <select id="set-difficulty">
-              <option value="easy">Easy</option>
-              <option value="normal" selected>Normal</option>
-              <option value="hard">Hard</option>
-            </select>
-          </label>
         </div>
+        <details class="settings-adv">
+          <summary>Detection fine-tuning (only if the puck is not tracked well)</summary>
+          <div class="settings-grid">
+            <label>Puck color tolerance <output id="out-puckTol"></output>
+              <input type="range" id="set-puckTol" min="20" max="200" step="1" />
+            </label>
+            <label>Stick color tolerance <output id="out-stickTol"></output>
+              <input type="range" id="set-stickTol" min="20" max="200" step="1" />
+            </label>
+            <label>Floor brightness threshold <output id="out-whiteV"></output>
+              <input type="range" id="set-whiteV" min="80" max="240" step="1" />
+            </label>
+            <label>Floor saturation tolerance <output id="out-whiteC"></output>
+              <input type="range" id="set-whiteC" min="10" max="120" step="1" />
+            </label>
+            <label>Detection resolution
+              <select id="set-procWidth">
+                <option value="240">Normal (240px, fast)</option>
+                <option value="320">High (320px)</option>
+                <option value="400">Highest (400px, when the puck looks small)</option>
+              </select>
+            </label>
+            <label class="switch"><input type="checkbox" id="set-debug" /><span>Show detection mask (debug)</span></label>
+          </div>
+        </details>
         <div class="row">
           <span id="settings-account" class="muted" style="align-self:center"></span>
           <button id="btn-settings-login" class="btn btn-primary hidden">Log in</button>
@@ -337,24 +348,28 @@
     <div id="panel-calib" class="panel modal hidden">
       <div class="modal-card">
         <header><h2>Calibration</h2><button class="btn btn-ghost btn-close" data-close="panel-calib">Close</button></header>
-        <p class="muted"><b>Auto (recommended)</b>: press the button, place the object you will use as a puck (a ball, a lid, a real puck — anything with a different color from the background) in the center circle and wait 3 s; its color and size are learned automatically. Works on any floor or mat. <b>Set by tap</b> means tapping the object directly on the screen.</p>
+        <p class="muted">Hold an object in the center circle for 3 s to learn its color and size. Anything works if its color differs from the background.</p>
         <div class="calib-grid">
           <div class="calib-item">
             <span class="swatch" id="swatch-puck"></span>
-            <div><b>Puck</b><small id="calib-puck-desc">Default: black</small></div>
-            <button class="btn btn-primary" data-autocalib="puck">Register puck again (3 s in the circle)</button>
-            <button class="btn" data-calib="puck">Set by tap</button>
-            <button class="btn btn-ghost" data-calib-reset="puck">Default</button>
+            <div class="calib-name"><b>Puck</b><small id="calib-puck-desc">Default: black</small></div>
+            <div class="calib-btns">
+              <button class="btn btn-primary" data-autocalib="puck">3 s in circle</button>
+              <button class="btn" data-calib="puck">Set by tap</button>
+              <button class="btn btn-ghost" data-calib-reset="puck">Default</button>
+            </div>
           </div>
           <div class="calib-item">
             <span class="swatch" id="swatch-stick"></span>
-            <div><b>Stick (blade / tape)</b><small id="calib-stick-desc">Not set</small></div>
-            <button class="btn btn-primary" data-autocalib="stick">3 s in the circle (auto)</button>
-            <button class="btn" data-calib="stick">Set by tap</button>
-            <button class="btn btn-ghost" data-calib-reset="stick">Clear</button>
+            <div class="calib-name"><b>Stick tape</b><small id="calib-stick-desc">Not set</small></div>
+            <div class="calib-btns">
+              <button class="btn btn-primary" data-autocalib="stick">3 s in circle</button>
+              <button class="btn" data-calib="stick">Set by tap</button>
+              <button class="btn btn-ghost" data-calib-reset="stick">Clear</button>
+            </div>
           </div>
         </div>
-        <p class="muted">Tip: if the stick tape and the puck are the same color (both black), they are hard to tell apart while touching. Use a color that differs from both the floor and the puck, such as orange or blue.</p>
+        <p class="muted">Tip: use stick tape in a color different from the puck and floor (orange, blue).</p>
       </div>
     </div>
 
@@ -365,6 +380,11 @@
         <div class="rank-filters">
           <select id="rank-mode"></select>
           <select id="rank-time" aria-label="Game time"></select>
+          <select id="rank-level" aria-label="Difficulty">
+            <option value="easy">Easy</option>
+            <option value="normal">Normal</option>
+            <option value="hard">Hard</option>
+          </select>
           <select id="rank-variant" aria-label="Normal · Invisible mode">
             <option value="">Normal</option>
             <option value="inv">Invisible mode</option>

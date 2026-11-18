@@ -306,7 +306,7 @@
     // R9) 손상된 저장값 검증
     const bad = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), whiteV: 'x', puckTol: 9999, puckModel: { r: -1 }, stickModel: 'orange', floorMode: 'manual', manualQuad: [[0, 0], [2, 0]], difficulty: 'nightmare', p1: '' });
     check('R9 background transparency sanitized', sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), bgTransparency: 250 }).bgTransparency === 12 && sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), bgTransparency: 60 }).bgTransparency === 60);
-    check('R9 sanitize restores defaults', bad.whiteV === 150 && bad.puckTol === 95 && bad.puckModel.r === 0 && bad.stickModel === null && bad.floorMode === 'auto' && bad.manualQuad === null && bad.difficulty === 'normal' && bad.p1 === '플레이어 1', bad);
+    check('R9 sanitize restores defaults', bad.whiteV === 150 && bad.puckTol === 95 && bad.puckModel.r === 0 && bad.stickModel === null && bad.floorMode === 'manual' && bad.manualQuad === null && bad.difficulty === 'normal' && bad.p1 === '플레이어 1', bad);
     settings.stickModel = null;
 
     // ===== 노트북 웹캠 대응 =====
@@ -454,6 +454,10 @@
       while (!ended && guard++ < 3000) { g.update(0.033, tp, tg); tg += 33; }
       check('G1 arcade ends on time (not on hits) at ~60s', ended && ended.reason === 'time' && Math.abs(ended.elapsed - 60) < 0.2, ended && { reason: ended.reason, elapsed: ended.elapsed, hits: g.hits });
       check('G1 rank key separates durations', ended.rankKey === 'arcade@60' && rankKey('arcade', 300) === 'arcade@300' && rankKey('wide', 300) === 'wide@300' && rankKey('quick', 300) === 'quick', ended.rankKey);
+      // 난이도별 랭킹: 아케이드·퍽 피하기만 (보통은 예전 키 그대로), 다른 모드는 난이도를 무시
+      check('G1b rank key separates difficulty for arcade/dodge only', rankKey('arcade', 60, false, 'hard') === 'arcade@60-hard' && rankKey('arcade', 60, true, 'easy') === 'arcade@60-inv-easy'
+        && rankKey('arcade', 60, false, 'normal') === 'arcade@60' && rankKey('wide', 60, false, 'hard') === 'wide@60' && rankKey('figure8', 45, false, 'hard') === 'figure8'
+        && rankKey('arcade', 60, false, 'bogus') === 'arcade@60' && /^scores_[A-Za-z0-9@_-]{1,40}$/.test('scores_' + rankKey('obstacle', 300, true, 'hard')));
       check('G1 result lists hits and game time', ended.items.some(([k]) => k === '충돌') && ended.items.some(([k, v]) => k === '게임 시간' && v === '1분'), ended.items.map(([k]) => k));
       // 와이드 드리블: 3가지 훈련을 고른 시간만큼 이어서. 판 왼쪽 끝 = 1번 칸, 오른쪽 끝 = 10번 칸
       {
@@ -588,7 +592,7 @@
       check('H1 arcade puck faded at 50%', !isRed(pHalf) && pHalf[0] > pHalf[1] + 25 && pHalf[1] > 120, pHalf);
       check('H1 puck always visible during countdown (needed to place it)', isRed(pCount), pCount);
       const tp = (o) => sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), ...o }).puckTransparency;
-      check('H1 puck transparency setting sanitized (0~100 step 10, old visibility setting migrated)', tp({ puckTransparency: 30 }) === 30 && tp({ puckTransparency: 100 }) === 100 && tp({ puckTransparency: 35 }) === 0 && tp({ puckTransparency: 130 }) === 0 && tp({ puckOpacity: 30 }) === 70 && tp({ puckOpacity: 100 }) === 0);
+      check('H1 puck transparency setting sanitized (0~100 step 1, old visibility setting migrated)', tp({ puckTransparency: 30 }) === 30 && tp({ puckTransparency: 100 }) === 100 && tp({ puckTransparency: 35 }) === 35 && tp({ puckTransparency: 33.5 }) === 0 && tp({ puckTransparency: 130 }) === 0 && tp({ puckOpacity: 30 }) === 70 && tp({ puckOpacity: 100 }) === 0);
     }
 
     // ===== 휴대폰 거치대 플레이 =====
@@ -1033,7 +1037,8 @@
       check('I2 month grid: Sunday first, 30 days, full weeks', g[0][0] === '2026-11-01' && g.flat().filter(Boolean).length === 30 && g.every((w) => w.length === 7) && monthGrid(2026, 2)[0].indexOf('2026-02-01') === 0 && dayKey(day(2026, 1, 5)) === '2026-01-05');
       const dirty = cleanActivity({ days: { bad: 1, '2026-01-02': { n: -3, s: 'x' } }, totals: { games: 'a' }, recent: { 'arcade@60': [{ s: 1, at: 2 }, { s: 'x' }], '<x>': [{ s: 1, at: 1 }] } }, 'u2');
       check('I3 stored activity is sanitized', Object.keys(dirty.days).join() === '2026-01-02' && dirty.days['2026-01-02'].n === 0 && dirty.totals.games === 0 && dirty.recent['arcade@60'].length === 1 && !dirty.recent['<x>'] && dirty.uid === 'u2');
-      check('I3 rank keys and sparkline', JSON.stringify(keyInfo('wide@180-inv')) === '{"modeId":"wide","seconds":180,"invisible":true}' && keyInfo('figure8').seconds === 0
+      check('I3 rank keys and sparkline', JSON.stringify(keyInfo('wide@180-inv')) === '{"modeId":"wide","seconds":180,"invisible":true,"level":"normal"}' && keyInfo('figure8').seconds === 0
+        && JSON.stringify(keyInfo('arcade@60-inv-hard')) === '{"modeId":"arcade","seconds":60,"invisible":true,"level":"hard"}' && keyInfo('obstacle@180-easy').level === 'easy'
         && sparkPoints([1, 2, 3]).length === 3 && sparkPoints([5])[0][0] === 60 && sparkPoints([]).length === 0);
       const rows = [{ uid: 'a', score: 9, country: 'KR', team: 'X' }, { uid: 'me', score: 7, country: 'KR', team: 'Y' }, { uid: 'c', score: 5, country: 'US', team: 'Y' }];
       const rs = rankSummaryOf(rows, { id: 'me', country: 'KR', team: 'Y' });

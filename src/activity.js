@@ -102,8 +102,8 @@ export function monthGrid(year, month) {
 
 /** 랭킹 키 -> { modeId, seconds, invisible }: 'arcade@180-inv' -> arcade, 180, true */
 export function keyInfo(key) {
-  const m = /^([a-z0-9]+)(?:@(\d+))?(-inv)?$/.exec(String(key));
-  return m ? { modeId: m[1], seconds: m[2] ? Number(m[2]) : 0, invisible: !!m[3] } : { modeId: String(key), seconds: 0, invisible: false };
+  const m = /^([a-z0-9]+)(?:@(\d+))?(-inv)?(?:-(easy|hard))?$/.exec(String(key));
+  return m ? { modeId: m[1], seconds: m[2] ? Number(m[2]) : 0, invisible: !!m[3], level: m[4] || 'normal' } : { modeId: String(key), seconds: 0, invisible: false, level: 'normal' };
 }
 
 /** 최근 점수 -> 작은 그래프(SVG polyline 점들). 값이 하나면 가운데 점 하나 */

@@ -29,7 +29,7 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null }) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
@@ -75,12 +75,7 @@ export class Renderer {
         ctx.beginPath(); let [ax, ay] = uvToC(t, 0); ctx.moveTo(ax, ay); [ax, ay] = uvToC(t, 1); ctx.lineTo(ax, ay); ctx.stroke();
         ctx.beginPath(); [ax, ay] = uvToC(0, t); ctx.moveTo(ax, ay); [ax, ay] = uvToC(1, t); ctx.lineTo(ax, ay); ctx.stroke();
       }
-      if (strong) {
-        let [tx, ty] = uvToC(0.5, 0); pill(ctx, '뒤쪽 · 멀리 — 좁게', tx, ty - fs * 1.4, fs * 0.85);
-        [tx, ty] = uvToC(0.5, 1); pill(ctx, '앞쪽 · 카메라 — 넓게', tx, ty - fs * 1.4, fs * 0.85);
-        // 모서리를 끄는 동안에는 숨김: 퍽은 그대로인데 바닥 틀이 움직여 숫자가 손과 반대로 바뀌어 보인다
-        if (puck.pos && !areaDragging) { const [px, py] = uvToC(puck.pos.x, puck.pos.y); pill(ctx, `바닥 좌표 ${puck.pos.x.toFixed(2)}, ${puck.pos.y.toFixed(2)}`, px, py - fs * 2.2, fs * 0.8, { bg: C.ink, fg: C.paper, border: null }); }
-      }
+      // 영역 편집 중 화면 글자는 두지 않는다 (휴대폰에서 바닥을 가림). 안내는 맨 위 한 줄 막대가 맡는다
     }
 
     // ---- 가운데 원: 물체 등록 / 핸즈프리 시작 ----
@@ -93,6 +88,12 @@ export class Renderer {
     if (!mapping) return;
     // 영역 편집 중에는 게임 화면을 그리지 않는다 (바닥 영상과 격자만 보이게)
     if (areaEditing) return;
+    // 시작 준비 3/3 움직여 보기: 네 모서리 표적 + 내 퍽만
+    if (setupTest) {
+      this._drawSetupTest(ctx, setupTest, uvToC, unit, hair, fs);
+      this._drawPuck(ctx, puck, uvToC, unit, hair, now, PUCK_R * this._floorPx(uvToC));
+      return;
+    }
 
     // ---- 아케이드: 화면 공간 렌더 ----
     if (game.mode.id === 'arcade') {
@@ -455,6 +456,25 @@ export class Renderer {
     ctx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0); ctx.setLineDash([]);
   }
 
+  /** 시작 준비 3/3: 바닥 네 모서리 근처 표적 (원근대로 찌그러진 원 = 실제 판정 범위). 닿으면 빨강 + 체크 */
+  _drawSetupTest(ctx, t, uvToC, unit, hair, fs) {
+    for (const g of t.targets) {
+      ctx.beginPath();
+      for (let k = 0; k <= 36; k++) {
+        const a = (k / 36) * Math.PI * 2;
+        const [x, y] = uvToC(g.x + Math.cos(a) * t.r, g.y + Math.sin(a) * t.r);
+        if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = g.hit ? rgba(C.red, 0.6) : rgba(C.paper, 0.5); ctx.fill();
+      ctx.setLineDash(g.hit ? [] : [unit * 0.012, unit * 0.009]);
+      inkStroke(ctx, hair * 1.6, g.hit ? C.red : C.ink);
+      ctx.setLineDash([]);
+      const [cx, cy] = uvToC(g.x, g.y);
+      if (g.hit) text(ctx, '✓', cx, cy, fs * 1.5, { weight: 900, color: C.paper, halo: false });
+    }
+  }
+
   /** 가운데 원 UI */
   _drawCalib(ctx, calib, toC, sx, unit, fs, hair, idleHold) {
     const c = calib.circle;
@@ -487,14 +507,16 @@ export class Renderer {
 
     const label = starting ? `퍽 인식됨 — ${Math.max(1, Math.ceil(3 - idleHold))}초 후 시작`
       : mismatch ? '등록된 퍽과 다른 물체입니다'
-      : calib.status === 'refresh' ? `등록된 퍽 다시 인식 중 ${Math.max(0, 3 - calib.hold).toFixed(1)}초`
-      : calib.status === 'too_big' ? '물체가 너무 큽니다 — 카메라에서 더 멀리'
-      : calib.status === 'ok' ? `퍽 등록 중 ${Math.max(0, 3 - calib.hold).toFixed(1)}초 — 가만히`
-      : calib.sample?.scattered ? '바닥 무늬만 보입니다 — 물체를 원 안에'
-      : (calib.target === 'stick' ? '스틱 블레이드(테이프)를 원 안에 놓으세요' : calib.registered ? '등록된 퍽을 원 안에 놓으세요' : '퍽으로 쓸 물체를 원 안에 놓으세요');
+      : calib.status === 'blocked' ? '퍽을 원 밖으로 뺐다가 다시'
+      : calib.status === 'refresh' ? '등록된 퍽 다시 인식 중 — 가만히'
+      : calib.status === 'too_big' ? '너무 커요 — 카메라에서 더 멀리'
+      : calib.status === 'ok' ? '퍽 등록 중 — 가만히'
+      : calib.sample?.scattered ? '바닥 무늬만 보여요 — 물체를 원 안에'
+      : (calib.target === 'stick' ? '스틱 테이프를 원 안에' : calib.registered ? '등록된 퍽을 원 안에' : '퍽을 원 안에');
     pill(ctx, label, cx, cy - r - fs * 1.6, fs, mismatch ? { bg: C.red, fg: C.paper, border: null } : starting ? { bg: C.ink, fg: C.paper, border: null } : {});
-    const sub = calib.manual ? '배경과 색이 다르면 무엇이든 됩니다 · 화면을 터치하면 취소'
+    const sub = calib.manual ? '배경과 다른 색이면 무엇이든'
       : starting ? '움직이면 취소됩니다'
+      : calib.status === 'blocked' ? '그러면 3초 뒤 시작'
       : mismatch ? '등록된 퍽을 놓거나, 아래 버튼으로 교체하세요'
       : calib.registered ? '3초 두면 시작' : '공 · 뚜껑 · 퍽 — 배경과 색만 다르면 됩니다';
     pill(ctx, sub, cx, cy + r + fs * 1.5, fs * 0.74, { weight: 500, border: null, alpha: 0.85 });

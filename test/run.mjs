@@ -34,12 +34,14 @@ const newCtx = async (opts) => {
   return c;
 };
 let failed = false;
-/** 카메라 시작 직후의 준비 과정(1/2 플레이 공간 -> 2/2 퍽 등록 -> 모드 창)을 건너뛰어 대기 화면으로 */
+/** 카메라 시작 직후의 준비 과정(1/3 영역 -> 2/3 퍽 등록 -> 3/3 움직여 보기 -> 모드 창)을 건너뛰어 대기 화면으로 */
 const skipSetup = async (page, touch = false) => {
   await page.waitForSelector('#area-step:not(.hidden)', { timeout: 8000 });
   if (touch) await page.tap('#area-done'); else await page.click('#area-done');
   await page.waitForSelector('#setup-bar:not(.hidden)');
   await page.keyboard.press('Escape');
+  // 등록된 퍽이 있으면 3/3 움직여 보기가 이어진다 -> Esc 로 건너뛰기
+  if (await page.evaluate(() => window.__puckTrainer?.app.setup === 'test')) await page.keyboard.press('Escape');
   await page.waitForSelector('#panel-mode:not(.hidden)');
   if (touch) await page.tap('[data-close="panel-mode"]'); else await page.click('[data-close="panel-mode"]');
 };
@@ -114,14 +116,19 @@ const skipSetup = async (page, touch = false) => {
   if (!joinOk) failed = true;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
-  // 시작 준비: 1/2 플레이 공간(완료) -> 2/2 퍽 등록(Esc로 건너뛰기) -> 모드 창이 열림(닫기)
+  // 시작 준비: 1/3 영역(완료) -> 2/3 퍽 등록(등록된 퍽이 없으면 Esc로 건너뛰면 바로 모드 창) -> 모드 창이 열림(닫기)
+  // 준비 중에는 HUD·아래 버튼·인식 칩을 숨기고, 영역 막대에는 초기화·완료만
   await page.waitForSelector('#area-step:not(.hidden)', { timeout: 5000 });
+  const setupUi = await page.evaluate(() => ({ cls: document.querySelector('#app').classList.contains('setting-up'), hud: getComputedStyle(document.querySelector('#hud')).display,
+    ctl: getComputedStyle(document.querySelector('#controls')).display, btns: [...document.querySelectorAll('#area-bar button')].filter((b) => b.offsetParent !== null).map((b) => b.id).join(','),
+    quad: JSON.stringify(window.__puckTrainer.settings.manualQuad), mode: window.__puckTrainer.settings.floorMode }));
   await page.click('#area-done');
   await page.waitForSelector('#setup-bar:not(.hidden)');
   await page.keyboard.press('Escape');
   await page.waitForSelector('#panel-mode:not(.hidden)');
-  const setupOk = await page.evaluate(() => window.__puckTrainer.app.setup === null && document.querySelector('#setup-bar').classList.contains('hidden'));
-  console.log(`${setupOk ? 'PASS' : 'FAIL'} start setup: play area -> puck registration -> mode window`);
+  const setupOk = await page.evaluate(() => window.__puckTrainer.app.setup === null && document.querySelector('#setup-bar').classList.contains('hidden') && !document.querySelector('#app').classList.contains('setting-up'))
+    && setupUi.cls && setupUi.hud === 'none' && setupUi.ctl === 'none' && setupUi.btns === 'area-reset,area-done' && setupUi.mode === 'manual' && setupUi.quad === JSON.stringify([[0.25, 0.3], [0.75, 0.3], [0.85, 0.8], [0.15, 0.8]]);
+  console.log(`${setupOk ? 'PASS' : 'FAIL'} start setup: area (drag + reset only, starting frame, HUD hidden) -> puck registration -> mode window (${JSON.stringify(setupUi)})`);
   if (!setupOk) failed = true;
   await page.click('[data-close="panel-mode"]');
   await page.waitForTimeout(2300);
@@ -156,10 +163,7 @@ const skipSetup = async (page, touch = false) => {
   const modeText = await page.textContent('#hud-mode');
   console.log(`${modeText.includes('퍽 피하기') ? 'PASS' : 'FAIL'} mode switch (${modeText.trim()})`);
   if (!modeText.includes('퍽 피하기')) failed = true;
-  // 수동 바닥 지정으로 바꾸면 가짜 카메라에서도 시작 가능해야 함
-  await page.click('#btn-settings');
-  await page.selectOption('#set-floorMode', 'manual');
-  await page.click('[data-close="panel-settings"]');
+  // 게임 영역은 네 모서리로 맞춘 바닥 하나뿐: 가짜 카메라에서도 바로 시작 가능해야 함
   await page.waitForTimeout(300);
   await page.click('#btn-start');
   await page.waitForTimeout(600);
@@ -247,17 +251,17 @@ const skipSetup = async (page, touch = false) => {
   // 다시 아케이드로
   await page.click('#btn-mode'); await page.click('#mode-list > :nth-child(1)');
 
-  // 영역 편집: 버튼 -> 사다리꼴 핸들 4개 + 편집 바, 완료 -> 저장
-  // 화면 전체 영역(모서리가 화면 끝)에서 편집을 시작하면 가운데 틀(0.3~0.7)에서 시작해 바깥으로 넓힌다
-  await page.evaluate(() => { const s = document.querySelector('#set-floorMode'); s.value = 'full'; s.dispatchEvent(new Event('change')); });
-  await page.waitForTimeout(300);
+  // 영역 편집: 버튼 -> 사다리꼴 핸들 4개 + 맨 위 한 줄 막대(초기화·완료만), HUD·아래 버튼은 숨김. 완료 -> 저장
+  // 화면 끝에 붙은 틀(예전 '화면 전체')도 그대로 두고, 손잡이만 화면 안에 보이게 한다
+  await page.evaluate(() => { window.__puckTrainer.settings.manualQuad = [[0, 0], [1, 0], [1, 1], [0, 1]]; });
   await page.click('#btn-floor-lock');
   await page.waitForSelector('#area-bar:not(.hidden)');
   const startQuad = await page.evaluate(() => JSON.stringify(window.__puckTrainer.settings.manualQuad));
   const inView = await page.$$eval('#floor-handles .handle', (hs) => { const v = document.querySelector('#view').getBoundingClientRect(); return hs.every((h) => { const r = h.getBoundingClientRect(); return r.left >= v.left && r.right <= v.right && r.top >= v.top && r.bottom <= v.bottom; }); });
-  const centered = startQuad === JSON.stringify([[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]);
-  console.log(`${centered && inView ? 'PASS' : 'FAIL'} area edit from full screen starts with a center frame, handles fully on screen (${startQuad})`);
-  if (!(centered && inView)) failed = true;
+  const areaUi = await page.evaluate(() => ({ btns: [...document.querySelectorAll('#area-bar button')].filter((b) => b.offsetParent !== null).map((b) => b.id).join(','), hud: getComputedStyle(document.querySelector('#hud')).display, ctl: getComputedStyle(document.querySelector('#controls')).display }));
+  const edgeKept = startQuad === JSON.stringify([[0, 0], [1, 0], [1, 1], [0, 1]]) && areaUi.btns === 'area-reset,area-done' && areaUi.hud === 'none' && areaUi.ctl === 'none';
+  console.log(`${edgeKept && inView ? 'PASS' : 'FAIL'} area edit keeps a frame at the screen edge, handles fully on screen, only reset + done, HUD hidden (${startQuad} ${JSON.stringify(areaUi)})`);
+  if (!(edgeKept && inView)) failed = true;
   const handlesVisible = await page.$$eval('#floor-handles .handle', (hs) => hs.filter((h) => h.offsetParent !== null).length);
   const h0 = await page.$('#floor-handles .handle[data-i="0"]');
   const hb = await h0.boundingBox();
@@ -270,15 +274,15 @@ const skipSetup = async (page, touch = false) => {
   const handlesHidden = await page.$$eval('#floor-handles .handle', (hs) => hs.every((h) => h.offsetParent === null));
   console.log(`${handlesHidden ? 'PASS' : 'FAIL'} handles hidden after done`);
   if (!handlesHidden) failed = true;
-  // 다시 열면 맞춰 둔 틀을 그대로 쓰고, '가운데 틀로'는 가운데 틀로 되돌린다
+  // 다시 열면 맞춰 둔 틀을 그대로 쓰고, '초기화'는 처음 틀(가운데 아래 사다리꼴)로 되돌린다
   await page.click('#btn-floor-lock');
   await page.waitForSelector('#area-bar:not(.hidden)');
   const kept = await page.evaluate(() => window.__puckTrainer.settings.manualQuad[0][0]);
   await page.click('#area-reset');
   const reset = await page.evaluate(() => JSON.stringify(window.__puckTrainer.settings.manualQuad));
   await page.click('#area-done');
-  const keptOk = Math.abs(kept - savedQuad.manualQuad[0][0]) < 1e-6 && reset === JSON.stringify([[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]);
-  console.log(`${keptOk ? 'PASS' : 'FAIL'} area edit keeps the fitted frame; reset returns to the center frame (${kept.toFixed(3)})`);
+  const keptOk = Math.abs(kept - savedQuad.manualQuad[0][0]) < 1e-6 && reset === JSON.stringify([[0.25, 0.3], [0.75, 0.3], [0.85, 0.8], [0.15, 0.8]]);
+  console.log(`${keptOk ? 'PASS' : 'FAIL'} area edit keeps the fitted frame; reset returns to the starting frame (${kept.toFixed(3)})`);
   if (!keptOk) failed = true;
 
   // 배경 투명도 슬라이더 -> 아케이드·퍽 피하기 배경 불투명도에 반영되고 저장됨
@@ -291,20 +295,20 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${washOk ? 'PASS' : 'FAIL'} background transparency slider (60% -> wash ${wash.a})`);
   if (!washOk) failed = true;
 
-  // 내 퍽 투명도 슬라이더 (10 단위, 0~100, 0 = 또렷이) -> 아케이드·평면 렌더러에 반영되고 저장됨
+  // 내 퍽 투명도 슬라이더 (1 단위, 0~100, 0 = 또렷이) -> 아케이드·평면 렌더러에 반영되고 저장됨
   await page.click('#btn-settings');
   const sliderAttr = await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); return { min: el.min, max: el.max, step: el.step, value: el.value }; });
-  await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '70'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '73'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   const po = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.puckAlpha, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).puckTransparency, out: document.querySelector('#out-puckTransparency').value }));
   await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '0'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.click('[data-close="panel-settings"]');
-  const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '10' && sliderAttr.value === '0' && Math.abs(po.a - 0.3) < 1e-9 && po.saved === 70 && po.out === '70';
-  console.log(`${poOk ? 'PASS' : 'FAIL'} puck transparency slider 0..100 step 10 (70% -> alpha ${po.a})`);
+  const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '1' && sliderAttr.value === '0' && Math.abs(po.a - 0.27) < 1e-9 && po.saved === 73 && po.out === '73';
+  console.log(`${poOk ? 'PASS' : 'FAIL'} puck transparency slider 0..100 step 1 (73% -> alpha ${po.a})`);
   if (!poOk) failed = true;
 
-  // 노트북 웹캠 흐름: 게임 영역 전체 화면 + 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경
+  // 노트북 웹캠 흐름: 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경 (영역은 화면 끝까지 맞춘 틀)
   await page.click('#btn-settings');
-  await page.selectOption('#set-floorMode', 'full');
+  await page.evaluate(() => { document.querySelector('.settings-adv').open = true; }); // 인식 세부 조정은 접혀 있음
   await page.selectOption('#set-procWidth', '320');
   await page.selectOption('#set-controller', 'stick');
   await page.click('[data-close="panel-settings"]');
@@ -320,12 +324,12 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#btn-start');
   await page.waitForTimeout(500);
   const fullRun = (await page.textContent('#btn-start')).trim() === '중지';
-  console.log(`${fullRun ? 'PASS' : 'FAIL'} game runs with full-frame area at 320px`);
+  console.log(`${fullRun ? 'PASS' : 'FAIL'} game runs at 320px`);
   if (!fullRun) failed = true;
   await page.click('#btn-start');
   await page.click('[data-close="panel-result"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
-  console.log(`${saved.floorMode === 'full' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
+  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
   // 기록 등록 + 랭킹 패널: 게임이 끝까지 진행된 결과를 흉내내어 onEnd 호출
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 17]] }); });
   await page.waitForSelector('#result-rank:not(.hidden)');
@@ -488,24 +492,55 @@ const skipSetup = async (page, touch = false) => {
   const reportOk = resultText.includes('터치') && resultText.includes('Coin') && resultText.includes('충돌') && !resultText.includes('Quick hands');
   console.log(`${reportOk ? 'PASS' : 'FAIL'} arcade result report (touches, coins, hits; no bonus rows)`);
   if (!reportOk) failed = true;
-  // 게임 종료 후 선택: 결과 창이 열린 채로 퍽을 왼쪽에 2초 두면 한 번 더, 오른쪽에 두면 모드 선택
-  const forceU = (u) => page.evaluate((uu) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: 0.5 }, now); }; }, u);
+  // 게임 종료 후 선택. 중지 버튼으로 끝낸 결과는 퍽으로 고르지 않는다 (버튼만 — 멈추자마자 다시 시작되는 일 방지)
+  const forceU = (u, v = 0.5) => page.evaluate(([uu, vv]) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: vv }, now); }; }, [u, v]);
+  const btnText = async () => (await page.textContent('#btn-start')).trim();
+  await forceU(0.15);
+  await page.waitForTimeout(3600);
+  const manualNoop = (await page.isVisible('#panel-result')) && (await page.isHidden('#choice-track')) && (await btnText()) === '시작';
+  console.log(`${manualNoop ? 'PASS' : 'FAIL'} result after the stop button: no puck choice (puck on the left does nothing)`);
+  if (!manualNoop) failed = true;
+  // 시간이 끝난 결과: 열릴 때 퍽이 있던 쪽(오른쪽)은 한 번 벗어나야 센다
+  await page.click('[data-close="panel-result"]');
+  await forceU(0.85);
+  await page.click('#btn-start'); await page.waitForTimeout(300);
+  await page.evaluate(() => window.__puckTrainer.game.stop('time'));
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  await page.waitForTimeout(3800);
+  const blockedStay = (await page.isVisible('#panel-result')) && (await page.isHidden('#panel-mode'));
+  // 가운데는 아무 일 없음 -> 왼쪽 2초: 결과를 닫고 가운데 원으로 -> 원에 3초 두면 바로 시작 (카운트다운 한 번)
   await forceU(0.5);
   await page.waitForTimeout(3200);
-  const centerNoop = (await page.isVisible('#panel-result')) && (await page.textContent('#btn-start')).trim() === '시작';
+  const centerNoop = (await page.isVisible('#panel-result')) && (await btnText()) === '시작';
   await forceU(0.15);
   await page.waitForTimeout(900);
   const fillPct = await page.evaluate(() => parseFloat(document.querySelector('#btn-result-again .choice-fill').style.width) || 0);
   const dotLeft = await page.evaluate(() => parseFloat(document.querySelector('#choice-dot').style.left));
   await page.waitForTimeout(1900);
-  const again = (await page.textContent('#btn-start')).trim() === '중지' && (await page.isHidden('#panel-result'));
-  console.log(`${centerNoop && fillPct > 5 && fillPct < 100 && Math.abs(dotLeft - 15) < 2 && again ? 'PASS' : 'FAIL'} result choice: puck left 2s -> play again (center no-op=${centerNoop}, fill ${fillPct.toFixed(0)}%, dot ${dotLeft}%)`);
-  if (!(centerNoop && again)) failed = true;
-  await page.click('#btn-start'); // 중지 -> 결과 창
+  const toIdle = (await page.isHidden('#panel-result')) && (await btnText()) === '시작';
+  await forceU(0.5);
+  await page.waitForTimeout(3700);
+  const again = (await btnText()) === '중지';
+  const choiceOk = blockedStay && centerNoop && fillPct > 5 && fillPct < 100 && Math.abs(dotLeft - 15) < 2 && toIdle && again;
+  console.log(`${choiceOk ? 'PASS' : 'FAIL'} result choice: side under the puck at open is ignored; puck left 2s -> back to the circle, 3s in the circle -> play again (${JSON.stringify({ blockedStay, centerNoop, fill: Math.round(fillPct), dotLeft, toIdle, again })})`);
+  if (!choiceOk) failed = true;
+  // 중지한 뒤 퍽이 원 안에 그대로 있으면 다시 시작하지 않고, 원 밖으로 뺐다가 넣으면 시작
+  await page.click('#btn-start'); // 중지 (퍽은 원 안)
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  await page.click('[data-close="panel-result"]');
+  await page.waitForTimeout(3600);
+  const held = await page.evaluate(() => ({ status: window.__puckTrainer.app.calib.status, running: window.__puckTrainer.game.running }));
+  await forceU(0.85); await page.waitForTimeout(400);
+  await forceU(0.5); await page.waitForTimeout(3700);
+  const rearm = (await btnText()) === '중지';
+  console.log(`${held.status === 'blocked' && !held.running && rearm ? 'PASS' : 'FAIL'} after the stop button the puck left in the circle does not restart until taken out and put back (${JSON.stringify({ ...held, rearm })})`);
+  if (!(held.status === 'blocked' && !held.running && rearm)) failed = true;
+  // 시간이 끝난 결과에서 오른쪽에 2초 -> 모드 선택
+  await page.evaluate(() => window.__puckTrainer.game.stop('time'));
   await page.waitForSelector('#panel-result:not(.hidden)');
   await forceU(0.85);
-  await page.waitForTimeout(3200);
-  const toMode = (await page.isVisible('#panel-mode')) && (await page.isHidden('#panel-result')) && (await page.textContent('#btn-start')).trim() === '시작';
+  await page.waitForTimeout(4200);
+  const toMode = (await page.isVisible('#panel-mode')) && (await page.isHidden('#panel-result')) && (await btnText()) === '시작';
   console.log(`${toMode ? 'PASS' : 'FAIL'} result choice: puck right 2s -> mode selection`);
   if (!toMode) failed = true;
   // 모드 선택 화면도 퍽으로: 열릴 때 커서가 올라가 있던 카드는 선택되지 않고(위에서 3.2초 대기 후에도 창이 열려 있음),
@@ -548,18 +583,15 @@ const skipSetup = async (page, touch = false) => {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`${base}/index.html`);
   await page.waitForFunction(() => window.__puckTrainer?.account);
-  await page.tap('#auth-guest');
-  await page.tap('#btn-camera');
+  await page.tap('#auth-guest'); // 게스트로 시작 = 바로 카메라 시작
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   await skipSetup(page, true);
   await page.waitForTimeout(500);
   const noHScroll = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
   const controlsVisible = await page.evaluate(() => { const r = document.querySelector('#btn-start').getBoundingClientRect(); return r.bottom <= window.innerHeight && r.width > 0; });
-  console.log(`${noHScroll && controlsVisible ? 'PASS' : 'FAIL'} phone portrait layout (no overflow, controls visible)`);
-  if (!(noHScroll && controlsVisible)) failed = true;
-  await page.tap('#btn-settings');
-  await page.selectOption('#set-floorMode', 'full');
-  await page.tap('[data-close="panel-settings"]');
+  const rotateHint = await page.isVisible('#rotate-hint');
+  console.log(`${noHScroll && controlsVisible && rotateHint ? 'PASS' : 'FAIL'} phone portrait layout (no overflow, controls visible, turn-sideways hint)`);
+  if (!(noHScroll && controlsVisible && rotateHint)) failed = true;
   await page.tap('#btn-start');
   await page.waitForTimeout(600);
   const running = (await page.textContent('#btn-start')).trim() === '중지';
@@ -582,8 +614,7 @@ const skipSetup = async (page, touch = false) => {
   const page = await context.newPage();
   await page.goto(`${base}/index.html`);
   await page.waitForFunction(() => window.__puckTrainer?.account);
-  await page.click('#auth-guest');
-  await page.click('#btn-camera');
+  await page.click('#auth-guest'); // 게스트로 시작 = 카메라 시작 (실패 -> 진단)
   await page.waitForSelector('#splash-diag:not(.hidden)', { timeout: 10000 });
   await page.waitForFunction(() => document.querySelector('#diag-info').textContent.length > 0); // 진단 내용은 비동기로 채워짐
   const errText = await page.textContent('#splash-error');
@@ -877,6 +908,96 @@ const skipSetup = async (page, touch = false) => {
   const { ok, logs } = await checkRanks().catch((e) => ({ ok: false, logs: [`FAIL online ranking check threw: ${e.stack || e}`] }));
   for (const l of logs) console.log(l);
   if (!ok) failed = true;
+}
+
+// ---- 9) 시작 준비 3단계(영역 -> 퍽 등록 -> 네 모서리 움직여 보기)와 난이도별 랭킹 (휴대폰 가로 = TV 미러링 화면) ----
+{
+  const context = await newCtx({ viewport: { width: 844, height: 390 }, permissions: ['camera'], deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const ok = (cond, name, detail = '') => { console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!cond) failed = true; };
+  const tick = (ms = 80) => page.waitForTimeout(ms);
+  // 예전 설정 옮기기: '화면 전체' -> 화면 전체 틀(네 모서리), 투명도는 1 단위 그대로
+  await page.goto(`${base}/index.html`);
+  await page.evaluate(() => localStorage.setItem('puck-trainer.settings.v1', JSON.stringify({ floorMode: 'full', puckTransparency: 33 })));
+  await page.reload();
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  const mig = await page.evaluate(() => { const s = window.__puckTrainer.settings; return { mode: s.floorMode, quad: JSON.stringify(s.manualQuad), pt: s.puckTransparency }; });
+  ok(mig.mode === 'manual' && mig.quad === JSON.stringify([[0.02, 0.02], [0.98, 0.02], [0.98, 0.98], [0.02, 0.98]]) && mig.pt === 33, 'old full-view setting becomes a full-frame four-corner area; transparency keeps 1% steps', JSON.stringify(mig));
+  // 첫 화면: 카메라 시작이 로그인 칸보다 위, 게스트로 시작 = 바로 카메라
+  const order = await page.evaluate(() => document.querySelector('#btn-camera').getBoundingClientRect().top < document.querySelector('#auth-card').getBoundingClientRect().top);
+  ok(order, 'start camera button sits above the login card');
+  await page.tap('#auth-guest');
+  await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
+  await page.waitForSelector('#area-step:not(.hidden)', { timeout: 8000 });
+  // 등록된 퍽이 있으면 2/3 에서 '등록된 퍽 쓰기'가 보이고, 화면을 터치해도 준비가 취소되지 않는다
+  await page.evaluate(() => { window.__puckTrainer.settings.puckModel = { r: 20, g: 24, b: 39, area: 60 }; });
+  await page.tap('#area-done');
+  await page.waitForSelector('#setup-bar:not(.hidden)');
+  const skipShown = await page.isVisible('#setup-skip');
+  const vb = await (await page.$('#view')).boundingBox();
+  await page.mouse.click(vb.x + vb.width * 0.3, vb.y + vb.height * 0.6); await tick(150);
+  const stillPuck = await page.evaluate(() => window.__puckTrainer.app.setup === 'puck' && window.__puckTrainer.app.calib.manual);
+  ok(skipShown && stillPuck, 'puck step: "use registered puck" shown, tapping the screen does not cancel setup');
+  // 2/3 '영역 다시' -> 1/3, 다시 완료 -> 2/3, '등록된 퍽 쓰기' -> 3/3 움직여 보기
+  await page.tap('#setup-back'); await page.waitForSelector('#area-step:not(.hidden)');
+  const backArea = await page.evaluate(() => window.__puckTrainer.app.setup === 'area' && window.__puckTrainer.app.areaEditing && !window.__puckTrainer.app.calib.manual);
+  await page.tap('#area-done'); await page.waitForSelector('#setup-bar:not(.hidden)');
+  await page.tap('#setup-skip'); await page.waitForSelector('#test-bar:not(.hidden)');
+  const t0 = await page.evaluate(() => ({ count: document.querySelector('#test-count').textContent, cls: document.querySelector('#app').classList.contains('setting-up'), hud: getComputedStyle(document.querySelector('#hud')).display, mode: !document.querySelector('#panel-mode').classList.contains('hidden') }));
+  ok(backArea && t0.count === '0 / 4' && t0.cls && t0.hud === 'none' && !t0.mode, 'setup steps go back and forth; registered puck leads to the 3/3 test step (0 / 4, HUD hidden, no mode window yet)', JSON.stringify(t0));
+  // '퍽 다시' -> 2/3 퍽 등록, Esc -> 3/3 다시
+  await page.tap('#test-repuck'); await page.waitForSelector('#setup-bar:not(.hidden)');
+  const repuck = await page.evaluate(() => window.__puckTrainer.app.setup === 'puck' && window.__puckTrainer.app.calib.manual);
+  await page.keyboard.press('Escape'); await page.waitForSelector('#test-bar:not(.hidden)');
+  ok(repuck, '"redo puck" in the test step goes back to puck registration');
+  // 퍽 추적 끊김 -> 안내, 네 모서리 표적을 차례로 -> 4 / 4 -> 모드 창
+  await tick(1600);
+  const lostHint = await page.textContent('#test-hint');
+  const forceUV = (u, v) => page.evaluate(([uu, vv]) => { const t = window.__puckTrainer.tracker; const orig = Object.getPrototypeOf(t).update; t.update = function (meas, now) { return orig.call(this, { u: uu, v: vv }, now); }; }, [u, v]);
+  const counts = [];
+  for (const [u, v] of [[0.5, 0.5], [0.14, 0.16], [0.86, 0.14], [0.85, 0.86], [0.16, 0.85]]) { await forceUV(u, v); await tick(350); counts.push(await page.textContent('#test-count')); }
+  await page.waitForSelector('#panel-mode:not(.hidden)', { timeout: 3000 });
+  const done = await page.evaluate(() => ({ setup: window.__puckTrainer.app.setup, cls: document.querySelector('#app').classList.contains('setting-up'), bar: document.querySelector('#test-bar').classList.contains('hidden') }));
+  ok(/퍽이 안 보여요/.test(lostHint) && counts.join(',') === '0 / 4,1 / 4,2 / 4,3 / 4,4 / 4' && done.setup === null && !done.cls && done.bar, 'test step: lost-puck hint, four corner targets count up, then the mode window opens', JSON.stringify({ lostHint, counts, done }));
+  // 난이도: 모드 창 제목 줄에서 고르면 HUD·결과·랭킹 키가 난이도별로 나뉜다 (아케이드·퍽 피하기만)
+  await page.tap('#level-seg [data-level="hard"]');
+  const lv = await page.evaluate(() => ({ set: window.__puckTrainer.settings.difficulty, game: window.__puckTrainer.game.difficulty, active: document.querySelector('#level-seg .active')?.dataset.level, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).difficulty }));
+  await page.tap('#mode-list .mode-card:nth-child(1)'); await page.waitForSelector('#panel-mode', { state: 'hidden' });
+  const hudMode = await page.textContent('#hud-mode');
+  await page.evaluate(() => { window.__puckTrainer.settings.autoStart = false; });
+  await page.tap('#btn-start'); await tick(300);
+  await page.evaluate(() => window.__puckTrainer.game.stop('time'));
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  const res = await page.evaluate(() => ({ key: window.__puckTrainer.app.lastResult.rankKey, level: window.__puckTrainer.app.lastResult.level, title: document.querySelector('#result-title').textContent, best: /New best/.test(document.querySelector('#result-body').textContent) }));
+  ok(lv.set === 'hard' && lv.game === 'hard' && lv.active === 'hard' && lv.saved === 'hard' && /어려움/.test(hudMode) && res.key === 'arcade@60-hard' && res.level === 'hard' && /어려움/.test(res.title) && !res.best,
+    'difficulty picked in the mode window: saved, shown in HUD and result, ranked separately (arcade@60-hard); a 0 score is not a new best', JSON.stringify({ lv, hudMode, res }));
+  await page.tap('[data-close="panel-result"]');
+  await page.tap('#btn-rank'); await page.waitForSelector('#panel-rank:not(.hidden)');
+  const rk1 = await page.evaluate(() => ({ shown: !document.querySelector('#rank-level').classList.contains('hidden'), value: document.querySelector('#rank-level').value }));
+  await page.selectOption('#rank-mode', 'figure8'); await tick(150);
+  const rk2 = await page.evaluate(() => !document.querySelector('#rank-level').classList.contains('hidden'));
+  ok(rk1.shown && rk1.value === 'hard' && !rk2, 'ranking filter has a difficulty choice for arcade/dodge only', JSON.stringify({ rk1, rk2 }));
+  await page.tap('[data-close="panel-rank"]');
+  // 설정: 게임 영역·난이도 칸은 없고, 인식 세부 조정은 접혀 있다. 기록 초기화는 확인을 묻는다 (취소하면 그대로)
+  await page.tap('#btn-settings'); await page.waitForSelector('#panel-settings:not(.hidden)');
+  const st = await page.evaluate(() => ({ floor: !!document.querySelector('#set-floorMode'), diff: !!document.querySelector('#set-difficulty'), adv: document.querySelector('.settings-adv') && !document.querySelector('.settings-adv').open }));
+  let asked = '';
+  page.once('dialog', (d) => { asked = d.message(); d.dismiss(); });
+  await page.evaluate(() => localStorage.setItem('puck-trainer.scores.v1', JSON.stringify({ 'arcade@60': 5 })));
+  await page.evaluate(() => document.querySelector('#btn-reset-scores').click()); await tick(150);
+  const kept = await page.evaluate(() => localStorage.getItem('puck-trainer.scores.v1'));
+  ok(!st.floor && !st.diff && st.adv && /최고 기록/.test(asked) && /arcade@60/.test(kept || ''), 'settings: no area/difficulty fields, detection tuning folded, clearing scores asks first', JSON.stringify({ st, asked, kept }));
+  await page.tap('[data-close="panel-settings"]');
+  // 휴대폰 가로(TV 미러링) 보정 창: 버튼이 창 밖으로 나가지 않는다
+  await page.tap('#btn-calib'); await page.waitForSelector('#panel-calib:not(.hidden)');
+  const calibFit = await page.evaluate(() => { const c = document.querySelector('#panel-calib .modal-card').getBoundingClientRect(); return [...document.querySelectorAll('#panel-calib .calib-item .btn')].every((b) => { const r = b.getBoundingClientRect(); return r.left >= c.left - 1 && r.right <= c.right + 1 && r.width > 40; }); });
+  ok(calibFit, 'calibration panel buttons stay inside the card on a phone in landscape');
+  await page.tap('[data-close="panel-calib"]');
+  ok(errors.length === 0, 'setup/difficulty: no console errors', errors.join(' | '));
+  await context.close();
 }
 
 await browser.close();

@@ -3,7 +3,7 @@ import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨
 import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
-import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
+import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel } from './game.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
@@ -13,7 +13,7 @@ import { makeFloorMapping } from './geometry.js';
 import { clock, clockNow } from './clock.js';
 import { initMe } from './me-ui.js';
 import { dayKey } from './activity.js';
-import { decideIdle, stepChoice, stepDwell, inCardCore, CHOICE_HOLD_S } from './idle-logic.js';
+import { decideIdle, stepChoice, stepDwell, inCardCore, choiceSide, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing, redirecting, langUrl, savedLang, rememberLang } from './i18n.js';
 import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAge, canRecordOn, TITLE_MAX } from './community.js';
 import { initCommunity } from './community-ui.js';
@@ -124,14 +124,17 @@ async function setupAuth() {
     $$('#auth-stick button').forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', String(on)); });
   }));
   els.authForm.addEventListener('submit', onAuthSubmit);
-  $('#auth-guest').addEventListener('click', () => { els.authForm.classList.add('hidden'); els.authNote.textContent = '게스트: 기록이 랭킹에 올라가지 않습니다.'; });
+  $('#auth-guest').addEventListener('click', () => {
+    els.authForm.classList.add('hidden'); els.authNote.textContent = '게스트: 기록이 랭킹에 올라가지 않습니다.';
+    if (!app.started && !els.btnCamera.disabled) startCamera(); // 게스트로 시작 = 바로 카메라 시작
+  });
   $('#btn-logout').addEventListener('click', doLogout);
   $('#btn-settings-logout').addEventListener('click', doLogout);
   $('#btn-settings-login').addEventListener('click', openLogin);
   $('#btn-me').addEventListener('click', openMe);
   $('#btn-me-splash').addEventListener('click', openMe);
   els.btnRank.addEventListener('click', () => openRank());
-  [els.rankMode, els.rankAge, els.rankScope, $('#rank-time'), $('#rank-variant')].forEach((e) => e.addEventListener('change', () => renderRank()));
+  [els.rankMode, els.rankAge, els.rankScope, $('#rank-time'), $('#rank-variant'), $('#rank-level')].forEach((e) => e.addEventListener('change', () => renderRank()));
   MODES.filter((m) => m.id !== 'free').forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name; els.rankMode.appendChild(o); });
   PLAY_MINUTES.forEach((min) => { const o = document.createElement('option'); o.value = String(min * 60); o.textContent = `${min}분`; $('#rank-time').appendChild(o); });
   AGE_GROUPS.forEach((g) => { const o = document.createElement('option'); o.value = g; o.textContent = g; els.rankAge.appendChild(o); });
@@ -326,15 +329,18 @@ async function openRank(modeId) {
   else if (game.mode.id !== 'free') els.rankMode.value = game.mode.id;
   $('#rank-time').value = String(game.playSeconds);
   $('#rank-variant').value = settings.invisible ? 'inv' : '';
+  $('#rank-level').value = settings.difficulty;
   open(els.panelRank);
   await renderRank();
 }
 
 async function renderRank() {
   if (!app.account) return;
-  const timed = MODES.find((m) => m.id === els.rankMode.value)?.timed;
-  $('#rank-time').classList.toggle('hidden', !timed);
-  const mode = rankKey(els.rankMode.value, Number($('#rank-time').value) || 60, $('#rank-variant').value === 'inv'); // 시간제 모드는 시간별, 투명 모드는 따로
+  const rm = MODES.find((m) => m.id === els.rankMode.value);
+  $('#rank-time').classList.toggle('hidden', !rm?.timed);
+  $('#rank-level').classList.toggle('hidden', !rm?.levels);
+  // 시간제 모드는 시간별, 투명 모드는 따로, 난이도가 있는 모드(아케이드·퍽 피하기)는 난이도별로 따로
+  const mode = rankKey(els.rankMode.value, Number($('#rank-time').value) || 60, $('#rank-variant').value === 'inv', $('#rank-level').value);
   const u = app.account.current();
   els.rankBody.innerHTML = '<tr><td colspan="6" class="muted">불러오는 중…</td></tr>';
   try {
@@ -366,7 +372,7 @@ async function submitResult(result) {
     const parts = [];
     if (all) parts.push(`전체 ${all.rank}위/${all.total}명`);
     if (age) parts.push(`${u.ageGroup} ${age.rank}위/${age.total}명`);
-    els.resultRank.innerHTML = `<span class="script">${improved ? 'New best!' : `best ${best}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
+    els.resultRank.innerHTML = `<span class="script">${improved && Number(result.score) > 0 ? 'New best!' : `best ${best}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
     els.resultRank.classList.remove('hidden');
     $('#btn-result-rank').addEventListener('click', () => { close(els.panelResult); openRank(result.mode.id); });
   } catch (err) {
@@ -400,10 +406,12 @@ async function renderGuestNotice(result, lapsed = false) {
     html.push('<p>이번 기록은 랭킹에 올라가지 않아요. 정회원 등급은 공식 인스타 DM으로 문의해 주세요.</p>');
   } else {
     if (r) html.push(`<p class="guest-rank"><b>정회원이었다면 지금 전체 ${r.rank}위 / ${r.total}명</b></p>`);
+    html.push('<details class="guest-how"><summary>정회원이 되려면</summary>');
     html.push('<p>정회원 친구에게 초대 링크를 받으면 바로 가입할 수 있어요.</p>');
     html.push('<p>또는 플레이 영상을 SNS(인스타 등)에 올리고, 올린 게시물 링크를 공식 인스타 DM으로 보내 주세요. 확인되면 정회원 가입 코드를 DM으로 보내 드려요.</p>');
     if (tag || sns) html.push(`<p class="guest-tags" data-ugc>${[tag && `#${esc(tag)}`, sns && `@${esc(sns)}`].filter(Boolean).join(' ')}</p>`);
     html.push('<p class="muted">보호자와 함께 해 주세요 · 얼굴 없이 판과 퍽만 나와도 괜찮아요 · 비공개 계정이면 영상이나 캡처를 DM에 함께 보내 주세요</p>');
+    html.push('</details>');
   }
   if (sns) html.push(`<div class="guest-dm"><a class="btn btn-primary" id="guest-dm" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span></div>`);
   if (!lapsed) html.push('<p class="muted">받은 코드는 첫 화면 회원가입의 가입 코드 칸에 넣으세요.</p>');
@@ -415,7 +423,7 @@ async function renderGuestNotice(result, lapsed = false) {
 let meUI = null;
 function setupMe() {
   meUI = initMe({
-    $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel,
+    $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
     COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin,
     codeLabel, inviteLink, copyText,
   });
@@ -740,14 +748,23 @@ function bindUI() {
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleAreaEdit);
   $('#area-done').addEventListener('click', () => endAreaEdit());
-  $('#area-auto').addEventListener('click', () => { settings.floorMode = 'auto'; vision.floorLocked = false; vision.floorAuto = null; $('#set-floorMode').value = 'auto'; applyFloorMode(); persist(); toast('흰 바닥 자동 감지 (사다리꼴). 바닥이 안 잡히면 화면 전체로 동작합니다'); endAreaEdit(false); });
-  $('#area-full').addEventListener('click', () => { settings.floorMode = 'full'; $('#set-floorMode').value = 'full'; applyFloorMode(); persist(); toast('카메라 화면 전체가 게임 영역입니다'); endAreaEdit(false); });
-  $('#area-reset').addEventListener('click', () => { settings.manualQuad = centerBox(); positionHandles(); persist(); });
+  $('#area-reset').addEventListener('click', () => { settings.manualQuad = defaultQuad(); positionHandles(); persist(); });
+  // 시작 준비 2/3·3/3 막대의 버튼
+  $('#setup-back').addEventListener('click', () => beginAreaSetup());
+  $('#test-repuck').addEventListener('click', () => beginPuckSetup());
+  $('#test-area').addEventListener('click', () => beginAreaSetup());
+  $('#test-skip').addEventListener('click', () => finishSetup());
   els.btnFlip.addEventListener('click', flipCamera);
   $$('#time-seg button').forEach((b) => b.addEventListener('click', () => {
     if (game.running) game.stop('manual');
     settings.playMinutes = Number(b.dataset.min); persist();
     game.playSeconds = settings.playMinutes * 60; game.resetState();
+    renderModeList(); updateHud(); syncScoreChallenge();
+  }));
+  // 난이도 (아케이드·퍽 피하기): 모드 창에서 시간과 함께 고른다. 랭킹은 난이도별로 따로
+  $$('#level-seg button').forEach((b) => b.addEventListener('click', () => {
+    if (game.running) game.stop('manual');
+    settings.difficulty = b.dataset.level; game.difficulty = settings.difficulty; persist();
     renderModeList(); updateHud(); syncScoreChallenge();
   }));
   // 8자 드리블 방향: 게임 화면에서 먼저 갈 콘(왼쪽·오른쪽) × 도는 방향(시계·반시계). 게임 중에도 멈추지 않고 바뀐다
@@ -786,29 +803,31 @@ function bindUI() {
     const input = $('#set-' + key), out = $('#out-' + key);
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); });
   }
-  $('#set-floorMode').addEventListener('change', (e) => { settings.floorMode = e.target.value; if (app.areaEditing && settings.floorMode !== 'manual') endAreaEdit(false); applyFloorMode(); persist(); });
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
     settings.controller = e.target.value; persist(); tracker.reset();
     if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
   });
-  $('#set-difficulty').addEventListener('change', (e) => { settings.difficulty = e.target.value; game.difficulty = settings.difficulty; persist(); });
   els.selCamera.addEventListener('change', async () => {
     settings.cameraId = els.selCamera.value; persist();
     try { await startStream(); } catch (err) { toast(describeCameraError(err)); }
   });
   $('#btn-reset-settings').addEventListener('click', () => {
+    if (!confirm('설정을 처음 값으로 되돌릴까요? (맞춰 둔 영역과 등록한 퍽도 처음으로)')) return;
     const keep = { cameraId: settings.cameraId, p1: settings.p1, p2: settings.p2 };
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS), keep);
-    game.figure8Dir = settings.figure8Dir;
+    game.figure8Dir = settings.figure8Dir; game.difficulty = settings.difficulty; renderModeList();
     persist(); applySettingsToUI(); applyMirror(); applyFloorMode(); refreshCalibUI(); toast('설정을 초기화했습니다');
   });
-  $('#btn-reset-scores').addEventListener('click', () => { clearScores(); renderModeList(); toast('기록을 초기화했습니다'); });
+  $('#btn-reset-scores').addEventListener('click', () => {
+    if (!confirm('이 기기에 저장된 최고 기록을 모두 지울까요? (온라인 랭킹 기록은 그대로)')) return;
+    clearScores(); renderModeList(); toast('기록을 초기화했습니다');
+  });
 
   // 보정
   $$('[data-calib]').forEach((b) => b.addEventListener('click', () => beginCalibration(b.dataset.calib)));
   $$('[data-autocalib]').forEach((b) => b.addEventListener('click', () => beginAutoCalibration(b.dataset.autocalib)));
-  $('#btn-replace-puck').addEventListener('click', () => { beginAutoCalibration('puck'); toast('새 물체를 원 안에 3초 두면 퍽이 교체됩니다'); });
+  $('#btn-replace-puck').addEventListener('click', () => { beginAutoCalibration('puck'); toast('새 물체를 원 안에 3초'); });
   $('#setup-skip').addEventListener('click', () => cancelAutoCalibration());
   $$('[data-calib-reset]').forEach((b) => b.addEventListener('click', () => {
     const t = b.dataset.calibReset;
@@ -819,7 +838,7 @@ function bindUI() {
   els.view.addEventListener('pointerdown', onViewTap);
 
   // 결과
-  els.btnAgain.addEventListener('click', () => { close(els.panelResult); app.versus = null; startRun(); });
+  els.btnAgain.addEventListener('click', () => { close(els.panelResult); if (els.btnAgain.dataset.rematch !== '1') app.versus = null; startRun(); });
   els.btnNext.addEventListener('click', () => { close(els.panelResult); startRun(); });
   $('#btn-result-mode').addEventListener('click', () => { close(els.panelResult); renderModeList(); open(els.panelMode); });
 
@@ -841,9 +860,9 @@ function bindUI() {
       case 'r': case 'R': if (game.running) game.stop('manual'); game.resetState(); closeAllPanels(); updateHud(); toast('초기화'); break;
       case 'f': case 'F': toggleFullscreen(); break;
       case 'm': case 'M': renderModeList(); open(els.panelMode); break;
-      case 'a': case 'A': toggleAreaEdit(); break;
+      case 'a': case 'A': if (app.setup && app.setup !== 'area') beginAreaSetup(); else toggleAreaEdit(); break;
       case 'd': case 'D': settings.debug = !settings.debug; $('#set-debug').checked = settings.debug; els.debug.classList.toggle('hidden', !settings.debug); persist(); break;
-      case 'Escape': closeAllPanels(); if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); break;
+      case 'Escape': closeAllPanels(); if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); else if (app.setup === 'test') finishSetup(); break;
     }
   });
 }
@@ -894,26 +913,71 @@ function startMouse() {
   openModeAfterStart();
 }
 
-// =============== 시작 준비: 1/2 플레이 공간 → 2/2 퍽 등록 → 모드 선택 ===============
-function beginAreaSetup() {
-  app.setup = 'area';
-  toggleAreaEdit();
-  $('#area-step').classList.remove('hidden');
-}
-
-function beginPuckSetup() {
-  app.setup = 'puck';
-  $('#area-step').classList.add('hidden');
-  beginAutoCalibration('puck');
-  $('#setup-bar').classList.remove('hidden');
-  $('#setup-skip').classList.toggle('hidden', !(settings.puckModel.area > 0));
+// =============== 시작 준비: 1/3 영역 → 2/3 퍽 등록 → 3/3 움직여 보기 → 모드 선택 ===============
+// 준비 중에는 HUD·아래 버튼·인식 칩을 숨기고, 맨 위 한 줄 막대만 안내한다 (휴대폰에서 화면을 가리지 않게)
+function setSetup(step) {
+  app.setup = step;
+  $('#app').classList.toggle('setting-up', !!step);
+  $('#area-step').classList.toggle('hidden', step !== 'area');
+  $('#setup-bar').classList.toggle('hidden', step !== 'puck');
+  $('#test-bar').classList.toggle('hidden', step !== 'test');
+  if (step !== 'test') app.test = null;
   els.toast.classList.add('hidden'); // 안내는 위 막대가 맡는다 (토스트와 겹치지 않게)
 }
 
+/** 보정(가운데 원) 상태만 조용히 끈다 (준비 단계를 오갈 때) */
+function quietCalibReset() {
+  app.calib = { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null };
+  autoCal.reset();
+}
+
+function beginAreaSetup() {
+  if (app.calib.manual) quietCalibReset();
+  setSetup('area');
+  if (!app.areaEditing) toggleAreaEdit();
+}
+
+function beginPuckSetup() {
+  setSetup('puck');
+  beginAutoCalibration('puck');
+  $('#setup-skip').classList.toggle('hidden', !(settings.puckModel.area > 0));
+}
+
+// 3/3 움직여 보기: 바닥 네 모서리 근처의 표적에 퍽을 가져가 끝까지 잘 잡히는지 확인
+const TEST_TARGETS = [[0.15, 0.15], [0.85, 0.15], [0.85, 0.85], [0.15, 0.85]];
+const TEST_R = 0.13; // 표적 반지름 (바닥 좌표)
+function beginTestSetup() {
+  quietCalibReset();
+  setSetup('test');
+  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, doneAt: 0 };
+  $('#test-hint').textContent = '퍽을 네 모서리 표적에';
+  paintTest();
+}
+
+function paintTest() {
+  const t = app.test; if (!t) return;
+  $('#test-count').textContent = `${t.targets.filter((g) => g.hit).length} / ${t.targets.length}`;
+}
+
+function updateSetupTest(dt, now) {
+  const t = app.test; if (!t) return;
+  app.calib.active = false; app.idleHold = 0;
+  if (t.doneAt) { if (now >= t.doneAt) { finishSetup(); toast('준비 완료 · 게임을 고르세요', 2500); } return; }
+  const seen = tracker.state === 'tracked' && !!tracker.pos;
+  t.lostFor = seen ? 0 : t.lostFor + dt;
+  if (seen) {
+    for (const g of t.targets) {
+      if (!g.hit && Math.hypot(tracker.pos.x - g.x, tracker.pos.y - g.y) < t.r) { g.hit = true; sfx.tick(); paintTest(); }
+    }
+  }
+  if (t.targets.every((g) => g.hit)) { t.doneAt = now + 900; sfx.target(); $('#test-hint').textContent = '잘 잡혀요!'; return; }
+  const hint = t.lostFor > 1.2 ? '퍽이 안 보여요 · 퍽 다시 등록' : '퍽을 네 모서리 표적에';
+  if ($('#test-hint').textContent !== hint) $('#test-hint').textContent = hint;
+}
+
 function finishSetup() {
-  app.setup = null;
-  $('#setup-bar').classList.add('hidden');
-  $('#area-step').classList.add('hidden');
+  quietCalibReset();
+  setSetup(null);
   openModeAfterStart();
 }
 
@@ -941,7 +1005,7 @@ async function startCamera() {
     noteAttendance();
     requestWakeLock();
     requestAnimationFrame(loop);
-    app.setup = 'area-wait'; // 첫 영상이 들어오면 1/2 영역 설정부터 (loop 에서 시작)
+    setSetup('area-wait'); // 첫 영상이 들어오면 1/3 영역 설정부터 (loop 에서 시작)
     if (document.documentElement.requestFullscreen && !navigator.standalone) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
@@ -1119,6 +1183,7 @@ function loop(raw) {
   const modeOpen = !els.panelMode.classList.contains('hidden');
   if (!modeOpen && app.modePick) { app.modePick = null; $('#mode-cursor').classList.add('hidden'); }
   if (app.calib.manual) updateAutoCalibration(dt);
+  else if (app.setup === 'test') updateSetupTest(dt, now);
   else if (!els.panelCommunity.classList.contains('hidden')) pauseIdle(); // 글을 읽고 쓰는 동안은 핸즈프리 시작을 멈춘다
   else if (!els.panelResult.classList.contains('hidden')) updateResultChoice(dt);
   else if (modeOpen) updateModeChoice(dt);
@@ -1128,7 +1193,7 @@ function loop(raw) {
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
   updatePuckCover(result, now);
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover });
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null });
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
@@ -1198,19 +1263,31 @@ function updateResultChoice(dt) {
   const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
   $('#btn-replace-puck').classList.add('hidden');
   const ch = app.choice;
-  const enabled = settings.autoStart;
+  // 중지 버튼으로 멈춘 결과는 퍽으로 고르지 않는다 (멈추자마자 다시 시작되는 일 방지) — 버튼만
+  const enabled = settings.autoStart && !ch.manual;
   $('#choice-track').classList.toggle('hidden', !enabled);
+  $('#result-choice').classList.toggle('no-puck', !enabled);
   const tracked = enabled && tracker.state === 'tracked' && !!tracker.pos;
   const u = tracker.pos ? tracker.pos.x : null;
-  const fire = enabled ? stepChoice(ch, { u, tracked, dt, armed: performance.now() >= ch.armAt }) : null;
+  // 결과가 뜰 때 퍽이 있던 쪽은 한 번 벗어났다가 와야 센다 (게임이 끝난 자리에 퍽이 있어 저절로 고르는 일 방지)
+  const armed = performance.now() >= ch.armAt;
+  const raw = tracked && u !== null ? choiceSide(u) : null;
+  if (ch.blocked === undefined) ch.blocked = raw; // 결과가 뜬 첫 프레임의 자리 (1.5초 안에 옮긴 쪽은 막지 않음)
+  if (ch.blocked && tracked && raw !== ch.blocked) ch.blocked = null;
+  const hint = ch.blocked ? '가운데로 옮겼다가 다시' : '퍽을 왼쪽·오른쪽에 2초';
+  if ($('#choice-hint').textContent !== hint) $('#choice-hint').textContent = hint;
+  const fire = enabled ? stepChoice(ch, { u, tracked, dt, armed: armed && !ch.blocked }) : null;
   if (!enabled) { ch.side = null; ch.hold = 0; }
   // 1초마다 틱
   if (ch.side && ch.hold > 0) { const remain = Math.ceil(CHOICE_HOLD_S - ch.hold); if (remain !== ch.tick) { ch.tick = remain; sfx.tick(); } } else ch.tick = -1;
   paintChoice(tracked ? u : null);
   if (!fire) return;
   ch.side = null; ch.hold = 0; paintChoice(null);
-  if (fire === 'L') (els.btnNext.classList.contains('hidden') ? els.btnAgain : els.btnNext).click();
-  else $('#btn-result-mode').click();
+  if (fire === 'R') { $('#btn-result-mode').click(); return; }
+  if (!els.btnNext.classList.contains('hidden')) { els.btnNext.click(); return; }
+  // 퍽으로 '한 번 더': 결과를 닫고 가운데 원으로 (원에 3초 = 바로 시작, 카운트다운 한 번만)
+  close(els.panelResult);
+  toast('퍽을 가운데 원에 3초 두면 시작', 3000);
 }
 
 /**
@@ -1397,6 +1474,12 @@ function updateIdleCircle(dt) {
     const [px, py] = mapping.toPx(tracker.pos.x, tracker.pos.y);
     puckInCircle = Math.hypot(px - circle.x, py - circle.y) < circle.r * 1.3;
   }
+  if (tracker.state === 'tracked' && tracker.pos && !puckInCircle) app.idleBlocked = false;
+  if (puckInCircle && app.idleBlocked) {
+    // 중지 버튼으로 멈춘 직후: 퍽이 원 안에 그대로 있어도 바로 다시 시작하지 않는다
+    autoCal.reset(); c.status = 'blocked'; c.sample = null; c.hold = 0; app.idleHold = 0; app.idleTick = -1;
+    return;
+  }
   if (puckInCircle) {
     // 알고 있는 퍽이 원 안에 있음 -> 시작 카운트다운
     autoCal.reset(); c.status = 'puck'; c.sample = null; c.hold = 0;
@@ -1445,20 +1528,20 @@ function commitLearnedModel(target, done, refresh = false) {
   autoCal.reset();
   persist(); refreshCalibUI();
   sfx.target();
-  if (app.setup === 'puck' && target === 'puck') { finishSetup(); toast(`퍽 등록 완료 · 크기 ${model.area}px · 게임을 고르세요`, 3500); return; }
-  if (refresh) toast(`등록된 퍽을 다시 인식했습니다 (크기 ${model.area}px) · 원 안에 3초 더 두면 시작`, 3500);
-  else toast(`${target === 'puck' ? '퍽' : '스틱'} 등록 완료 · rgb(${model.r},${model.g},${model.b}) · 크기 ${model.area}px${target === 'puck' ? ' · 원 안에 3초 더 두면 시작' : ''}`, 4000);
+  if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); return; }
+  if (refresh) toast('등록된 퍽을 다시 인식했어요 · 원에 3초 더 두면 시작', 3500);
+  else toast(target === 'puck' ? '퍽 등록 완료 · 원에 3초 더 두면 시작' : '스틱 등록 완료', 3500);
 }
 
 // =============== HUD ===============
 function updateHud(force) {
   const who = app.account?.current();
-  els.hudMode.textContent = game.mode.name + (settings.invisible ? ' · 투명' : '') + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
+  els.hudMode.textContent = game.mode.name + (game.mode.levels && settings.difficulty !== 'normal' ? ` · ${levelLabel(settings.difficulty)}` : '') + (settings.invisible ? ' · 투명' : '') + (app.versus ? ` · ${app.versus.names[app.versus.current]}` : who ? ` · ${who.nick}` : '');
   const ch = game.mode.id === 'free' ? app.challenge : null;
   const sc = game.mode.id !== 'free' ? app.scoreChallenge : null;
   els.hudInstruction.textContent = game.running ? (app.paused ? '일시정지 · 창을 닫으면 이어서 합니다' : game.instruction)
     : !app.started ? '' : ch ? `도전 · ${ch.title}${ch.holder ? ` · 1위 평균 ${ch.holder.avg.toFixed(1)}s` : ''}`
-      : sc ? `도전 · ${sc.nick} · ${sc.score}점` : '시작을 누르세요';
+      : sc ? `도전 · ${sc.nick} · ${sc.score}점` : settings.autoStart && !app.mouseMode ? '퍽을 원에 3초 또는 시작' : '시작을 누르세요';
   $('#app').classList.toggle('playing', game.running);
   $('#app').classList.toggle('hide-cursor', !!app.mouseMode && game.running && renderer.puckAlpha < 1);
   const f8 = game.mode.id === 'figure8' && app.started && !app.areaEditing && !app.setup;
@@ -1531,7 +1614,7 @@ function toggleRun() {
 function startRun(opts = {}) {
   if (app.calib.manual) cancelAutoCalibration();
   app.calib.active = false;
-  if (!app.lastVision?.floor?.mapping) { toast('바닥이 인식되지 않았습니다. 흰 바닥이 보이게 카메라를 조정하거나 설정에서 수동 지정하세요.'); return; }
+  if (!app.lastVision?.floor?.mapping) { toast('게임 영역이 없어요 · 영역 버튼으로 네 모서리를 맞추세요'); return; }
   if (settings.controller === 'stick' && !settings.stickModel) { toast('조작 대상이 스틱입니다. 보정에서 스틱 색을 먼저 지정하세요.'); return; }
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(마름모 표시)된 뒤 시작하세요.' : '퍽이 인식(빨간 점 표시)된 뒤 시작하세요.'); }
   tracker.resetStats();
@@ -1545,7 +1628,9 @@ function startRun(opts = {}) {
 game.onEnd = (result) => {
   result.versus = !!app.versus;
   app.lastResult = result;
-  const isBest = result.mode.id !== 'free' && result.reason !== 'manual' ? saveBest(result.rankKey || result.mode.id, result.score) : false;
+  // 0점은 최고 기록으로 치지 않는다 (처음 한 판을 바로 멈췄을 때 'New best 0' 방지)
+  const isBest = result.mode.id !== 'free' && result.reason !== 'manual' && Number(result.score) > 0 ? saveBest(result.rankKey || result.mode.id, result.score) : false;
+  app.idleBlocked = result.reason === 'manual';
   showResult(result, isBest);
   submitResult(result);
   recordPlay(result);
@@ -1556,6 +1641,7 @@ game.onEnd = (result) => {
 
 function showResult(result, isBest) {
   let title = result.mode.timed ? `${result.mode.name} · ${timeLabel(result.mode, result.seconds || result.limit)}` : result.mode.name;
+  if (result.level && result.level !== 'normal') title += ` · ${levelLabel(result.level)}`;
   if (result.invisible) title += ' · 투명';
   if (result.reason === 'time') title += ' — Time up';
   if (result.reason === 'done') title += ' — Complete';
@@ -1579,16 +1665,19 @@ function showResult(result, isBest) {
       els.btnNext.classList.add('hidden');
       els.btnAgain.classList.remove('hidden');
       els.btnAgain.querySelector('.choice-label').textContent = '다시 대결';
+      els.btnAgain.dataset.rematch = '1';
       app.versus = { names: vs.names, scores: [], current: 0 };
     }
   } else {
     els.btnNext.classList.add('hidden');
     els.btnAgain.classList.remove('hidden');
     els.btnAgain.querySelector('.choice-label').textContent = '한 번 더';
+    els.btnAgain.dataset.rematch = '';
   }
   els.resultTitle.textContent = title;
   els.resultBody.innerHTML = body.join('');
-  app.choice = { side: null, hold: 0, tick: -1, armAt: performance.now() + 800 }; // 결과가 뜬 직후 0.8초는 세지 않음
+  // 결과가 뜬 직후 1.5초는 세지 않음. blocked: 그때 퍽이 있던 쪽 (한 번 벗어나야 셈). manual: 중지로 끝남 (퍽 선택 없음)
+  app.choice = { side: null, hold: 0, tick: -1, armAt: performance.now() + 1500, blocked: undefined, manual: result.reason === 'manual' };
   paintChoice(null);
   open(els.panelResult);
 }
@@ -1671,7 +1760,8 @@ function shareDraft() {
   const sig = courseSig(settings.course, settings.courseCycles);
   const cr = settings.courseRecord && settings.courseRecord.sig === sig ? { avg: settings.courseRecord.avg, best: settings.courseRecord.best } : null;
   const r = app.lastResult;
-  const ranked = r && r.mode.id !== 'free' && (r.reason === 'time' || r.reason === 'done') && !r.versus;
+  // 기록 자랑은 보통 난이도 기록만 (글의 비교 키 bragKey 에 난이도가 없음)
+  const ranked = r && r.mode.id !== 'free' && (r.reason === 'time' || r.reason === 'done') && !r.versus && (r.level || 'normal') === 'normal';
   return {
     course: settings.course.length >= 2 ? { points: settings.course.map((p) => ({ n: p.n, x: p.x, y: p.y })), cycles: settings.courseCycles, record: cr } : null,
     result: ranked ? { modeId: r.mode.id, seconds: r.mode.timed ? r.seconds || r.limit : 0, score: r.score, invisible: !!r.invisible } : null,
@@ -1705,6 +1795,7 @@ function challengeMode(post) {
   if (game.running) game.stop('manual');
   if (m.timed && PLAY_MINUTES.includes(post.seconds / 60)) { settings.playMinutes = post.seconds / 60; game.playSeconds = post.seconds; }
   settings.invisible = post.invisible === true; game.invisible = settings.invisible; applyWash();
+  settings.difficulty = 'normal'; game.difficulty = 'normal'; // 기록 자랑 글은 보통 난이도 기록
   persist();
   app.versus = null;
   app.challenge = null;
@@ -1727,7 +1818,7 @@ function challengeMode(post) {
 function syncScoreChallenge() {
   const sc = app.scoreChallenge;
   if (!sc) return;
-  if (rankKey(game.mode.id, game.playSeconds, settings.invisible) !== sc.key) {
+  if (rankKey(game.mode.id, game.playSeconds, settings.invisible, settings.difficulty) !== sc.key) {
     app.scoreChallenge = null;
     toast('모드를 바꿔서 기록 자랑 도전이 해제되었습니다');
     updateHud();
@@ -1749,6 +1840,7 @@ async function renderShare(result) {
   if (result.mode.id !== 'free') {
     const sc = app.scoreChallenge && app.scoreChallenge.key === result.rankKey ? app.scoreChallenge : null;
     if (sc) { await renderScoreChallenge(result, sc, show); return; }
+    if ((result.level || 'normal') !== 'normal') { show('<span>기록 자랑은 보통 난이도 기록만 올릴 수 있어요</span>'); return; }
     show('<span>이 기록을 커뮤니티에 자랑해 보세요</span>', '기록 자랑하기', () => community.compose({ type: 'record' }));
     return;
   }
@@ -1852,6 +1944,7 @@ function renderModeList() {
   const scores = loadScores();
   els.modeList.innerHTML = '';
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
+  $$('#level-seg button').forEach((b) => b.classList.toggle('active', b.dataset.level === settings.difficulty));
   els.invisibleToggle.checked = settings.invisible;
   // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(커뮤니티)
   const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'community'];
@@ -1870,7 +1963,7 @@ function renderModeList() {
     const m = MODES[cell], i = pos;
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
-    const key = rankKey(m.id, game.playSeconds, settings.invisible);
+    const key = rankKey(m.id, game.playSeconds, settings.invisible, settings.difficulty);
     const best = scores[key] !== undefined ? `<span class="best">best ${scores[key]}</span>` : '';
     const time = m.timed ? timeLabel(m, settings.playMinutes * 60) : m.duration ? `${m.duration}초` : '자유';
     card.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span><span class="time">${time}</span><b>${m.name}</b><em>${m.en}</em><small>${m.desc}</small>${best}`;
@@ -1895,51 +1988,39 @@ function renderModeList() {
 }
 
 // =============== 영역 (원근 사다리꼴) ===============
-// 처음 틀: 화면 가운데 적당한 크기의 사각형. 모서리가 화면 끝에 붙어 있으면 찾기·잡기 어려우니 여기서 시작해 바깥으로 넓힌다
-function centerBox() { return [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]; }
-/** 네 모서리가 모두 화면 끝(4%)에서 떨어져 있어 잡기 쉬운가 */
-function grabbable(q, edge = 0.04) {
-  return Array.isArray(q) && q.length === 4 && q.every(([u, v]) => u > edge && u < 1 - edge && v > edge && v < 1 - edge);
-}
+// 처음 틀(초기화): 화면 가운데 아래쪽의 사다리꼴 (뒤쪽 좁게, 앞쪽 넓게). 여기서 네 모서리를 끌어 실제 바닥에 맞춘다
+function defaultQuad() { return [[0.25, 0.3], [0.75, 0.3], [0.85, 0.8], [0.15, 0.8]]; }
 
-/** 영역 편집 시작: 자동 감지 결과나 저장된 틀이 잡기 쉬우면 그대로, 화면 끝에 붙어 있거나 없으면 가운데 틀에서 시작 */
+/** 영역 편집 시작: 저장된 틀이 있으면 그대로 (화면 끝에 붙어 있어도), 없으면 처음 틀 */
 function toggleAreaEdit() {
   if (app.areaEditing) { endAreaEdit(); return; }
   if (game.running) game.stop('manual');
   closeAllPanels();
-  const q = app.lastVision?.floor?.quad;
-  const from = settings.floorMode !== 'manual' && q ? q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]) : settings.manualQuad;
-  settings.manualQuad = grabbable(from) ? from : centerBox();
+  if (!settings.manualQuad) settings.manualQuad = defaultQuad();
   settings.floorMode = 'manual';
-  $('#set-floorMode').value = 'manual';
   persist();
   app.areaEditing = true;
+  $('#app').classList.add('area-editing');
   app.calib.active = false; app.idleHold = 0;
   applyFloorMode();
   $('#area-bar').classList.remove('hidden');
   els.btnFloorLock.classList.add('active');
-  if (app.setup !== 'area') toast('가운데 틀의 모서리를 바깥으로 끌어 바닥에 맞추세요 (뒤쪽 좁게, 앞쪽 넓게)', 4000); // 시작 준비 중에는 위 막대가 안내
 }
 
 function endAreaEdit(announce = true) {
   app.areaEditing = false;
+  $('#app').classList.remove('area-editing');
   $('#area-bar').classList.add('hidden');
   els.handles.classList.add('hidden');
   els.btnFloorLock.classList.remove('active');
   persist();
   if (app.setup === 'area') { beginPuckSetup(); return; } // 시작 준비 중: 다음 단계 (퍽 등록)
-  if (announce) toast('영역 저장됨. 퍽을 원 안에 두면 시작합니다');
+  if (announce) toast('영역 저장됨');
 }
 
 function applyFloorMode() {
   const manual = settings.floorMode === 'manual';
-  if (manual && !settings.manualQuad) {
-    // 자동 감지 결과(사다리꼴)가 잡기 쉬우면 그대로, 아니면 가운데 틀
-    const q = app.lastVision?.floor?.quad;
-    const from = q ? q.map(([x, y]) => [clamp(x / vision.PW, 0, 1), clamp(y / vision.PH, 0, 1)]) : null;
-    settings.manualQuad = grabbable(from) ? from : centerBox();
-    persist();
-  }
+  if (manual && !settings.manualQuad) { settings.manualQuad = defaultQuad(); persist(); }
   // 핸들은 편집 중에만 표시 (플레이 중 터치 방해 방지)
   els.handles.classList.toggle('hidden', !(manual && app.areaEditing));
   positionHandles();
@@ -1949,7 +2030,7 @@ function positionHandles() {
   if (settings.floorMode !== 'manual' || !settings.manualQuad) return;
   $$('#floor-handles .handle').forEach((h) => {
     const [u, v] = settings.manualQuad[Number(h.dataset.i)];
-    h.style.left = `${u * 100}%`; h.style.top = `${v * 100}%`;
+    h.style.left = `clamp(24px, ${u * 100}%, calc(100% - 24px))`; h.style.top = `clamp(24px, ${v * 100}%, calc(100% - 24px))`;
   });
 }
 
@@ -1988,7 +2069,10 @@ function beginAutoCalibration(target) {
 function cancelAutoCalibration(msg) {
   app.calib = { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null };
   autoCal.reset();
-  if (app.setup === 'puck') { finishSetup(); toast(settings.puckModel.area > 0 ? '등록된 퍽을 그대로 씁니다 · 게임을 고르세요' : '퍽 등록을 건너뛰었습니다 · 게임을 고른 뒤 원 안에 퍽을 두면 등록됩니다', 4000); return; }
+  if (app.setup === 'puck') {
+    if (settings.puckModel.area > 0) { beginTestSetup(); return; } // 등록된 퍽을 그대로 쓰고 3/3 움직여 보기
+    finishSetup(); toast('퍽 등록을 건너뛰었어요 · 게임을 고른 뒤 원에 퍽을 3초', 4000); return;
+  }
   if (msg) toast(msg);
 }
 
@@ -2015,7 +2099,7 @@ function beginCalibration(target) {
 }
 
 function onViewTap(e) {
-  if (app.calib.manual) { if (!e.target.classList.contains('handle')) cancelAutoCalibration('자동 지정 취소'); return; }
+  if (app.calib.manual) { if (!app.setup && !e.target.classList.contains('handle')) cancelAutoCalibration('자동 지정 취소'); return; }
   if (!app.calibTarget || !app.lastVision) return;
   if (e.target.classList.contains('handle')) return;
   const r = els.view.getBoundingClientRect();
@@ -2035,19 +2119,19 @@ function onViewTap(e) {
   if (target === 'puck') { settings.puckModel = model; vision.seedPuck(px, py, model.area); tracker.reset(); }
   else settings.stickModel = model;
   persist(); refreshCalibUI();
-  toast(`${target === 'puck' ? '퍽' : '스틱'} 색 지정 완료 (rgb ${model.r},${model.g},${model.b}, 크기 ${model.area}px)`);
+  toast(`${target === 'puck' ? '퍽' : '스틱'} 색 지정 완료`);
 }
 
 function refreshCalibUI() {
   const pm = settings.puckModel;
   els.swatchPuck.style.background = `rgb(${pm.r},${pm.g},${pm.b})`;
   els.swatchPuck.classList.remove('none');
-  els.calibPuckDesc.textContent = pm.area > 0 ? `지정됨 · rgb(${pm.r},${pm.g},${pm.b}) · ${pm.area}px` : '기본: 검정 (크기 자동)';
+  els.calibPuckDesc.textContent = pm.area > 0 ? '등록됨' : '기본: 검정';
   const sm = settings.stickModel;
   if (sm) {
     els.swatchStick.style.background = `rgb(${sm.r},${sm.g},${sm.b})`;
     els.swatchStick.classList.remove('none');
-    els.calibStickDesc.textContent = `지정됨 · rgb(${sm.r},${sm.g},${sm.b}) · ${sm.area}px`;
+    els.calibStickDesc.textContent = '등록됨';
   } else {
     els.swatchStick.style.background = '';
     els.swatchStick.classList.add('none');
@@ -2071,10 +2155,8 @@ function applySettingsToUI() {
   }
   applyWash();
   game.arcade.floorWidthM = settings.floorWidthM;
-  $('#set-floorMode').value = settings.floorMode;
   $('#set-procWidth').value = String(settings.procWidth);
   $('#set-controller').value = settings.controller;
-  $('#set-difficulty').value = settings.difficulty;
   els.p1.value = settings.p1; els.p2.value = settings.p2;
   refreshCalibUI();
   applyMirror();

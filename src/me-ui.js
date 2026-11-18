@@ -6,7 +6,7 @@ const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
 
 /**
- * deps: { $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel,
+ * deps: { $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
  *         COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin,
  *         codeLabel, inviteLink, copyText }
  */
@@ -24,9 +24,10 @@ export function initMe(deps) {
   }
   const keyLabel = (key) => {
     const k = keyInfo(key), m = deps.MODES.find((x) => x.id === k.modeId);
-    return [m ? m.name : k.modeId, m?.timed ? deps.timeLabel(m, k.seconds) : '', k.invisible ? '투명' : ''].filter(Boolean).join(' · ');
+    return [m ? m.name : k.modeId, m?.timed ? deps.timeLabel(m, k.seconds) : '', k.level !== 'normal' ? deps.levelLabel(k.level) : '', k.invisible ? '투명' : ''].filter(Boolean).join(' · ');
   };
-  const keyOrder = (key) => { const k = keyInfo(key); return deps.MODES.findIndex((x) => x.id === k.modeId) * 10000 + k.seconds * 2 + (k.invisible ? 1 : 0); };
+  const LV_ORDER = { easy: 0, normal: 1, hard: 2 };
+  const keyOrder = (key) => { const k = keyInfo(key); return deps.MODES.findIndex((x) => x.id === k.modeId) * 100000 + k.seconds * 10 + (k.invisible ? 5 : 0) + LV_ORDER[k.level]; };
 
   // 프로필 수정 칸 (국가 목록·스틱 버튼)
   const sel = $('#me-country');
@@ -139,8 +140,10 @@ export function initMe(deps) {
     const body = $('#me-scores');
     body.innerHTML = `<tr><td colspan="5" class="muted">${esc(tr('불러오는 중…'))}</td></tr>`;
     let best = [];
-    try { best = await app.account.myScores(KEYS); } catch { best = []; }
     const recent = view.act?.recent || {};
+    // 쉬움·어려움 기록은 해 본 게임만 읽는다 (최근 기록에 있는 키). 모든 난이도를 늘 읽으면 읽기 수가 두 배가 된다
+    const extra = Object.keys(recent).filter((k) => !KEYS.includes(k) && keyInfo(k).level !== 'normal' && deps.MODES.some((m) => m.id === keyInfo(k).modeId && m.levels));
+    try { best = await app.account.myScores([...KEYS, ...extra]); } catch { best = []; }
     const keys = [...new Set([...best.map((b) => b.mode), ...Object.keys(recent)])].filter((k) => keyInfo(k).modeId !== 'free').sort((a, b) => keyOrder(a) - keyOrder(b));
     if (!keys.length) { body.innerHTML = '<tr><td colspan="5" class="muted">아직 기록이 없습니다. 게임을 끝까지 하면 여기에 쌓입니다</td></tr>'; return; }
     body.innerHTML = keys.map((k) => {

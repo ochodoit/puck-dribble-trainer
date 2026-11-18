@@ -113,20 +113,35 @@
       <button id="btn-replace-puck" class="btn btn-primary btn-replace hidden">이 물체로 퍽 교체 (3초)</button>
 
       <!-- 영역 편집 바 -->
+      <!-- 시작 준비: 1/3 영역 -> 2/3 퍽 등록 -> 3/3 움직여 보기 -> 모드 선택. 안내는 한 줄, 화면 맨 위 -->
       <div id="area-bar" class="area-bar hidden">
-        <span class="area-hint"><b id="area-step" class="setup-step hidden">1 / 2 플레이 공간</b>가운데 틀의 네 모서리를 바깥으로 끌어 실제 바닥 모서리에 맞추세요. 뒤쪽(멀리)은 좁게, 앞쪽(카메라)은 넓게 — 원근 격자가 바닥에 붙어 보이면 맞습니다.</span>
+        <b id="area-step" class="setup-step hidden">1 / 3 영역</b>
+        <span class="area-hint">네 모서리를 끌어 바닥에 맞추세요</span>
         <div class="area-actions">
-          <button id="area-auto" class="btn btn-ghost">흰 바닥 자동</button>
-          <button id="area-full" class="btn btn-ghost">화면 전체</button>
-          <button id="area-reset" class="btn btn-ghost">가운데 틀로</button>
+          <button id="area-reset" class="btn btn-ghost">초기화</button>
           <button id="area-done" class="btn btn-primary">완료</button>
         </div>
       </div>
-      <!-- 시작 준비 2단계: 퍽 등록 -->
       <div id="setup-bar" class="area-bar hidden">
-        <span class="area-hint"><b class="setup-step">2 / 2 퍽 등록</b>퍽(공·뚜껑·퍽)을 화면 가운데 원 안에 놓고 3초 기다리세요. 등록되면 게임 선택으로 넘어갑니다.</span>
-        <div class="area-actions"><button id="setup-skip" class="btn btn-ghost hidden">건너뛰기 (등록된 퍽 사용)</button></div>
+        <b class="setup-step">2 / 3 퍽 등록</b>
+        <span class="area-hint">퍽을 가운데 원에 3초</span>
+        <div class="area-actions">
+          <button id="setup-back" class="btn btn-ghost">영역 다시</button>
+          <button id="setup-skip" class="btn btn-ghost hidden">등록된 퍽 쓰기</button>
+        </div>
       </div>
+      <div id="test-bar" class="area-bar hidden">
+        <b class="setup-step">3 / 3 움직여 보기</b>
+        <span id="test-hint" class="area-hint">퍽을 네 모서리 표적에</span>
+        <b id="test-count" class="test-count">0 / 4</b>
+        <div class="area-actions">
+          <button id="test-repuck" class="btn btn-ghost">퍽 다시</button>
+          <button id="test-area" class="btn btn-ghost">영역 다시</button>
+          <button id="test-skip" class="btn btn-ghost">건너뛰기</button>
+        </div>
+      </div>
+      <!-- 세로 휴대폰: 가로로 돌리라는 안내 (화면을 가리지 않는 작은 띠) -->
+      <p id="rotate-hint" class="rotate-hint" aria-hidden="true">가로로 돌리면 화면이 넓어져요</p>
 
       <!-- 인식 상태 -->
       <div id="status" class="status">
@@ -160,6 +175,18 @@
           <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="" role="img" aria-label="스틱과 퍽 일러스트" decoding="async" />
         </picture>
         <p class="lead">퍽을 읽는 스틱 핸들링 게임. 당신의 실력을 보여주세요</p>
+        <button id="btn-camera" class="btn btn-primary btn-big">카메라 시작</button>
+        <button id="btn-mouse" class="btn btn-mouse hidden" title="테스트 관리자 전용">마우스로 시작 (카메라 없이)</button>
+        <p id="splash-error" class="error hidden"></p>
+        <div id="splash-diag" class="diag hidden">
+          <label>카메라 선택 <select id="diag-camera"></select></label>
+          <div class="row" style="justify-content:center">
+            <button type="button" id="btn-retry-camera" class="btn btn-primary">다시 시도</button>
+            <button type="button" id="btn-copy-diag" class="btn btn-ghost">진단 정보 복사</button>
+          </div>
+          <pre id="diag-info" class="diag-info"></pre>
+        </div>
+        <p class="start-note">로그인하지 않으면 게스트로 시작합니다 (랭킹 미등록)</p>
         <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
         <div id="invite-card" class="invite-card hidden" role="status">
           <b id="invite-title"></b>
@@ -197,30 +224,19 @@
             <p id="auth-error" class="error hidden"></p>
             <div class="row" style="justify-content:center">
               <button type="submit" id="auth-submit" class="btn btn-primary">로그인</button>
-              <button type="button" id="auth-guest" class="btn btn-ghost">게스트로 플레이 (랭킹 미등록)</button>
+              <button type="button" id="auth-guest" class="btn btn-ghost">게스트로 시작 (랭킹 미등록)</button>
             </div>
           </form>
           <p id="auth-store-note" class="muted"></p>
-        </div>
-        <button id="btn-camera" class="btn btn-primary btn-big">카메라 시작</button>
-        <button id="btn-mouse" class="btn btn-mouse hidden" title="테스트 관리자 전용">마우스로 시작 (카메라 없이)</button>
-        <p id="splash-error" class="error hidden"></p>
-        <div id="splash-diag" class="diag hidden">
-          <label>카메라 선택 <select id="diag-camera"></select></label>
-          <div class="row" style="justify-content:center">
-            <button type="button" id="btn-retry-camera" class="btn btn-primary">다시 시도</button>
-            <button type="button" id="btn-copy-diag" class="btn btn-ghost">진단 정보 복사</button>
-          </div>
-          <pre id="diag-info" class="diag-info"></pre>
         </div>
         <details class="howto">
           <summary>처음이라면 — 사용 방법</summary>
           <ol class="tips">
             <li><span><b>세우기</b> — 휴대폰·아이패드·노트북을 거치대에 세워 전면 카메라로 자신과 바닥이 보이게 둡니다.</span></li>
-            <li><span><b>퍽 등록</b> — 공·뚜껑·퍽 무엇이든, 화면 가운데 원 안에 3초 두면 인식됩니다. 배경과 색만 다르면 됩니다.</span></li>
-            <li><span><b>시작</b> — 등록된 퍽을 원 안에 3초 더 두면 손대지 않고 시작합니다. 끝나면 같은 방법으로 다시 시작.</span></li>
-            <li><span><b>영역</b> — 뒤쪽이 좁아 보이는 바닥은 "영역" 버튼으로 네 모서리를 맞추면 원근이 보정됩니다.</span></li>
-            <li><span><b>주의</b> — 같은 색 물체를 바닥에 두지 마세요. 화면이 가려지면 추적이 멈춥니다.</span></li>
+            <li><span><b>영역</b> — 네 모서리를 끌어 바닥에 맞춥니다. 다음부터는 맞춰 둔 영역을 그대로 씁니다.</span></li>
+            <li><span><b>퍽 등록</b> — 공·뚜껑·퍽 무엇이든 가운데 원 안에 3초 두면 인식됩니다. 배경과 색만 다르면 됩니다.</span></li>
+            <li><span><b>움직여 보기</b> — 퍽을 네 모서리 표적에 가져가 끝까지 잘 잡히는지 확인한 뒤 게임을 고릅니다.</span></li>
+            <li><span><b>시작</b> — 등록된 퍽을 원 안에 3초 두면 손대지 않고 시작합니다. 휴대폰을 TV에 연결해도 됩니다.</span></li>
           </ol>
         </details>
         <p class="about">퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.</p>
@@ -233,16 +249,21 @@
     <!-- 모드 선택 -->
     <div id="panel-mode" class="panel modal hidden">
       <div class="modal-card">
-        <header><h2>Mode</h2><button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button></header>
-        <div class="time-row">
-          <div id="time-seg" class="seg" role="group" aria-label="게임 시간">
-            <button type="button" data-min="1">1분</button>
-            <button type="button" data-min="3">3분</button>
-            <button type="button" data-min="5">5분</button>
+        <header class="mode-head"><h2>Mode</h2>
+          <div class="mode-opts">
+            <div id="time-seg" class="seg" role="group" aria-label="게임 시간">
+              <button type="button" data-min="1">1분</button>
+              <button type="button" data-min="3">3분</button>
+              <button type="button" data-min="5">5분</button>
+            </div>
+            <div id="level-seg" class="seg" role="group" aria-label="난이도 (아케이드·퍽 피하기)">
+              <button type="button" data-level="easy">쉬움</button>
+              <button type="button" data-level="normal">보통</button>
+              <button type="button" data-level="hard">어려움</button>
+            </div>
           </div>
-          <p class="muted">게임 시간 · 랭킹은 시간별로 따로</p>
-        </div>
-        <p id="mode-pick-hint" class="muted pick-hint">퍽을 카드 가운데에 2초 두면 선택</p>
+          <button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button></header>
+        <p class="muted pick-hint"><span id="mode-pick-hint">퍽을 카드 가운데에 2초 두면 선택</span> <span>랭킹은 시간·난이도별로 따로 (난이도: 아케이드·퍽 피하기)</span></p>
         <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
         <div id="mode-list" class="mode-list"></div>
         <div class="versus-row">
@@ -268,60 +289,50 @@
             <select id="sel-camera"></select>
           </label>
           <label class="switch"><input type="checkbox" id="set-mirror" checked /><span>좌우 반전(거울 모드)</span></label>
-          <label class="switch"><input type="checkbox" id="set-debug" /><span>인식 마스크 표시(디버그)</span></label>
           <label class="switch"><input type="checkbox" id="set-sound" checked /><span>효과음</span></label>
           <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>핸즈프리 시작 (퍽을 원 안에 3초)</span></label>
           <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>카메라 쪽으로 밀면 화면 위로 (아케이드·퍽 피하기·와이드 드리블·자유 연습)</span></label>
-
-          <label>바닥 밝기 기준 <output id="out-whiteV"></output>
-            <input type="range" id="set-whiteV" min="80" max="240" step="1" />
-          </label>
-          <label>바닥 채도 허용 <output id="out-whiteC"></output>
-            <input type="range" id="set-whiteC" min="10" max="120" step="1" />
-          </label>
-          <label>퍽 색 허용 오차 <output id="out-puckTol"></output>
-            <input type="range" id="set-puckTol" min="20" max="200" step="1" />
-          </label>
-          <label>스틱 색 허용 오차 <output id="out-stickTol"></output>
-            <input type="range" id="set-stickTol" min="20" max="200" step="1" />
-          </label>
-          <label>게임 영역
-            <select id="set-floorMode">
-              <option value="auto">흰 바닥 자동 감지</option>
-              <option value="manual">수동 지정(모서리 드래그)</option>
-              <option value="full">카메라 화면 전체 (노트북 웹캠 추천)</option>
-            </select>
-          </label>
-          <label>인식 해상도
-            <select id="set-procWidth">
-              <option value="240">보통 (240px, 빠름)</option>
-              <option value="320">높음 (320px)</option>
-              <option value="400">최고 (400px, 퍽이 작게 보일 때)</option>
-            </select>
-          </label>
           <label>조작 대상
             <select id="set-controller">
               <option value="puck">퍽</option>
               <option value="stick">스틱 블레이드 (퍽 없이 연습)</option>
             </select>
           </label>
-          <label>내 퍽 투명도 % (0 또렷이 · 100 안 보임 — 감각으로 플레이) <output id="out-puckTransparency"></output>
-            <input type="range" id="set-puckTransparency" min="0" max="100" step="10" />
+          <label>내 퍽 투명도 % (0 또렷이 · 100 안 보임) <output id="out-puckTransparency"></output>
+            <input type="range" id="set-puckTransparency" min="0" max="100" step="1" />
           </label>
-          <label>배경 투명도 % (아케이드·퍽 피하기에서 카메라가 비치는 정도) <output id="out-bgTransparency"></output>
+          <label>배경 투명도 % (아케이드·퍽 피하기) <output id="out-bgTransparency"></output>
             <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
           </label>
           <label>게임 영역 실제 폭 (m) <output id="out-floorWidthM"></output>
             <input type="range" id="set-floorWidthM" min="0.5" max="6" step="0.1" />
           </label>
-          <label>난이도
-            <select id="set-difficulty">
-              <option value="easy">쉬움</option>
-              <option value="normal" selected>보통</option>
-              <option value="hard">어려움</option>
-            </select>
-          </label>
         </div>
+        <details class="settings-adv">
+          <summary>인식 세부 조정 (퍽이 잘 안 잡힐 때만)</summary>
+          <div class="settings-grid">
+            <label>퍽 색 허용 오차 <output id="out-puckTol"></output>
+              <input type="range" id="set-puckTol" min="20" max="200" step="1" />
+            </label>
+            <label>스틱 색 허용 오차 <output id="out-stickTol"></output>
+              <input type="range" id="set-stickTol" min="20" max="200" step="1" />
+            </label>
+            <label>바닥 밝기 기준 <output id="out-whiteV"></output>
+              <input type="range" id="set-whiteV" min="80" max="240" step="1" />
+            </label>
+            <label>바닥 채도 허용 <output id="out-whiteC"></output>
+              <input type="range" id="set-whiteC" min="10" max="120" step="1" />
+            </label>
+            <label>인식 해상도
+              <select id="set-procWidth">
+                <option value="240">보통 (240px, 빠름)</option>
+                <option value="320">높음 (320px)</option>
+                <option value="400">최고 (400px, 퍽이 작게 보일 때)</option>
+              </select>
+            </label>
+            <label class="switch"><input type="checkbox" id="set-debug" /><span>인식 마스크 표시(디버그)</span></label>
+          </div>
+        </details>
         <div class="row">
           <span id="settings-account" class="muted" style="align-self:center"></span>
           <button id="btn-settings-login" class="btn btn-primary hidden">로그인</button>
@@ -339,24 +350,28 @@
     <div id="panel-calib" class="panel modal hidden">
       <div class="modal-card">
         <header><h2>Calibration</h2><button class="btn btn-ghost btn-close" data-close="panel-calib">닫기</button></header>
-        <p class="muted"><b>자동 지정(추천)</b>: 버튼을 누른 뒤 퍽으로 쓸 물체(공·뚜껑·실제 퍽 등 배경과 색이 다른 것)를 화면 가운데 원 안에 놓고 3초만 기다리면 색과 크기를 스스로 학습합니다. 어떤 바닥·매트에서도 됩니다. <b>터치로 지정</b>은 화면 속 물체를 직접 터치하는 방식입니다.</p>
+        <p class="muted">물체를 가운데 원에 3초 두면 색과 크기를 익힙니다. 배경과 색이 다르면 무엇이든 됩니다.</p>
         <div class="calib-grid">
           <div class="calib-item">
             <span class="swatch" id="swatch-puck"></span>
-            <div><b>퍽</b><small id="calib-puck-desc">기본: 검정</small></div>
-            <button class="btn btn-primary" data-autocalib="puck">퍽 다시 등록 (원 안에 3초)</button>
-            <button class="btn" data-calib="puck">터치로 지정</button>
-            <button class="btn btn-ghost" data-calib-reset="puck">기본값</button>
+            <div class="calib-name"><b>퍽</b><small id="calib-puck-desc">기본: 검정</small></div>
+            <div class="calib-btns">
+              <button class="btn btn-primary" data-autocalib="puck">원 안에 3초</button>
+              <button class="btn" data-calib="puck">터치로 지정</button>
+              <button class="btn btn-ghost" data-calib-reset="puck">기본값</button>
+            </div>
           </div>
           <div class="calib-item">
             <span class="swatch" id="swatch-stick"></span>
-            <div><b>스틱(블레이드/테이프)</b><small id="calib-stick-desc">미지정</small></div>
-            <button class="btn btn-primary" data-autocalib="stick">원 안에 3초 (자동)</button>
-            <button class="btn" data-calib="stick">터치로 지정</button>
-            <button class="btn btn-ghost" data-calib-reset="stick">해제</button>
+            <div class="calib-name"><b>스틱 테이프</b><small id="calib-stick-desc">미지정</small></div>
+            <div class="calib-btns">
+              <button class="btn btn-primary" data-autocalib="stick">원 안에 3초</button>
+              <button class="btn" data-calib="stick">터치로 지정</button>
+              <button class="btn btn-ghost" data-calib-reset="stick">해제</button>
+            </div>
           </div>
         </div>
-        <p class="muted">팁: 스틱 테이프와 퍽의 색이 같으면(둘 다 검정) 서로 붙었을 때 잠시 구분이 어려워집니다. 주황·파랑 등 바닥과 퍽 모두와 다른 색을 추천합니다.</p>
+        <p class="muted">팁: 스틱 테이프는 퍽·바닥과 다른 색(주황·파랑)이 좋아요.</p>
       </div>
     </div>
 
@@ -367,6 +382,11 @@
         <div class="rank-filters">
           <select id="rank-mode"></select>
           <select id="rank-time" aria-label="게임 시간"></select>
+          <select id="rank-level" aria-label="난이도">
+            <option value="easy">쉬움</option>
+            <option value="normal">보통</option>
+            <option value="hard">어려움</option>
+          </select>
           <select id="rank-variant" aria-label="일반 · 투명 모드">
             <option value="">일반</option>
             <option value="inv">투명 모드</option>

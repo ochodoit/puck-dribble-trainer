@@ -12,14 +12,14 @@ export const DEFAULT_SETTINGS = {
   stickTol: 70,     // 스틱 색 허용 오차
   puckModel: { r: 0, g: 0, b: 0, area: 0 },   // area 0 = 바닥 크기 기준 자동
   stickModel: null,                           // null = 스틱 추적 안 함
-  floorMode: 'auto',                          // 'auto'(흰 바닥) | 'manual'(모서리) | 'full'(카메라 화면 전체)
+  floorMode: 'manual',                        // 게임 영역 = 네 모서리로 맞춘 바닥 (예전 'auto'·'full' 은 불러올 때 'manual' 로 옮김)
   procWidth: 240,                             // 인식 해상도(처리 폭 px): 240 | 320 | 400
   controller: 'puck',                         // 게임 조작 대상: 'puck' | 'stick'(퍽 없이 스틱 블레이드로)
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
   flipDepth: true,                            // 앞뒤 방향(아케이드·퍽 피하기·자유 연습 공통): true = 카메라 쪽으로 밀면 화면 위로
-  puckTransparency: 0,                        // 플레이 중 내 퍽 투명도(%): 0 = 또렷이, 100 = 안 보임 (10 단위). 화면의 퍽 표시와 카메라 속 진짜 퍽 모두
+  puckTransparency: 0,                        // 플레이 중 내 퍽 투명도(%): 0 = 또렷이, 100 = 안 보임 (1 단위). 화면의 퍽 표시와 카메라 속 진짜 퍽 모두
   figure8Dir: 'L-up',                         // 8자 드리블 방향: L|R(어느 콘 먼저) - up|down(콘을 위·아래 어느 쪽부터)
   invisible: false,                           // 투명 모드: 플레이 중 내 퍽을 아예 숨김 (손의 감각으로만). 랭킹·자랑은 일반과 따로
   courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
@@ -59,12 +59,14 @@ export function sanitizeSettings(s) {
   s.stickTol = num(s.stickTol, 20, 200, d.stickTol);
   s.puckModel = isColorModel(s.puckModel) ? { r: s.puckModel.r, g: s.puckModel.g, b: s.puckModel.b, area: s.puckModel.area } : structuredClone(d.puckModel);
   s.stickModel = isColorModel(s.stickModel) ? { r: s.stickModel.r, g: s.stickModel.g, b: s.stickModel.b, area: s.stickModel.area } : null;
-  s.floorMode = ['auto', 'manual', 'full'].includes(s.floorMode) ? s.floorMode : 'auto';
   s.procWidth = [240, 320, 400].includes(s.procWidth) ? s.procWidth : d.procWidth;
   s.controller = s.controller === 'stick' ? 'stick' : 'puck';
   const quadOk = Array.isArray(s.manualQuad) && s.manualQuad.length === 4 &&
     s.manualQuad.every((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((c) => Number.isFinite(c) && c >= 0 && c <= 1));
-  if (!quadOk) { s.manualQuad = null; if (s.floorMode === 'manual') s.floorMode = 'auto'; }
+  // 게임 영역은 네 모서리 하나뿐: 예전 '화면 전체'는 화면 전체 틀로, 예전 '흰 바닥 자동'은 저장된 틀(없으면 처음 틀)로
+  if (s.floorMode === 'full') s.manualQuad = [[0.02, 0.02], [0.98, 0.02], [0.98, 0.98], [0.02, 0.98]];
+  else if (!quadOk) s.manualQuad = null;
+  s.floorMode = 'manual';
   s.difficulty = ['easy', 'normal', 'hard'].includes(s.difficulty) ? s.difficulty : d.difficulty;
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
@@ -75,7 +77,8 @@ export function sanitizeSettings(s) {
   // 퍽 투명도 (예전 '내 퍽 표시 %' 설정은 100 - 값 으로 옮긴다)
   const step10 = (v) => Number.isInteger(v) && v >= 0 && v <= 100 && v % 10 === 0;
   // 예전 키가 남아 있으면 예전 형식으로 저장된 설정 (새 형식은 저장할 때 예전 키를 지움)
-  s.puckTransparency = step10(s.puckOpacity) ? 100 - s.puckOpacity : step10(s.puckTransparency) ? s.puckTransparency : d.puckTransparency;
+  const pct = (v) => Number.isInteger(v) && v >= 0 && v <= 100;
+  s.puckTransparency = step10(s.puckOpacity) ? 100 - s.puckOpacity : pct(s.puckTransparency) ? s.puckTransparency : d.puckTransparency;
   delete s.puckOpacity;
   s.courseCycles = Number.isInteger(s.courseCycles) && s.courseCycles >= 10 && s.courseCycles <= 100 && s.courseCycles % 10 === 0 ? s.courseCycles : d.courseCycles;
   s.course = Array.isArray(s.course)

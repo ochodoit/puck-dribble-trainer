@@ -24,7 +24,7 @@ Authentication > **설정** 탭 > **승인된 도메인** > 도메인 추가 > `
 ### 4. 보안 규칙 붙여넣기
 Firestore > **규칙** 탭 > 기존 내용을 모두 지우고 아래 내용을 붙여넣기 > **게시**
 
-(이 내용은 저장소의 `firestore.rules` 와 같습니다. 규칙을 바꾸면 이 파일과 함께 고칩니다. 추천코드·팀 기능을 만들 때 다시 바뀝니다.)
+(이 내용은 저장소의 `firestore.rules` 와 같습니다. 규칙을 바꾸면 이 파일과 함께 고칩니다. 2026-11-18: 친구 초대 코드·3개월 이용권·의견 추첨 반영)
 
 ```
 rules_version = '2';
@@ -36,6 +36,8 @@ rules_version = '2';
 //  3) 개인정보: 프로필(나이·가입 코드)은 본인과 운영자만 읽는다. 랭킹에는 화면에 보이는 칸만 남는다
 //  4) 정리: 운영자는 글·도전 기록·랭킹 기록·의견을 지울 수 있다
 //  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간)
+//  6) 정회원 기간: 무료 정회원은 베타 종료일까지. 그 뒤는 운영자가 유지(kept)했거나 이용권 기한(until)이 남은 계정만
+//  7) 초대 코드: 정회원 한 사람당 하나, 3명까지, 추가 없음 (프로필의 invite 칸과 한 묶음으로 한 번만 만든다)
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -51,15 +53,16 @@ service cloud.firestore {
       return exists(cp) ? get(cp).data.get('betaEndsAt', null) : null;
     }
     // 정회원인가 (u = 내 프로필). 프로필은 가입 코드로만 만들 수 있다
-    // 베타 멤버는 베타 종료일(config/site.betaEndsAt)이 지나면, 그 전에 [개발자에게] 의견을 보냈거나 운영자가 유지(kept)한 경우만 정회원
+    // 무료 정회원은 가입 경로(오픈베타·초대·1회용 코드)와 상관없이 베타 종료일(config/site.betaEndsAt)까지.
+    // 그 뒤에는 운영자가 유지(kept)한 계정, 이용권 기한(until, 운영자가 줌)이 남은 계정만 정회원
     function activeMember(u) {
-      return !(u.get('beta', false) == true || !('code' in u))
-        || u.get('kept', false) == true
-        || stillBeta(betaEnd());
+      return u.get('kept', false) == true
+        || (u.get('until', null) is timestamp && request.time < u.until)
+        || betaOpen();
     }
-    function stillBeta(end) {
-      let fp = /databases/$(database)/documents/feedback/$(request.auth.uid);
-      return end == null || request.time < end || (exists(fp) && get(fp).data.at < end);
+    function betaOpen() {
+      let end = betaEnd();
+      return end == null || request.time < end;
     }
     function isMember() {
       return request.auth != null && activeMember(me());
@@ -77,6 +80,7 @@ service cloud.firestore {
         && d.team is string && d.team.size() <= 20
         && d.age is int && d.age >= 3 && d.age <= 99
         && (!('country' in d) || (d.country is string && d.country.size() <= 4))
+        && (!('stick' in d) || d.stick in ['L', 'R'])
         && validNumber(d);
     }
     // 별명: 2~12자 (글자·숫자·_-. 와 가운데 띄어쓰기), 소문자 키가 맞고, 운영자로 보일 이름은 안 됨
@@ -124,10 +128,23 @@ service cloud.firestore {
     match /admins/{uid} {
       allow get: if request.auth != null && request.auth.uid == uid;
     }
+    // 내 초대 코드 만들기: 지금 정회원이고, 아직 초대 코드가 없고, 같은 묶음에서 내 프로필의 invite 칸이 이 코드를 가리킨다
+    function inviteOwnerOk(d, code) {
+      let u = me();
+      return activeMember(u) && !('invite' in u) && d.nick == u.nick
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('invite', null) == code;
+    }
     // 가입 코드: 코드를 아는 사람만 그 코드 하나를 읽을 수 있다 (목록은 운영자만)
     match /codes/{code} {
       allow get: if true;
       allow list, delete: if isAdmin();
+      // 정회원: 내 초대 코드 (3명까지, 마감·메모 없음, 한 사람당 하나). 만든 뒤에는 운영자만 고친다
+      allow create: if request.auth != null && code.matches('^[2-9A-HJKMNP-Z]{8}$')
+        && request.resource.data.keys().hasOnly(['type', 'uses', 'maxUses', 'expiresAt', 'off', 'note', 'createdAt', 'by', 'nick'])
+        && request.resource.data.type == 'invite' && request.resource.data.uses == 0 && request.resource.data.maxUses == 3
+        && request.resource.data.off == false && request.resource.data.expiresAt == null && request.resource.data.note == ''
+        && request.resource.data.createdAt is number && request.resource.data.by == request.auth.uid
+        && inviteOwnerOk(request.resource.data, code);
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(['type', 'uses', 'maxUses', 'expiresAt', 'off', 'note', 'createdAt', 'by'])
         && request.resource.data.type in ['beta', 'one']
@@ -152,7 +169,7 @@ service cloud.firestore {
         && request.resource.data.count == resource.data.count + 1
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.memberNo == request.resource.data.count;
     }
-    // 사이트 설정: 게스트 안내(공식 인스타 계정, 해시태그), 베타 종료일(betaEndsAt)
+    // 사이트 설정: site = 게스트 안내(공식 인스타 계정, 해시태그)·베타 종료일(betaEndsAt), lottery = 의견 추첨 결과(당첨자 별명·번호)
     match /config/{id} {
       allow read: if true;
       allow write: if isAdmin();
@@ -162,21 +179,28 @@ service cloud.firestore {
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
       allow create: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt'])
+        && request.resource.data.keys().hasOnly(['nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt', 'stick'])
         && validProfile(request.resource.data) && validNick(request.resource.data)
         && request.resource.data.ageGroup == ageGroupFor(request.resource.data.age)
         && request.resource.data.code is string && joinOk(request.resource.data, uid);
       // 본인: 등번호·국가·팀·나이만 고칠 수 있다 (별명·가입 정보·회원 번호·정회원 유지는 못 바꿈)
       allow update: if request.auth != null && request.auth.uid == uid && validProfile(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup', 'stick'])
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age', 'ageGroup'])
           || request.resource.data.ageGroup == ageGroupFor(request.resource.data.age));
-      // 운영자: 기존 가입자 정리 (회원 번호·베타 표시), 의견을 못 보낸 베타 멤버도 정회원 유지(kept)
-      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberNo', 'beta', 'kept']);
+      // 본인: 내 초대 코드를 처음 한 번 연결 (새로 만드는 코드 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invite'])
+        && !('invite' in resource.data) && request.resource.data.invite is string
+        && !exists(/databases/$(database)/documents/codes/$(request.resource.data.invite))
+        && getAfter(/databases/$(database)/documents/codes/$(request.resource.data.invite)).data.by == uid;
+      // 운영자: 기존 가입자 정리 (회원 번호·베타 표시), 베타가 끝나도 정회원 유지(kept), 이용권 기한(until)·종류(coupon)
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberNo', 'beta', 'kept', 'until', 'coupon'])
+        && (request.resource.data.get('until', null) == null || request.resource.data.until is timestamp);
       allow delete: if isAdmin();
     }
     // 개발자에게: 가입한 사람이 한 사람당 문서 하나. 본인과 운영자만 읽는다
-    // 처음 보낸 시각(at)은 서버 시간으로 남고 고쳐도 바뀌지 않는다 (베타 마감 전에 보냈는지 판단)
+    // 처음 보낸 시각(at)은 서버 시간으로 남고 고쳐도 바뀌지 않는다 (베타 종료일 전에 보냈는지 = 3개월 이용권 추첨 대상)
     function validFeedback(d, uid) {
       let u = me();
       return d.keys().hasOnly(['uid', 'nick', 'memberNo', 'good', 'fix', 'updatedAt', 'at'])
@@ -185,6 +209,17 @@ service cloud.firestore {
         && d.good is string && d.good.size() <= 500 && d.fix is string && d.fix.size() <= 500
         && (d.good.size() > 0 || d.fix.size() > 0)
         && d.updatedAt == request.time;
+    }
+    // 내 정보: 출석·최근 기록·누적 훈련 (activity.js). 본인만 읽고 쓰며 운영자는 지울 수 있다
+    match /activity/{uid} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'days', 'totals', 'recent', 'updatedAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.days is map && request.resource.data.days.size() <= 3700
+        && request.resource.data.totals is map && request.resource.data.recent is map && request.resource.data.recent.size() <= 40
+        && request.resource.data.updatedAt is number;
+      allow delete: if isAdmin();
     }
     match /feedback/{uid} {
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin());
@@ -201,6 +236,7 @@ service cloud.firestore {
       allow create: if joiningNow()
         && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.nickLower == nick;
+      allow delete: if isAdmin(); // 운영자가 베타 멤버를 지우면 별명도 다시 쓸 수 있게
     }
 
     // ---- 커뮤니티 ----
@@ -355,9 +391,12 @@ const firebaseConfig = {
 ### 7. 가입 받기 시작
 1. 운영자 화면 > **가입 준비** 를 한 번 누름 — 기존 가입자에게 가입 순서대로 번호를 매기고 베타 멤버로 표시, 회원 수 문서(`meta/members`)를 만듦. 이걸 누르기 전에는 새 가입이 되지 않음
 2. **게스트 안내**에 공식 인스타 계정·해시태그를 넣고 저장 (게스트 결과 화면에 나옴, DM 버튼이 그 계정으로 열림)
-3. **베타 링크** 만들기 — 마감일과 인원 상한(0 = 제한 없음)을 정하고 만든 링크를 공유. 이 링크로 가입하면 바로 정회원(베타 멤버)
-4. 인스타 DM으로 플레이 인증이 오면 **1회용 코드**를 만들어 코드(또는 링크)를 DM 답장으로 보냄 (한 사람만 쓸 수 있음)
-5. **베타 기간**에 베타 종료일을 정해 저장 — 베타 멤버에게 "의견 보내고 정회원 유지" 안내가 뜸. 종료일 전에 커뮤니티 [개발자에게]로 의견을 보낸 멤버만 정회원으로 남음. 온 의견은 운영자 화면 아래 **개발자에게 온 의견**에서 읽고, 못 보낸 멤버도 '정회원 유지' 버튼으로 남길 수 있음
+3. **베타 기간**에 베타 종료일(2026-12-31)을 정해 저장 — 무료 정회원(오픈베타 링크·친구 초대·1회용 코드)은 모두 이 날까지. 정회원에게 "정회원 ○까지 · 의견 보내고 3개월 이용권 추첨" 안내가 뜸
+4. **오픈베타 링크** 만들기 — 마감일 12월 31일, 인원 상한 100명으로 만들어 공유. 이 링크로 가입하면 바로 정회원
+5. 정회원은 **내 정보 > 친구 초대**에서 자기 초대 링크를 받음(3명까지, 추가 코드 없음). 초대받아 가입한 친구도 자기 링크를 받음. 초대 코드는 베타 종료일에 마감
+6. 게스트가 플레이 영상을 SNS에 올리고 그 링크를 공식 인스타 DM으로 보내면 **1회용 코드**를 만들어 코드(또는 링크)를 DM 답장으로 보냄 (한 사람만 쓸 수 있음)
+7. 종료일 전에 커뮤니티 [개발자에게]로 의견을 보낸 회원은 **의견 추첨** 대상. 운영자 화면 > 의견 추첨에서 30명을 뽑고 **당첨 확정**을 누르면 당첨자는 베타 종료일(이미 지났으면 오늘)부터 3개월 동안 정회원(`users.until`). 회원 목록의 '3개월 이용권' 버튼으로 한 명씩 줄 수도 있고, '정회원 유지'는 기한 없이 남김
+8. 종료일 다음부터는 '정회원 유지'·'3개월 이용권' 회원만 랭킹 등록·글쓰기 가능. 베타 뒤에는 구독형으로 바꿀 예정 (결제 웹훅에 Cloud Functions가 필요해 그때 Blaze 요금제로 전환)
 
 ### 8. 보안 겹 더하기 (권장)
 1. **운영자 비밀번호**: 운영자 화면 > **운영자 비밀번호**에서 12자 이상으로 바꾸기 (숫자만 써도 됨)
@@ -371,7 +410,7 @@ const firebaseConfig = {
 3. 첫 화면 아래 안내문이 "온라인 랭킹 — 모든 기기의 기록이 함께 집계됩니다."로 바뀌면 연결 완료
 
 ## 알아 둘 점
-- 무료 요금제(Spark)로 충분. 카드 등록 필요 없음.
+- 지금은 무료 요금제(Spark)로 충분. 카드 등록 필요 없음. 하루 무료량(읽기 5만·쓰기 2만)과 유료 전환 기준은 README의 '운영 비용' 참고.
 - 기존에 각 기기에 저장된 기록·글은 온라인으로 옮겨지지 않음 (온라인에서 새로 가입).
 - 예전의 접속 코드(1234) 화면은 없앴습니다. 누구나 게스트로 플레이할 수 있고, 랭킹·글쓰기는 가입 코드로 가입한 정회원만 합니다. 보안은 위 규칙이 담당 (남의 기록·글은 고치거나 지울 수 없음, 코드 사용 횟수·회원 번호는 가입할 때 함께만 바뀜).
 - 규칙을 새로 게시하기 전에 바뀐 게임을 배포하면 가입·랭킹 등록이 실패합니다. 규칙 게시 → 운영자 지정 → 가입 준비 순서로 하세요.

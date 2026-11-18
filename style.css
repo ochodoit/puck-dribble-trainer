@@ -550,6 +550,18 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .fb-item header span, .fb-item header time { font-size: 11.5px; color: var(--mute); }
 .fb-item p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fb-item em { display: block; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--red); }
+/* 의견 추첨 결과 (당첨자 목록) */
+.adm-lot-out { margin-top: 10px; font-size: 13.5px; }
+.adm-lot-out p { margin: 8px 0 4px; }
+.adm-lot { margin: 0; padding-left: 22px; columns: 2 160px; column-gap: 18px; max-height: 320px; overflow: auto; }
+.adm-lot li { break-inside: avoid; padding: 2px 0; }
+.adm-lot li span { font-size: 11.5px; color: var(--mute); }
+
+/* 내 정보: 친구 초대 (내 초대 코드) */
+.me-sec > .muted { margin: 0 0 8px; font-size: 12.5px; }
+.me-invite-code { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
+.me-invite-code b { font-family: var(--display); font-weight: 900; font-size: 22px; letter-spacing: 0.04em; }
+.me-invite .adm-out { margin-top: 8px; }
 
 /* ---------- 회원가입: 스틱 (레프트·라이트) ---------- */
 .auth-grid .field { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }

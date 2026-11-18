@@ -7,7 +7,7 @@ import { Game, MODES, PLAY_MINUTES, rankKey } from './game.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, isBetaUser, FEEDBACK_MAX, LAPSED, stickLabel } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel, LOTTERY_WINNERS, lotteryPool, drawLottery, couponUntil } from './account.js';
 import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
 import { makeFloorMapping } from './geometry.js';
 import { clock, clockNow } from './clock.js';
@@ -192,19 +192,23 @@ function forgetInvite() {
 
 const shortDate = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
 
-/** 초대 카드: 코드 상태에 따라 '베타 초대 링크예요' 등. 쓸 수 있으면 회원가입 칸을 열고 코드를 채운다 */
+/** 초대 카드: 코드 종류·상태에 따라 '오픈베타 초대 링크예요', '○○님의 초대 링크예요' 등. 쓸 수 있으면 회원가입 칸을 열고 코드를 채운다 */
 async function showInvite() {
   const card = $('#invite-card');
   card.classList.add('hidden');
   if (!app.invite || !app.account || app.account.current()) return;
   const info = await app.account.checkCode(app.invite);
-  const ok = info.status === 'ok';
+  const ok = info.status === 'ok', end = app.site?.betaEndsAt;
+  const left = info.maxUses > 0 ? `남은 자리 ${Math.max(0, info.maxUses - info.uses)}명` : '';
+  const until = end ? `정회원 기간 ${shortDate(end)}까지` : '';
+  const line = (...parts) => parts.filter(Boolean).join(' · ');
   let title, sub;
-  if (ok && info.type === 'beta') { title = '베타 초대 링크예요'; sub = info.expiresAt ? `${shortDate(info.expiresAt)}까지 가입하면 바로 정회원` : '지금 가입하면 바로 정회원'; }
-  else if (ok) { title = '정회원 초대 코드예요'; sub = '가입하면 바로 정회원이 됩니다'; }
+  if (ok && info.type === 'beta') { title = '오픈베타 초대 링크예요'; sub = line(info.expiresAt ? `${shortDate(info.expiresAt)}까지 가입하면 바로 정회원` : '지금 가입하면 바로 정회원', left); }
+  else if (ok && info.type === 'invite') { title = info.nick ? `${info.nick}님의 초대 링크예요` : '친구 초대 링크예요'; sub = line('가입하면 바로 정회원', until, left); }
+  else if (ok) { title = '정회원 초대 코드예요'; sub = line('가입하면 바로 정회원이 됩니다', until); }
   else {
-    title = info.status === 'expired' ? '마감된 링크예요' : info.status === 'error' ? codeError('error') : info.status === 'full' ? codeError('full', info) : '쓸 수 없는 코드예요';
-    sub = '게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요';
+    title = info.status === 'expired' ? '마감된 링크예요' : info.status === 'error' ? codeError('error') : info.status === 'full' ? (info.type === 'beta' ? '오픈베타 인원이 다 찼어요' : codeError('full', info)) : '쓸 수 없는 코드예요';
+    sub = '정회원 친구에게 초대 링크를 받거나, 게스트로 플레이하고 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요';
   }
   $('#invite-title').textContent = title;
   $('#invite-sub').textContent = sub;
@@ -235,7 +239,7 @@ async function onAuthSubmit(e) {
       forgetInvite();
       $('#auth-code').value = '';
       toast(`환영합니다, ${app.account.current().nick}! ${memberBadge(app.account.current())}`, 4000);
-      track('sign_up', { method: app.account.current()?.via === 'beta' ? 'beta' : 'one' });
+      track('sign_up', { method: ['beta', 'invite'].includes(app.account.current()?.via) ? app.account.current().via : 'one' });
     } else {
       await app.account.login(nick, pin);
       track('login', { method: 'nickname' });
@@ -290,13 +294,19 @@ function refreshAuthUI() {
   else $('#invite-card').classList.add('hidden');
 }
 
-/** 베타 멤버 상태 칩: 마감 전 '의견 보내고 정회원 유지', 보냈으면 '정회원 유지', 마감까지 못 보냈으면 '베타 종료' */
+/**
+ * 정회원 기간 칩: 베타 기간 중 '정회원 ○월 ○일까지 · 의견 보내고 3개월 이용권 추첨', 보냈으면 '추첨 응모 완료',
+ * 이용권 당첨 '3개월 이용권 · ○월 ○일까지', 운영자 유지 '정회원 유지', 베타가 끝났으면 '베타 종료'
+ */
 function betaChipHtml() {
+  const u = app.account?.current();
   const st = app.account?.memberState?.() || 'guest';
   const end = app.site?.betaEndsAt;
-  if (st === 'beta' && end) return ` <button type="button" class="beta-chip" data-feedback>의견 보내고 정회원 유지 · ${shortDate(end)}까지</button>`;
+  if (u?.until && (st === 'beta' || st === 'coupon')) return ` <span class="beta-chip ok">3개월 이용권 · ${shortDate(u.until)}까지</span>`;
+  if (st === 'beta' && end && u?.feedbackAt) return ` <span class="beta-chip ok">정회원 ${shortDate(end)}까지 · 이용권 추첨 응모 완료</span>`;
+  if (st === 'beta' && end) return ` <button type="button" class="beta-chip" data-feedback>정회원 ${shortDate(end)}까지 · 의견 보내고 3개월 이용권 추첨</button>`;
   if (st === 'kept' && end) return ' <span class="beta-chip ok">정회원 유지</span>';
-  if (st === 'lapsed') return ' <button type="button" class="beta-chip bad" data-feedback>베타 종료 · 정회원 유지 안 됨</button>';
+  if (st === 'lapsed') return ' <span class="beta-chip bad">베타 종료 · 정회원 기간 끝남</span>';
   return '';
 }
 /** 로그인했지만 베타가 끝나 정회원이 유지되지 않은 계정인가 (랭킹·글쓰기 막힘) */
@@ -390,7 +400,8 @@ async function renderGuestNotice(result, lapsed = false) {
     html.push('<p>이번 기록은 랭킹에 올라가지 않아요. 정회원 등급은 공식 인스타 DM으로 문의해 주세요.</p>');
   } else {
     if (r) html.push(`<p class="guest-rank"><b>정회원이었다면 지금 전체 ${r.rank}위 / ${r.total}명</b></p>`);
-    html.push('<p>플레이 영상을 인스타에 올리고 공식 계정으로 DM을 보내 주세요. 확인되면 정회원 가입 코드를 DM으로 보내 드려요.</p>');
+    html.push('<p>정회원 친구에게 초대 링크를 받으면 바로 가입할 수 있어요.</p>');
+    html.push('<p>또는 플레이 영상을 SNS(인스타 등)에 올리고, 올린 게시물 링크를 공식 인스타 DM으로 보내 주세요. 확인되면 정회원 가입 코드를 DM으로 보내 드려요.</p>');
     if (tag || sns) html.push(`<p class="guest-tags" data-ugc>${[tag && `#${esc(tag)}`, sns && `@${esc(sns)}`].filter(Boolean).join(' ')}</p>`);
     html.push('<p class="muted">보호자와 함께 해 주세요 · 얼굴 없이 판과 퍽만 나와도 괜찮아요 · 비공개 계정이면 영상이나 캡처를 DM에 함께 보내 주세요</p>');
   }
@@ -406,6 +417,7 @@ function setupMe() {
   meUI = initMe({
     $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel,
     COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin,
+    codeLabel, inviteLink, copyText,
   });
 }
 function openMe() { if (meUI) meUI.open(); }
@@ -502,7 +514,36 @@ function setupAdmin() {
       }
       return;
     }
+    if (b.dataset.act === 'coupon' || b.dataset.act === 'uncoupon') {
+      const until = b.dataset.act === 'coupon' ? couponUntil(app.site?.betaEndsAt ?? null) : null;
+      adminDo(async () => { await app.account.grantCoupon(row.dataset.uid, until); refreshAuthUI(); });
+      return;
+    }
     adminDo(async () => { await app.account.keepMember(row.dataset.uid, b.dataset.act === 'keep'); refreshAuthUI(); });
+  });
+  // 의견 추첨: 베타 종료일 전에 의견을 보낸 회원 중 n명 -> 확정하면 3개월 이용권
+  $('#adm-lot-draw').addEventListener('click', () => adminDo(async () => {
+    const pool = lotteryPool(await app.account.memberList(), app.site?.betaEndsAt ?? null);
+    if (!pool.length) throw new Error('추첨할 회원이 없습니다 (베타 종료일 전에 의견을 보낸 회원)');
+    app.lotDraft = drawLottery(pool, Number($('#adm-lot-n').value) || LOTTERY_WINNERS).map((u) => ({ id: u.id, nick: u.nick, memberNo: Number.isInteger(u.memberNo) ? u.memberNo : null }));
+  }));
+  $('#adm-lot-ok').addEventListener('click', () => {
+    const d = app.lotDraft;
+    if (!d?.length) return;
+    const until = couponUntil(app.site?.betaEndsAt ?? null);
+    if (!window.confirm(tr(`당첨자 ${d.length}명에게 3개월 이용권(${ymd(until)}까지)을 줍니다. 진행할까요?`))) return;
+    adminDo(async () => {
+      for (const w of d) await app.account.grantCoupon(w.id, until);
+      const prev = await app.account.getLottery();
+      await app.account.saveLottery({ at: Date.now(), until, winners: [...(prev?.winners || []), ...d] });
+      app.lotDraft = null;
+      refreshAuthUI();
+      toast(`당첨자 ${d.length}명에게 3개월 이용권을 줬습니다`, 4000);
+    });
+  });
+  $('#adm-lot-copy').addEventListener('click', () => {
+    const ws = app.lotWinners || [];
+    copyText(`${tr('3개월 이용권 당첨')}: ${ws.map((w) => `${w.nick}${w.memberNo != null ? ` (${memberNoLabel(w.memberNo)})` : ''}`).join(', ')}`, '당첨자 목록을 복사했습니다');
   });
   $('#adm-feedback').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-act="delete-fb"]');
@@ -561,38 +602,54 @@ function showIssued(box, c) {
 }
 
 const STATUS_LABEL = { ok: '사용 가능', off: '꺼짐', expired: '마감', full: '다 씀', missing: '-' };
-const BETA_LABEL = { kept: '유지', beta: '기다리는 중', lapsed: '유지 안 됨', member: '정회원' };
-/** 어떻게 가입했나: 베타 링크(베타 멤버) · 1회용 코드(처음부터 정회원) · 코드가 생기기 전 예전 가입(베타 멤버로 봄) */
-const joinLabel = (u) => (!u.code ? '예전 가입' : u.via === 'beta' || u.beta ? '베타 링크' : '1회용 코드');
+const BETA_LABEL = { beta: '베타 기간', kept: '유지', coupon: '이용권', lapsed: '종료' };
+/** 어떻게 가입했나: 오픈베타 링크 · 친구 초대 · 1회용 코드(SNS 인증) · 코드가 생기기 전 예전 가입 */
+const joinLabel = (u) => (!u.code ? '예전 가입' : u.via === 'beta' || u.beta ? '오픈베타 링크' : u.via === 'invite' ? '친구 초대' : '1회용 코드');
 
 /**
- * 운영자: 회원 목록(가입 경로·의견·유지 상태)과 개발자에게 온 의견.
- * 베타 기간 규칙(의견을 보내야 정회원 유지)은 베타 링크로 가입한 베타 멤버에게만 해당하고,
- * 1회용 코드로 가입한 사람은 처음부터 정회원이라 '정회원'으로 표시한다
+ * 운영자: 회원 목록(가입 경로·의견·정회원 상태)과 개발자에게 온 의견.
+ * 무료 정회원은 가입 경로와 상관없이 베타 종료일까지. 그 뒤에는 '정회원 유지'(기한 없음)와 '3개월 이용권' 회원만 정회원
  */
 async function renderAdminBeta(a) {
   const [all, fbs] = await Promise.all([a.memberList(), a.listFeedback()]);
   const end = app.site?.betaEndsAt ?? null;
   const st = all.map((u) => betaState(u, end));
   const n = (k) => st.filter((x) => x === k).length;
-  const betaN = all.filter(isBetaUser).length, oneN = all.length - betaN;
-  const sum = [`회원 ${all.length}명`, `베타 멤버 ${betaN}명`, `유지 ${n('kept')}명`, `기다리는 중 ${n('beta')}명`, `유지 안 됨 ${n('lapsed')}명`];
-  if (oneN) sum.push(`1회용 코드로 가입 ${oneN}명`);
+  const by = (label) => all.filter((u) => joinLabel(u) === label).length;
+  const sum = [`회원 ${all.length}명`, `오픈베타 링크 ${by('오픈베타 링크')}명`, `친구 초대 ${by('친구 초대')}명`, `1회용 코드 ${by('1회용 코드')}명`];
+  if (by('예전 가입')) sum.push(`예전 가입 ${by('예전 가입')}명`);
+  sum.push(`유지 ${n('kept')}명`, `이용권 ${all.filter((u) => u.until).length}명`, `종료 ${n('lapsed')}명`);
   if (!end) sum.push('종료일을 아직 정하지 않았습니다');
   $('#adm-beta-sum').textContent = sum.join(' · ');
   $('#adm-betas').innerHTML = all.length ? all.map((u, i) => {
-    const beta = st[i] !== 'member';
-    const act = !beta ? '' : u.kept ? '<button type="button" class="btn btn-ghost" data-act="unkeep">유지 취소</button>'
-      : st[i] !== 'kept' ? '<button type="button" class="btn btn-ghost" data-act="keep">정회원 유지</button>' : '';
+    const keep = u.kept ? '<button type="button" class="btn btn-ghost" data-act="unkeep">유지 취소</button>' : '<button type="button" class="btn btn-ghost" data-act="keep">정회원 유지</button>';
+    const coupon = u.until ? '<button type="button" class="btn btn-ghost" data-act="uncoupon">이용권 취소</button>' : '<button type="button" class="btn btn-ghost" data-act="coupon">3개월 이용권</button>';
     const del = '<button type="button" class="btn btn-ghost btn-del" data-act="delete">삭제</button>';
-    return `<tr data-uid="${esc(u.id)}" data-nick="${esc(u.nick)}" data-beta="${beta ? 1 : 0}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(u.memberNo)}</td><td data-ugc>${esc(u.nick)}</td>
-      <td>${joinLabel(u)}</td><td>${u.feedbackAt ? ymd(u.feedbackAt) : '-'}</td><td>${BETA_LABEL[st[i]] || ''}</td><td class="adm-acts">${act}${del}</td></tr>`;
+    const state = `${BETA_LABEL[st[i]] || ''}${u.until ? ` · ${st[i] === 'coupon' ? '' : '이용권 '}${ymd(u.until)}까지` : ''}`;
+    return `<tr data-uid="${esc(u.id)}" data-nick="${esc(u.nick)}" data-state="${st[i]}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(u.memberNo)}</td><td data-ugc>${esc(u.nick)}</td>
+      <td>${joinLabel(u)}</td><td>${u.feedbackAt ? ymd(u.feedbackAt) : '-'}</td><td>${state}</td><td class="adm-acts">${keep}${coupon}${del}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="muted">회원이 없습니다</td></tr>';
   $('#adm-feedback').innerHTML = fbs.length ? fbs.map((f) => `<article class="fb-item" data-uid="${esc(f.uid)}" data-nick="${esc(f.nick)}">
     <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time><button type="button" class="btn btn-ghost btn-del" data-act="delete-fb">삭제</button></header>
     ${f.good ? `<p><em>좋았던 점</em><span data-ugc>${esc(f.good)}</span></p>` : ''}${f.fix ? `<p><em>고쳤으면 하는 점</em><span data-ugc>${esc(f.fix)}</span></p>` : ''}</article>`).join('')
     : '<p class="muted">아직 온 의견이 없습니다</p>';
   return all;
+}
+
+/** 운영자: 의견 추첨 · 3개월 이용권 (추첨 대상 수, 추첨 결과(확정 전), 확정된 당첨자) */
+async function renderAdminLottery(a, members) {
+  const end = app.site?.betaEndsAt ?? null;
+  const pool = lotteryPool(members, end);
+  const lot = await a.getLottery().catch(() => null);
+  app.lotWinners = lot?.winners || [];
+  $('#adm-lot-sum').textContent = [`추첨 대상 ${pool.length}명`, `이용권 ${members.filter((u) => u.until).length}명`, `지금 확정하면 ${ymd(couponUntil(end))}까지`].join(' · ');
+  const list = (ws) => '<ol class="adm-lot">' + ws.map((w) => `<li><span>${memberNoLabel(w.memberNo)}</span> <b data-ugc>${esc(w.nick)}</b></li>`).join('') + '</ol>';
+  const out = [];
+  if (app.lotDraft?.length) out.push(`<p><b>추첨 결과 ${app.lotDraft.length}명 · 아직 확정 전</b></p>${list(app.lotDraft)}`);
+  if (lot?.winners?.length) out.push(`<p><b>확정된 당첨자 ${lot.winners.length}명</b> · ${ymd(lot.at)} · ${ymd(lot.until)}까지</p>${list(lot.winners)}`);
+  $('#adm-lot-out').innerHTML = out.join('') || '<p class="muted">아직 추첨하지 않았습니다</p>';
+  $('#adm-lot-ok').classList.toggle('hidden', !app.lotDraft?.length);
+  $('#adm-lot-copy').classList.toggle('hidden', !lot?.winners?.length);
 }
 
 /**
@@ -607,7 +664,7 @@ async function renderAdminStats(a, members) {
     const hm = (sec) => { const m = Math.round(sec / 60), h = Math.floor(m / 60), mm = m % 60; return h ? `${h}시간 ${mm}분` : `${mm}분`; };
     const tile = (v, label, sub) => '<div class="me-stat"><b>' + v + '</b><span>' + label + '</span>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>';
     box.innerHTML = [
-      tile(s.members.total, '전체 회원', `베타 ${s.members.beta} · 1회용 ${s.members.one}`),
+      tile(s.members.total, '전체 회원', `오픈베타 ${s.members.beta} · 초대 ${s.members.invite} · 1회용 ${s.members.one}`),
       tile(s.members.d7, '최근 7일 가입', `오늘 ${s.members.today} · 30일 ${s.members.d30}`),
       tile(s.attended.today, '오늘 출석한 회원', `7일 ${s.attended.d7} · 30일 ${s.attended.d30}`),
       tile(s.games.today, '오늘 회원 판 수', `7일 ${s.games.d7} · 누적 ${s.games.total}`),
@@ -656,6 +713,7 @@ async function renderAdmin() {
       app.adminConfigLoaded = true;
     }
     const members = await renderAdminBeta(a);
+    await renderAdminLottery(a, members);
     await renderAdminStats(a, members);
     const rows = await a.listCodes();
     $('#adm-codes').innerHTML = rows.length ? rows.map((c) => {
@@ -663,7 +721,7 @@ async function renderAdmin() {
       const exp = c.type === 'beta'
         ? `<input type="date" data-act="expiry" value="${c.expiresAt ? ymd(c.expiresAt) : ''}" aria-label="마감일" />`
         : (c.expiresAt ? ymd(c.expiresAt) : '-');
-      return `<tr data-code="${esc(c.code)}" class="${st === 'ok' ? '' : 'dim'}"><td><b>${esc(codeLabel(c.code))}</b></td><td>${c.type === 'beta' ? '베타' : '1회용'}</td>
+      return `<tr data-code="${esc(c.code)}" class="${st === 'ok' ? '' : 'dim'}"><td><b>${esc(codeLabel(c.code))}</b></td><td>${c.type === 'beta' ? '오픈베타' : '1회용'}</td>
         <td>${c.uses || 0}/${c.maxUses ? c.maxUses : '∞'}</td><td>${exp}</td><td data-ugc>${esc(c.note || '')}</td><td>${STATUS_LABEL[st]}</td>
         <td class="adm-acts"><button type="button" class="btn btn-ghost" data-act="code">코드 복사</button><button type="button" class="btn btn-ghost" data-act="copy">링크 복사</button><button type="button" class="btn btn-ghost" data-act="${c.off ? 'on' : 'off'}">${c.off ? '켜기' : '끄기'}</button><button type="button" class="btn btn-ghost btn-del" data-act="delete">삭제</button></td></tr>`;
     }).join('') : '<tr><td colspan="7" class="muted">아직 만든 코드가 없습니다</td></tr>';
@@ -1537,7 +1595,7 @@ function showResult(result, isBest) {
 
 // =============== 커뮤니티 ===============
 // =============== 개발자에게 (커뮤니티) ===============
-// 한 사람당 하나, 다시 보내면 고쳐짐. 베타 멤버는 베타 종료일 전에 보내면 정회원 등급이 유지된다
+// 한 사람당 하나, 다시 보내면 고쳐짐. 베타 종료일 전에 보내면 3개월 이용권 추첨 대상 (30명, 운영자 화면에서 추첨)
 function setupFeedback() {
   const form = $('#fb-form');
   ['fb-good', 'fb-fix'].forEach((id) => $(`#${id}`).addEventListener('input', () => countFeedback(id)));
@@ -1550,13 +1608,13 @@ function setupFeedback() {
     if (!app.account?.current()) return;
     const err = $('#fb-error');
     err.classList.add('hidden');
-    const before = app.account.memberState();
+    const u = app.account.current();
+    const entered = !u.feedbackAt && !u.until && app.account.memberState() === 'beta'; // 처음 보냄 = 추첨 응모
     $('#fb-submit').disabled = true;
     try {
       await app.account.sendFeedback({ good: $('#fb-good').value, fix: $('#fb-fix').value });
       form.classList.add('hidden');
-      const kept = before === 'beta' && app.account.memberState() === 'kept';
-      toast(kept ? '보내 주셔서 고마워요! 베타가 끝나도 정회원 등급이 유지됩니다' : '보내 주셔서 고마워요!', 4000);
+      toast(entered ? '보내 주셔서 고마워요! 3개월 이용권 추첨에 응모되었어요' : '보내 주셔서 고마워요!', 4000);
       refreshAuthUI();
     } catch (ex) {
       err.textContent = ex.message || String(ex);
@@ -1573,10 +1631,11 @@ async function openFeedback() {
   await community.open();
   const st = app.account.memberState(), end = app.site?.betaEndsAt;
   $('#fb-intro').textContent = {
-    beta: end ? `베타 기간(${shortDate(end)}까지)이 끝나기 전에 보내 주시면 정회원 등급이 그대로 유지돼요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.`
-      : '베타 멤버가 의견을 보내 주시면 베타가 끝나도 정회원 등급이 유지돼요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.',
-    kept: '정회원 등급이 유지됩니다. 언제든 고쳐서 다시 보낼 수 있어요.',
-    lapsed: '베타 기간이 끝나 정회원 등급은 유지되지 않았어요. 의견은 계속 보낼 수 있고, 등급은 공식 인스타 DM으로 문의해 주세요.',
+    beta: end ? `베타 기간(${shortDate(end)}까지)에 개선할 점이나 오류를 보내 주신 분 중 30명을 추첨해 3개월 이용권을 드려요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.`
+      : '개선할 점이나 오류를 보내 주신 분 중 30명을 추첨해 3개월 이용권을 드려요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.',
+    kept: '좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요. 언제든 고쳐서 다시 보낼 수 있어요.',
+    coupon: '3개월 이용권으로 정회원이에요. 의견은 언제든 고쳐서 다시 보낼 수 있어요.',
+    lapsed: '베타 기간이 끝나 정회원 기간이 끝났어요. 의견은 계속 보낼 수 있고, 등급은 공식 인스타 DM으로 문의해 주세요.',
   }[st] || '좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.';
   $('#fb-error').classList.add('hidden');
   let prev = null;

@@ -2,11 +2,12 @@
 // 별명 -> 가상 이메일(u-<hex>@<이 프로젝트의 Firebase 도메인>), 6자리 비밀번호 -> Firebase Auth 비밀번호.
 // 예전 계정은 u-<hex>@puck-trainer.app (로그인할 때 두 번째로 시도하고, 되면 새 주소로 옮겨 본다).
 // 컬렉션: users/{uid} 프로필(= 정회원), nicks/{nickLower} 별명 고유성, scores_{mode}/{uid} 모드별 최고 기록,
-//         codes/{CODE} 가입 코드, meta/members 회원 수(정회원 번호), config/site 게스트 안내·베타 종료일, admins/{uid} 운영자(콘솔에서 만듦),
-//         feedback/{uid} 개발자에게 (베타 마감 전에 보내면 정회원 유지)
+//         codes/{CODE} 가입 코드(오픈베타·1회용·회원의 초대 코드), meta/members 회원 수(정회원 번호), config/site 게스트 안내·베타 종료일,
+//         config/lottery 의견 추첨 결과, admins/{uid} 운영자(콘솔에서 만듦),
+//         feedback/{uid} 개발자에게 (베타 종료일 전에 보내면 3개월 이용권 추첨 대상)
 import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, rankAmong, NOT_READY,
-  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, rankSummaryOf, validateEdit,
+  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, rankSummaryOf, validateEdit, INVITE_MAX, COUPON_MONTHS,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
 
@@ -45,7 +46,8 @@ export class FirebaseAccountStore {
     let admin = false, feedbackAt = null;
     try { admin = (await this.F.getDoc(this._doc('admins', uid))).exists(); } catch { admin = false; }
     try { const fb = await this.F.getDoc(this._doc('feedback', uid)); feedbackAt = fb.exists() ? toMs(fb.data().at) : null; } catch { feedbackAt = null; }
-    this.user = { id: uid, ...snap.data(), feedbackAt, admin };
+    const d = snap.data();
+    this.user = { id: uid, ...d, until: toMs(d.until), feedbackAt, admin };
     return this.user;
   }
 
@@ -57,8 +59,34 @@ export class FirebaseAccountStore {
     if (!CODE_RE.test(key)) return { code: key, status: 'format' };
     try {
       const snap = await this.F.getDoc(this._doc('codes', key));
-      return codeInfo(key, snap.exists() ? snap.data() : null);
+      return codeInfo(key, snap.exists() ? snap.data() : null, Date.now(), this.site.betaEndsAt);
     } catch { return { code: key, status: 'error' }; }
+  }
+
+  /**
+   * 내 초대 코드 (3명까지). 없으면 처음 한 번 만든다 — 정회원(베타 기간 중·유지·이용권)만.
+   * 코드 문서와 프로필의 invite 칸을 한 묶음으로 쓴다 (규칙: 한 사람당 하나, 3명, 추가 없음)
+   */
+  async myInvite() {
+    if (!this.user) return null;
+    const uid = this.user.id, end = this.site.betaEndsAt;
+    if (this.user.invite) {
+      const s = await this.F.getDoc(this._doc('codes', this.user.invite));
+      if (s.exists()) return codeInfo(this.user.invite, s.data(), Date.now(), end);
+    }
+    if (!isActiveMember(this.memberState())) return null;
+    for (let i = 0; i < 6; i++) {
+      const code = makeCode(), ref = this._doc('codes', code);
+      if ((await this.F.getDoc(ref)).exists()) continue;
+      const data = { type: 'invite', uses: 0, maxUses: INVITE_MAX, expiresAt: null, off: false, note: '', createdAt: Date.now(), by: uid, nick: this.user.nick };
+      const b = this.F.writeBatch(this.db);
+      b.set(ref, data);
+      b.update(this._doc('users', uid), { invite: code });
+      await b.commit();
+      this.user.invite = code;
+      return codeInfo(code, data, Date.now(), end);
+    }
+    throw new Error('코드를 만들지 못했습니다. 다시 시도하세요');
   }
 
   /** 가입 = 정회원. 쓸 수 있는 코드가 있어야 하며, 코드 사용·회원 번호·프로필·별명을 한 트랜잭션으로 쓴다 (규칙이 함께 검사) */
@@ -84,7 +112,7 @@ export class FirebaseAccountStore {
         if (n.exists()) throw new Error('이미 사용 중인 별명입니다');
         if (!m.exists()) throw new Error(NOT_READY);
         const cd = c.exists() ? c.data() : null;
-        const st = codeStatus(cd);
+        const st = codeStatus(cd, Date.now(), this.site.betaEndsAt);
         if (st !== 'ok') throw new Error(codeError(st, cd));
         const no = (m.data().count || 0) + 1, now = Date.now();
         const p = {
@@ -232,10 +260,12 @@ export class FirebaseAccountStore {
     throw new Error('코드를 만들지 못했습니다. 다시 시도하세요');
   }
 
+  /** 운영자가 만든 코드(오픈베타·1회용)만. 회원들의 초대 코드는 넣지 않는다 (단일 필드 색인만 쓰도록 정렬은 화면에서) */
   async listCodes() {
     this._needAdmin();
-    const snap = await this.F.getDocs(this.F.query(this.F.collection(this.db, 'codes'), this.F.orderBy('createdAt', 'desc'), this.F.limit(100)));
-    return snap.docs.map((d) => ({ code: d.id, ...d.data(), expiresAt: toMs(d.data().expiresAt), lastAt: toMs(d.data().lastAt) }));
+    const snap = await this.F.getDocs(this.F.query(this.F.collection(this.db, 'codes'), this.F.where('type', 'in', ['beta', 'one']), this.F.limit(300)));
+    return snap.docs.map((d) => ({ code: d.id, ...d.data(), expiresAt: toMs(d.data().expiresAt), lastAt: toMs(d.data().lastAt) }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 100);
   }
 
   async updateCode(code, patch) {
@@ -329,7 +359,7 @@ export class FirebaseAccountStore {
       this.listFeedback(),
     ]);
     const at = new Map(fb.map((f) => [f.uid, f.at]));
-    return us.docs.map((d) => ({ id: d.id, ...d.data(), feedbackAt: at.get(d.id) ?? null })).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
+    return us.docs.map((d) => ({ id: d.id, ...d.data(), until: toMs(d.data().until), feedbackAt: at.get(d.id) ?? null })).sort((a, b) => (a.memberNo || 0) - (b.memberNo || 0));
   }
 
   /** 운영자: 베타 멤버만 (베타 링크로 가입 또는 예전 계정) */
@@ -371,11 +401,33 @@ export class FirebaseAccountStore {
     await b.commit();
   }
 
-  /** 운영자: 의견을 못 보낸 베타 멤버도 정회원으로 유지 */
+  /** 운영자: 베타가 끝나도 정회원으로 유지 (기한 없음) */
   async keepMember(uid, kept = true) {
     this._needAdmin();
     await this.F.updateDoc(this._doc('users', uid), { kept: !!kept });
     if (this.user?.id === uid) this.user.kept = !!kept;
     return { id: uid, kept: !!kept };
+  }
+
+  /** 운영자: 이용권 주기(until = 기한 ms) / 거두기(until = null). 규칙이 베타 종료 뒤 until 까지 정회원으로 본다 */
+  async grantCoupon(uid, until) {
+    this._needAdmin();
+    const patch = { until: until ? this.F.Timestamp.fromMillis(until) : null, coupon: until ? `${COUPON_MONTHS}m` : null };
+    await this.F.updateDoc(this._doc('users', uid), patch);
+    if (this.user?.id === uid) Object.assign(this.user, { until: until ?? null, coupon: patch.coupon });
+    return { id: uid, until: until ?? null };
+  }
+
+  /** 의견 추첨 결과 config/lottery (공개: 당첨 발표용 별명·번호만) */
+  async getLottery() {
+    const snap = await this.F.getDoc(this._doc('config', 'lottery'));
+    if (!snap.exists()) return null;
+    const d = snap.data();
+    return { ...d, at: toMs(d.at), until: toMs(d.until) };
+  }
+  async saveLottery(data) {
+    this._needAdmin();
+    await this.F.setDoc(this._doc('config', 'lottery'), data);
+    return data;
   }
 }

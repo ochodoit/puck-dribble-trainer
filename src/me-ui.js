@@ -1,13 +1,14 @@
-// 내 정보 화면: 프로필(수정)·회원 등급, 출석 달력, 누적 훈련, 게임별 기록(최고·플레이 수·순위·최근 10판), 커뮤니티 활동.
+// 내 정보 화면: 프로필(수정)·회원 등급, 친구 초대(내 초대 코드 3명), 출석 달력, 누적 훈련, 게임별 기록(최고·플레이 수·순위·최근 10판), 커뮤니티 활동.
 // 데이터는 계정 저장소(account.js / account-firebase.js)의 getActivity·myScores·rankSummary 와 커뮤니티 저장소에서.
 import { attendanceSummary, monthGrid, dayKey, keyInfo, sparkPoints, hoursMinutes } from './activity.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
-const STATE_LABEL = { member: '정회원', kept: '베타 멤버 · 정회원 유지', lapsed: '베타 종료 · 정회원 유지 안 됨' };
+const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
 
 /**
  * deps: { $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel,
- *         COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin }
+ *         COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin,
+ *         codeLabel, inviteLink, copyText }
  */
 export function initMe(deps) {
   const { $, $$, esc, tr, open, close, toast, app } = deps;
@@ -74,9 +75,10 @@ export function initMe(deps) {
 
   function renderProfile() {
     const u = app.account.current();
-    const st = app.account.memberState ? app.account.memberState() : 'member';
+    const st = app.account.memberState ? app.account.memberState() : 'beta';
     const end = app.site?.betaEndsAt;
-    const state = st === 'beta' ? (end ? `베타 멤버 · ${deps.shortDate(end)}까지 의견을 보내면 정회원 유지` : '베타 멤버') : STATE_LABEL[st] || '';
+    const state = st === 'beta' ? (end ? `정회원 · ${deps.shortDate(end)}까지` : '정회원')
+      : st === 'coupon' ? `3개월 이용권 · ${deps.shortDate(u.until)}까지` : STATE_LABEL[st] || '';
     const jersey = u.number != null ? ' <span class="jersey">' + deps.jerseyLabel(u.number) + '</span>' : '';
     const age = `${u.ageGroup} (${u.age}세)`;
     const facts = [esc(deps.countryLabel(u.country)), esc(age), u.stick ? deps.stickLabel(u.stick) : ''].filter(Boolean).join(' · ');
@@ -180,6 +182,29 @@ export function initMe(deps) {
     box.innerHTML = `<h4>내가 쓴 글 ${mine.length}</h4>${mineHtml}<h4>도전한 코스 ${tried.length}</h4>${triedHtml}`;
   }
 
+  /** 친구 초대: 내 초대 코드(3명까지, 추가 없음). 처음 열 때 만든다 (정회원만) */
+  async function renderInvite() {
+    const box = $('#me-invite');
+    box.innerHTML = '<p class="muted">' + esc(tr('불러오는 중…')) + '</p>';
+    let inv = null, err = null;
+    try { inv = app.account.myInvite ? await app.account.myInvite() : null; } catch (e) { err = e.message || String(e); }
+    if (err) { box.innerHTML = '<p class="error">' + esc(err) + '</p>'; return; }
+    if (!inv) { box.innerHTML = '<p class="muted">' + esc(tr('베타 기간이 끝나 초대 코드를 만들 수 없어요')) + '</p>'; return; }
+    const left = Math.max(0, inv.maxUses - inv.uses), link = deps.inviteLink(inv.code);
+    const state = inv.status === 'ok' ? `${inv.uses}/${inv.maxUses}명 가입 · 남은 자리 ${left}명`
+      : inv.status === 'full' ? `${inv.maxUses}명 모두 가입했어요` : '베타 기간이 끝나 쓸 수 없는 코드예요';
+    box.innerHTML = `<div class="me-invite-code"><b>${esc(deps.codeLabel(inv.code))}</b> <span class="${inv.status === 'ok' ? '' : 'muted'}">${esc(state)}</span></div>`
+      + (inv.status === 'ok' ? `<div class="adm-out"><input type="text" readonly value="${esc(link)}" aria-label="초대 링크" />`
+        + '<button type="button" class="btn" data-inv="link">링크 복사</button><button type="button" class="btn" data-inv="code">코드 복사</button>'
+        + (navigator.share ? '<button type="button" class="btn btn-primary" data-inv="share">공유</button>' : '') + '</div>' : '');
+    box.querySelector('input')?.addEventListener('focus', (e) => e.target.select());
+    box.querySelector('[data-inv="link"]')?.addEventListener('click', () => deps.copyText(link));
+    box.querySelector('[data-inv="code"]')?.addEventListener('click', () => deps.copyText(deps.codeLabel(inv.code), '코드를 복사했습니다'));
+    box.querySelector('[data-inv="share"]')?.addEventListener('click', () => {
+      navigator.share({ title: tr('퍽 드리블 트레이너'), text: tr('퍽 드리블 트레이너 정회원 초대 링크예요. 이 링크로 가입하면 바로 정회원!'), url: link }).catch(() => {});
+    });
+  }
+
   async function render() {
     const u = app.account?.current();
     $('#me-guest').classList.toggle('hidden', !!u);
@@ -187,6 +212,7 @@ export function initMe(deps) {
     if (!u) return;
     $('#me-edit').classList.add('hidden');
     renderProfile();
+    renderInvite();
     view.act = null;
     renderAttendance(); renderTotals();
     try { view.act = await app.account.getActivity(); } catch { view.act = null; }

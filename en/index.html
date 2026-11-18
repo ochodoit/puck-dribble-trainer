@@ -402,7 +402,7 @@
       </div>
     </div>
 
-    <!-- 내 정보: 프로필·회원 등급, 출석, 누적 훈련, 게임별 기록, 커뮤니티 활동 -->
+    <!-- 내 정보: 프로필·회원 등급, 친구 초대, 출석, 누적 훈련, 게임별 기록, 커뮤니티 활동 -->
     <div id="panel-me" class="panel modal hidden">
       <div class="modal-card me-card">
         <header><h2>My Info</h2><button class="btn btn-ghost btn-close" data-close="panel-me">Close</button></header>
@@ -430,6 +430,11 @@
               <p id="me-edit-msg" class="error hidden"></p>
               <div class="row"><button type="submit" id="me-edit-save" class="btn btn-primary">Save</button><button type="button" id="me-edit-cancel" class="btn btn-ghost">Cancel</button></div>
             </form>
+          </section>
+          <section class="me-sec">
+            <h3>Friend invite</h3>
+            <p class="muted">Up to 3 friends can join as members right away with your invite link. No extra codes are given.</p>
+            <div id="me-invite" class="me-invite"></div>
           </section>
           <section class="me-sec">
             <h3>Attendance</h3>
@@ -461,7 +466,7 @@
       </div>
     </div>
 
-    <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견 -->
+    <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견·의견 추첨 -->
     <div id="panel-admin" class="panel modal hidden">
       <div class="modal-card admin">
         <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">Close</button></header>
@@ -495,7 +500,7 @@
         </section>
         <section class="adm-sec">
           <h3>One-time code</h3>
-          <p class="muted">DM the code (or link) to a guest whose Instagram play post you checked. Only one person can use it.</p>
+          <p class="muted">Send the code (or link) to a guest whose play video link you checked by DM. Only one person can use it.</p>
           <div class="adm-row">
             <input id="adm-one-note" type="text" maxlength="60" placeholder="Note (e.g. Instagram ID)" aria-label="Note" />
             <button type="button" id="adm-one" class="btn btn-primary">Create</button>
@@ -503,8 +508,8 @@
           <div id="adm-one-out" class="adm-out hidden"></div>
         </section>
         <section class="adm-sec">
-          <h3>Beta link</h3>
-          <p class="muted">Many people sign up with the same link. It closes automatically after the deadline.</p>
+          <h3>Open beta link</h3>
+          <p class="muted">Many people sign up with the same link (e.g. 100 people until Dec 31). It closes automatically after the deadline or once it is full.</p>
           <div class="adm-row">
             <label>Deadline<input id="adm-beta-date" type="date" /></label>
             <label>Max sign-ups<input id="adm-beta-max" type="number" min="0" inputmode="numeric" placeholder="0 = no limit" /></label>
@@ -515,7 +520,7 @@
         </section>
         <section class="adm-sec">
           <h3>Guest notice</h3>
-          <p class="muted">How guests get a member code, shown on their result screen: post a play video on Instagram and DM the official account.</p>
+          <p class="muted">How guests become members, shown on their result screen: sign up with a member friend's invite link, or post a play video on social media and DM the link to our official Instagram.</p>
           <div class="adm-row">
             <label>Official Instagram account<input id="adm-sns" type="text" maxlength="60" placeholder="e.g. puck.official" /></label>
             <label>Hashtag<input id="adm-hashtag" type="text" maxlength="40" placeholder="e.g. puckdribblechallenge" /></label>
@@ -524,7 +529,7 @@
         </section>
         <section class="adm-sec">
           <h3>Beta period</h3>
-          <p class="muted">Only beta members who send feedback with [To the developer] in Community by the end date stay members. Others can no longer post scores or write after the end date. Members who joined with a one-time code are full members from the start, so the beta period does not apply to them.</p>
+          <p class="muted">Free membership lasts until the end date, whichever way members joined (open beta link, friend invite or one-time code). From the next day they can no longer post scores or write; only members you keep (no end) and 3-month pass holders stay members. Friend invite codes also close on the end date.</p>
           <div class="adm-row">
             <label>Beta end date<input id="adm-beta-end" type="date" /></label>
             <button type="button" id="adm-save-beta-end" class="btn">Save</button>
@@ -535,6 +540,18 @@
         <section class="adm-sec">
           <h3>Feedback to the developer</h3>
           <div id="adm-feedback" class="adm-feedback"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>Feedback draw · 3-month pass</h3>
+          <p class="muted">Randomly picks from members who sent feedback with [To the developer] before the beta end date (excluding pass holders). Once confirmed, winners stay members for 3 months from the beta end date (or from today if it has passed).</p>
+          <p id="adm-lot-sum" class="muted"></p>
+          <div class="adm-row">
+            <label>Winners<input id="adm-lot-n" type="number" min="1" max="500" inputmode="numeric" value="30" /></label>
+            <button type="button" id="adm-lot-draw" class="btn">Draw</button>
+            <button type="button" id="adm-lot-ok" class="btn btn-primary hidden">Confirm winners (give passes)</button>
+            <button type="button" id="adm-lot-copy" class="btn btn-ghost hidden">Copy winner list</button>
+          </div>
+          <div id="adm-lot-out" class="adm-lot-out"></div>
         </section>
         <section class="adm-sec">
           <h3>Codes</h3>

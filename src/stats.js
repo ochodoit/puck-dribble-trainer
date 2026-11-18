@@ -22,7 +22,7 @@ export function memberStats(members = [], acts = [], now = Date.now(), days = 14
   const today = dayKey(now);
   const w7 = new Set(lastDays(7, now)), w30 = new Set(lastDays(30, now));
   const joins = members.map(joinDay), joinsBy = countBy(joins);
-  const beta = members.filter(isBetaUser).length;
+  const beta = members.filter(isBetaUser).length, invite = members.filter((u) => u.via === 'invite').length;
   const A = acts.map((a) => cleanActivity(a, a?.uid));
   const attended = (set) => A.filter((a) => Object.keys(a.days).some((k) => set.has(k))).length;
   const games = (set) => A.reduce((s, a) => s + Object.entries(a.days).reduce((t, [k, v]) => t + (set.has(k) ? v.n : 0), 0), 0);
@@ -30,7 +30,7 @@ export function memberStats(members = [], acts = [], now = Date.now(), days = 14
   for (const a of A) for (const [m, n] of Object.entries(a.totals.modes)) modes[m] = (modes[m] || 0) + n;
   const ages = countBy(members.map((u) => u.ageGroup)), countries = countBy(members.map((u) => u.country));
   return {
-    members: { total: members.length, beta, one: members.length - beta, today: joinsBy.get(today) || 0,
+    members: { total: members.length, beta, invite, one: members.length - beta - invite, today: joinsBy.get(today) || 0,
       d7: joins.filter((k) => w7.has(k)).length, d30: joins.filter((k) => w30.has(k)).length },
     attended: { today: attended(new Set([today])), d7: attended(w7), d30: attended(w30) },
     games: { total: A.reduce((s, a) => s + a.totals.games, 0), today: games(new Set([today])), d7: games(w7), d30: games(w30),

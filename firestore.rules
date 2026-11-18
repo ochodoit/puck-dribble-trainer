@@ -7,6 +7,8 @@ rules_version = '2';
 //  3) 개인정보: 프로필(나이·가입 코드)은 본인과 운영자만 읽는다. 랭킹에는 화면에 보이는 칸만 남는다
 //  4) 정리: 운영자는 글·도전 기록·랭킹 기록·의견을 지울 수 있다
 //  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간)
+//  6) 정회원 기간: 무료 정회원은 베타 종료일까지. 그 뒤는 운영자가 유지(kept)했거나 이용권 기한(until)이 남은 계정만
+//  7) 초대 코드: 정회원 한 사람당 하나, 3명까지, 추가 없음 (프로필의 invite 칸과 한 묶음으로 한 번만 만든다)
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -22,15 +24,16 @@ service cloud.firestore {
       return exists(cp) ? get(cp).data.get('betaEndsAt', null) : null;
     }
     // 정회원인가 (u = 내 프로필). 프로필은 가입 코드로만 만들 수 있다
-    // 베타 멤버는 베타 종료일(config/site.betaEndsAt)이 지나면, 그 전에 [개발자에게] 의견을 보냈거나 운영자가 유지(kept)한 경우만 정회원
+    // 무료 정회원은 가입 경로(오픈베타·초대·1회용 코드)와 상관없이 베타 종료일(config/site.betaEndsAt)까지.
+    // 그 뒤에는 운영자가 유지(kept)한 계정, 이용권 기한(until, 운영자가 줌)이 남은 계정만 정회원
     function activeMember(u) {
-      return !(u.get('beta', false) == true || !('code' in u))
-        || u.get('kept', false) == true
-        || stillBeta(betaEnd());
+      return u.get('kept', false) == true
+        || (u.get('until', null) is timestamp && request.time < u.until)
+        || betaOpen();
     }
-    function stillBeta(end) {
-      let fp = /databases/$(database)/documents/feedback/$(request.auth.uid);
-      return end == null || request.time < end || (exists(fp) && get(fp).data.at < end);
+    function betaOpen() {
+      let end = betaEnd();
+      return end == null || request.time < end;
     }
     function isMember() {
       return request.auth != null && activeMember(me());
@@ -96,10 +99,23 @@ service cloud.firestore {
     match /admins/{uid} {
       allow get: if request.auth != null && request.auth.uid == uid;
     }
+    // 내 초대 코드 만들기: 지금 정회원이고, 아직 초대 코드가 없고, 같은 묶음에서 내 프로필의 invite 칸이 이 코드를 가리킨다
+    function inviteOwnerOk(d, code) {
+      let u = me();
+      return activeMember(u) && !('invite' in u) && d.nick == u.nick
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('invite', null) == code;
+    }
     // 가입 코드: 코드를 아는 사람만 그 코드 하나를 읽을 수 있다 (목록은 운영자만)
     match /codes/{code} {
       allow get: if true;
       allow list, delete: if isAdmin();
+      // 정회원: 내 초대 코드 (3명까지, 마감·메모 없음, 한 사람당 하나). 만든 뒤에는 운영자만 고친다
+      allow create: if request.auth != null && code.matches('^[2-9A-HJKMNP-Z]{8}$')
+        && request.resource.data.keys().hasOnly(['type', 'uses', 'maxUses', 'expiresAt', 'off', 'note', 'createdAt', 'by', 'nick'])
+        && request.resource.data.type == 'invite' && request.resource.data.uses == 0 && request.resource.data.maxUses == 3
+        && request.resource.data.off == false && request.resource.data.expiresAt == null && request.resource.data.note == ''
+        && request.resource.data.createdAt is number && request.resource.data.by == request.auth.uid
+        && inviteOwnerOk(request.resource.data, code);
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(['type', 'uses', 'maxUses', 'expiresAt', 'off', 'note', 'createdAt', 'by'])
         && request.resource.data.type in ['beta', 'one']
@@ -124,7 +140,7 @@ service cloud.firestore {
         && request.resource.data.count == resource.data.count + 1
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.memberNo == request.resource.data.count;
     }
-    // 사이트 설정: 게스트 안내(공식 인스타 계정, 해시태그), 베타 종료일(betaEndsAt)
+    // 사이트 설정: site = 게스트 안내(공식 인스타 계정, 해시태그)·베타 종료일(betaEndsAt), lottery = 의견 추첨 결과(당첨자 별명·번호)
     match /config/{id} {
       allow read: if true;
       allow write: if isAdmin();
@@ -143,12 +159,19 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup', 'stick'])
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age', 'ageGroup'])
           || request.resource.data.ageGroup == ageGroupFor(request.resource.data.age));
-      // 운영자: 기존 가입자 정리 (회원 번호·베타 표시), 의견을 못 보낸 베타 멤버도 정회원 유지(kept)
-      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberNo', 'beta', 'kept']);
+      // 본인: 내 초대 코드를 처음 한 번 연결 (새로 만드는 코드 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invite'])
+        && !('invite' in resource.data) && request.resource.data.invite is string
+        && !exists(/databases/$(database)/documents/codes/$(request.resource.data.invite))
+        && getAfter(/databases/$(database)/documents/codes/$(request.resource.data.invite)).data.by == uid;
+      // 운영자: 기존 가입자 정리 (회원 번호·베타 표시), 베타가 끝나도 정회원 유지(kept), 이용권 기한(until)·종류(coupon)
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberNo', 'beta', 'kept', 'until', 'coupon'])
+        && (request.resource.data.get('until', null) == null || request.resource.data.until is timestamp);
       allow delete: if isAdmin();
     }
     // 개발자에게: 가입한 사람이 한 사람당 문서 하나. 본인과 운영자만 읽는다
-    // 처음 보낸 시각(at)은 서버 시간으로 남고 고쳐도 바뀌지 않는다 (베타 마감 전에 보냈는지 판단)
+    // 처음 보낸 시각(at)은 서버 시간으로 남고 고쳐도 바뀌지 않는다 (베타 종료일 전에 보냈는지 = 3개월 이용권 추첨 대상)
     function validFeedback(d, uid) {
       let u = me();
       return d.keys().hasOnly(['uid', 'nick', 'memberNo', 'good', 'fix', 'updatedAt', 'at'])

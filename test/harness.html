@@ -17,7 +17,7 @@
   import { makeFloorMapping } from '../src/geometry.js';
   import { memberStats, lastDays } from '../src/stats.js';
   import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
-  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit } from '../src/account.js';
+  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit, addMonths, couponUntil, lotteryPool, drawLottery, INVITE_MAX, codeInfo } from '../src/account.js';
   import { addActivity, cleanActivity, streak, attendanceSummary, monthGrid, keyInfo, dayKey, sparkPoints, RECENT_MAX } from '../src/activity.js';
   import { siteAllowed, isDevHost, OFFICIAL_URL } from '../src/guard.js';
   import { decideIdle, stepChoice, stepDwell, choiceSide, inCardCore, CARD_INSET, CHOICE_HOLD_S } from '../src/idle-logic.js';
@@ -706,27 +706,39 @@
         && after === 'test123:1:true,Old2:2:true,Old3:3:true' && memberBadge(la.current()) === '베타 멤버 No.0001' && again.assigned === 0, { before, r, after, again });
     }
 
-    // ===== 베타 종료: [개발자에게] 의견을 마감 전에 보낸 베타 멤버만 정회원 유지 =====
+    // ===== 베타 기간: 무료 정회원은 가입 경로와 상관없이 베타 종료일까지. 그 뒤는 운영자 유지(kept)·이용권(until)만 =====
     {
-      const end = 1000, b = { beta: true, code: 'X' };
+      const end = 1000, b = { beta: true, code: 'X' }, one = { beta: false, code: 'Y', via: 'one' };
       const st = [
-        betaState(null, end, 500), betaState({ beta: false, code: 'X' }, end, 5000), betaState(b, null, 5000), betaState(b, end, 500),
-        betaState({ ...b, feedbackAt: 900 }, end, 5000), betaState({ ...b, feedbackAt: 1200 }, end, 5000), betaState(b, end, 1000),
-        betaState({ ...b, kept: true }, end, 5000), betaState({ beta: true }, end, 5000),
+        betaState(null, end, 500), betaState(b, null, 5000), betaState(b, end, 500), betaState(one, end, 500), betaState(one, end, 5000),
+        betaState({ ...b, feedbackAt: 900 }, end, 5000), betaState(b, end, 1000), betaState({ ...b, kept: true }, end, 5000),
+        betaState({ ...one, until: 3000 }, end, 2000), betaState({ ...one, until: 3000 }, end, 3000), betaState({ ...b, until: { toMillis: () => 3000 } }, end, 500), betaState({ beta: true }, end, 5000),
       ].join(',');
-      check('M5 beta state: before end / feedback in time / late / operator keep / legacy', st === 'guest,member,beta,beta,kept,lapsed,lapsed,kept,lapsed'
-        && isActiveMember('kept') && isActiveMember('beta') && isActiveMember('member') && !isActiveMember('lapsed') && !isActiveMember('guest'), st);
+      check('M5 membership: free until the beta end for every join route; afterwards only kept or pass holders; feedback alone no longer keeps it',
+        st === 'guest,beta,beta,beta,lapsed,lapsed,lapsed,kept,coupon,lapsed,beta,lapsed'
+        && isActiveMember('kept') && isActiveMember('beta') && isActiveMember('coupon') && !isActiveMember('lapsed') && !isActiveMember('guest') && !isActiveMember('member'), st);
       check('M5 feedback text: at least one box, 500 chars max', validateFeedback({}) && validateFeedback({ good: ' ', fix: '' })
         && validateFeedback({ good: 'x'.repeat(501) }) && validateFeedback({ good: '좋아요' }) === null && validateFeedback({ fix: '고쳐 주세요' }) === null);
+      const at = (y, m, d, h = 23, mi = 59) => new Date(y, m - 1, d, h, mi, 59, 999).getTime();
+      const dec31 = at(2026, 12, 31), jan10 = at(2027, 1, 10, 12, 0);
+      const cu = { a: addMonths(dec31, 3) === at(2027, 3, 31), b: addMonths(at(2026, 11, 30), 3) === at(2027, 2, 28), c: couponUntil(dec31, at(2026, 12, 1)) === at(2027, 3, 31),
+        d: couponUntil(dec31, jan10) === at(2027, 4, 10, 12, 0), e: couponUntil(null, jan10) === at(2027, 4, 10, 12, 0) };
+      check('M5 3-month pass: from the beta end (or from now once it has passed), month-end safe', Object.values(cu).every(Boolean), cu);
+      const drawn = { zero: drawLottery([1, 2, 3, 4, 5], 3, () => 0).join(), last: drawLottery([1, 2, 3, 4, 5], 3, (k) => k - 1).join(), over: drawLottery([1, 2], 30).length, none: drawLottery([1, 2], 0).length };
+      const big = drawLottery(Array.from({ length: 100 }, (_, i) => i), 30);
+      check('M5 draw: n people at random without repeats (all if fewer)', drawn.zero === '1,2,3' && drawn.last === '5,1,2' && drawn.over === 2 && drawn.none === 0 && big.length === 30 && new Set(big).size === 30, drawn);
+      const pool = lotteryPool([{ nick: 'a', feedbackAt: 900 }, { nick: 'b', feedbackAt: 1200 }, { nick: 'c' }, { nick: 'd', feedbackAt: 100, until: 5000 }], end).map((u) => u.nick).join();
+      check('M5 draw pool: feedback sent before the beta end, no pass yet', pool === 'a' && lotteryPool([{ nick: 'b', feedbackAt: 1200 }], null).length === 1, pool);
 
       const ls = mem();
       const st5 = new LocalAccountStore(ls);
       st5._putCode('BETA5000', { type: 'beta', maxUses: 0 });
       st5._putCode('ADMIN500', { type: 'one' });
+      st5._putCode('ONE50000', { type: 'one' });
       const P = { pin: '123456', country: 'KR', team: 'T', age: 12, stick: 'L' };
       await st5.register({ nick: 'test123', ...P, code: 'ADMIN500' });
-      const past = Date.now() + 60000; // 지금은 마감 1분 전
-      await st5.setSiteConfig({ betaEndsAt: past });
+      const soon = Date.now() + 60000; // 지금은 종료 1분 전
+      await st5.setSiteConfig({ betaEndsAt: soon });
       st5.logout();
       await st5.register({ nick: 'early', ...P, code: 'BETA5000' });
       const s0 = st5.memberState();
@@ -736,34 +748,90 @@
       const f2 = await st5.sendFeedback({ good: '8자 방향 좋아요', fix: '어두우면 놓쳐요' });
       st5.logout();
       await st5.register({ nick: 'late', ...P, code: 'BETA5000' });
-      const lateBefore = st5.memberState();
-      const sLate = st5.memberState(past + 1); // 마감이 지난 시점으로 판단
-      // 마감을 지난 시각으로 바꿔 실제 동작 확인
-      const endAt = f1.at + 2; // early 의 의견 바로 뒤가 마감
+      st5.logout();
+      await st5.register({ nick: 'solo', ...P, code: 'ONE50000' });
+      const soloBefore = st5.memberState(), soloAfter = st5.memberState(soon + 1);
+      // 종료일을 지난 시각으로 바꿔 실제 동작 확인 (early 의 의견은 종료 전)
       await new Promise((r) => setTimeout(r, 15));
+      const endAt = Date.now() - 1;
       ls.setItem('puck-trainer.site.v1', JSON.stringify({ ...JSON.parse(ls.getItem('puck-trainer.site.v1')), betaEndsAt: endAt }));
       let blocked = null; try { await st5.submitScore('arcade@60', 10); } catch (e) { blocked = e.message; }
       st5.logout();
       await st5.login('early', '123456');
       const sEarly = st5.memberState();
-      const earlyScore = await st5.submitScore('arcade@60', 20);
+      let earlyBlocked = null; try { await st5.submitScore('arcade@60', 20); } catch (e) { earlyBlocked = e.message; }
       const mine = await st5.getMyFeedback();
       let listDenied = null; try { await st5.listFeedback(); } catch (e) { listDenied = e.message; }
+      let couponDenied = null; try { await st5.grantCoupon(st5.current().id, Date.now() + 1e9); } catch (e) { couponDenied = e.message; }
       st5.logout();
       await st5.login('test123', '123456');
       const fbs = await st5.listFeedback();
-      const betas = (await st5.betaMembers()).map((u) => `${u.nick}:${betaState(u, endAt)}`).join(',');
-      const lateUid = (await st5.betaMembers()).find((u) => u.nick === 'late').id;
-      await st5.keepMember(lateUid, true);
-      const kept = (await st5.betaMembers()).map((u) => `${u.nick}:${betaState(u, endAt)}`).join(',');
-      check('M5 send feedback before the end: membership kept, edits keep the first time', s0 === 'beta' && fbErr === '좋았던 점이나 고쳤으면 하는 점을 적어 주세요'
-        && s1 === 'kept' && f2.at === f1.at && f2.fix === '어두우면 놓쳐요' && mine.good === '8자 방향 좋아요', { s0, s1, f1, f2, fbErr });
-      check('M5 no feedback by the end: lapsed, score not ranked; sender still ranks', lateBefore === 'beta' && sLate === 'lapsed' && blocked === LAPSED
-        && sEarly === 'kept' && earlyScore.best === 20, { lateBefore, sLate, blocked, sEarly });
-      check('M5 operator reads feedback, sees beta members, keeps a late one', listDenied === '운영자만 할 수 있습니다' && fbs.length === 1 && fbs[0].nick === 'early'
-        && betas === 'early:kept,late:lapsed' && kept === 'early:kept,late:kept', { listDenied, betas, kept });
-      const allMembers = (await st5.memberList()).map((u) => `${u.nick}:${betaState(u, endAt)}`).join(',');
-      check('M5 operator member list shows everyone; one who joined with a one-time code is a full member, not a beta member', allMembers === 'test123:member,early:kept,late:kept', allMembers);
+      const members = await st5.memberList();
+      const drawPool = lotteryPool(members, endAt).map((u) => u.nick).join();
+      const uid = (n) => members.find((u) => u.nick === n).id;
+      await st5.keepMember(uid('late'), true);
+      const states = (await st5.memberList()).map((u) => `${u.nick}:${betaState(u, endAt)}`).join(',');
+      check('M5 before the end: every route is a member, feedback is saved (first time kept on edits) but does not change the state', s0 === 'beta' && s1 === 'beta' && soloBefore === 'beta'
+        && fbErr === '좋았던 점이나 고쳤으면 하는 점을 적어 주세요' && f2.at === f1.at && f2.fix === '어두우면 놓쳐요' && mine.good === '8자 방향 좋아요', { s0, s1, soloBefore, f1, f2, fbErr });
+      check('M5 after the end: open beta, one-time code and feedback senders all lapse; scores are blocked', soloAfter === 'lapsed' && blocked === LAPSED && sEarly === 'lapsed' && earlyBlocked === LAPSED, { soloAfter, blocked, sEarly, earlyBlocked });
+      check('M5 operator: reads feedback, draw pool = senders before the end, keep = member with no end', listDenied === '운영자만 할 수 있습니다' && fbs.length === 1 && fbs[0].nick === 'early'
+        && drawPool === 'early' && states === 'test123:lapsed,early:lapsed,late:kept,solo:lapsed', { listDenied, drawPool, states });
+      // 추첨 확정 -> 3개월 이용권: 그 기한까지 정회원, 결과는 저장(당첨 발표용), 운영자만, 거두면 다시 종료
+      const until = couponUntil(endAt);
+      await st5.grantCoupon(uid('early'), until);
+      await st5.saveLottery({ at: Date.now(), until, winners: [{ id: uid('early'), nick: 'early', memberNo: 2 }] });
+      const lot = await st5.getLottery();
+      st5.logout();
+      await st5.login('early', '123456');
+      const sWin = st5.memberState(), winScore = await st5.submitScore('arcade@60', 30), winUntil = st5.current().until;
+      st5.logout();
+      await st5.login('test123', '123456');
+      await st5.grantCoupon(uid('early'), null);
+      const revoked = (await st5.memberList()).find((u) => u.nick === 'early');
+      check('M7 pass: confirmed winner is a member until the pass ends, result saved, only the operator gives it, removing it lapses again',
+        couponDenied === '운영자만 할 수 있습니다' && sWin === 'coupon' && winScore.best === 30 && winUntil === until && until > Date.now() + 80 * 864e5
+        && lot.winners[0].nick === 'early' && revoked.until === null && betaState(revoked, endAt) === 'lapsed', { couponDenied, sWin, winUntil, until, lot, revoked });
+    }
+
+    // ===== 친구 초대: 정회원 한 사람당 초대 코드 하나, 3명까지, 추가 없음. 초대받아 가입한 사람도 3명 초대 =====
+    {
+      const ls = mem();
+      const s6 = new LocalAccountStore(ls);
+      const P = { pin: '123456', country: 'KR', team: 'T', age: 12, stick: 'R' };
+      s6._putCode('BETA6000', { type: 'beta', maxUses: 0 });
+      s6._putCode('ADMIN600', { type: 'one' });
+      const guestInv = await s6.myInvite();
+      await s6.register({ nick: 'host', ...P, code: 'BETA6000' });
+      const inv1 = await s6.myInvite(), inv1again = await s6.myInvite();
+      s6.logout();
+      const card = await s6.checkCode(codeLabel(inv1.code));
+      const reg = async (nick, code) => { try { const u = await s6.register({ nick, ...P, code }); s6.logout(); return u; } catch (e) { return e.message; } };
+      const f1 = await reg('f1', codeLabel(inv1.code)), f2 = await reg('f2', inv1.code), f3 = await reg('f3', inv1.code), f4 = await reg('f4', inv1.code);
+      await s6.login('host', '123456');
+      const full = await s6.myInvite();
+      s6.logout();
+      await s6.login('f1', '123456');
+      const chain = await s6.myInvite();
+      s6.logout();
+      await reg('test123', 'ADMIN600');
+      await s6.login('test123', '123456');
+      const adminList = (await s6.listCodes()).map((c) => c.type).sort().join();
+      s6.logout();
+      check('M6 my invite code: members only, made once, 3 people, shows who invited', guestInv === null && inv1.type === 'invite' && inv1.maxUses === INVITE_MAX && INVITE_MAX === 3
+        && inv1.code === inv1again.code && inv1.code.length === 8 && card.status === 'ok' && card.type === 'invite' && card.nick === 'host' && !('by' in card), { inv1, card });
+      check('M6 invite sign-ups: members right away (not beta), a 4th person is refused, no extra code', f1.via === 'invite' && !f1.beta && memberBadge(f1).startsWith('정회원 No.')
+        && f3.via === 'invite' && f4 === '초대 인원(3명)이 다 찬 코드입니다' && full.code === inv1.code && full.status === 'full' && full.uses === 3, { f1, f4, full });
+      check('M6 invited members get their own 3-person code; the operator code list leaves invite codes out', chain && chain.code !== inv1.code && chain.status === 'ok' && chain.uses === 0
+        && adminList === 'beta,one', { chain, adminList });
+      // 베타가 끝나면 초대 코드는 마감되고, 정회원이 아닌 사람은 새 코드를 만들 수 없다
+      ls.setItem('puck-trainer.site.v1', JSON.stringify({ betaEndsAt: Date.now() - 1 }));
+      const closed = await s6.checkCode(chain.code);
+      let lateJoin = null; try { await s6.register({ nick: 'late6', ...P, code: chain.code }); } catch (e) { lateJoin = e.message; }
+      await s6.login('f2', '123456');
+      const noCode = await s6.myInvite();
+      const statusEnd = [codeStatus({ type: 'invite', maxUses: 3, uses: 0 }, 5000, 1000), codeStatus({ type: 'invite', maxUses: 3, uses: 0 }, 500, 1000), codeStatus({ type: 'beta', maxUses: 0 }, 5000, 1000)].join();
+      check('M6 after the beta end: invite codes close and a lapsed member cannot make one', closed.status === 'expired' && lateJoin === '마감된 코드입니다' && noCode === null
+        && statusEnd === 'expired,ok,ok' && codeInfo('X', { type: 'one', maxUses: 1 }).nick === '', { closed, lateJoin, noCode, statusEnd });
     }
 
     // ===== 보안: 운영자처럼 보이는 별명 금지, 운영자 비밀번호(12자 이상) 바꾸기, 공식 주소에서만 실행 =====
@@ -916,7 +984,8 @@
       a2 = addActivity(a2, { key: 'quick', score: 30, sec: 20, mode: 'quick' }, now - 20 * DAYMS);
       const s = memberStats(members, [a1, a2], now);
       const last = s.daily[s.daily.length - 1], twoAgo = s.daily[s.daily.length - 3], yday = s.daily[s.daily.length - 2];
-      check('ST1 operator stats: members by join route, new sign-ups, attendance, member games and time', s.members.total === 4 && s.members.beta === 3 && s.members.one === 1
+      check('ST1 operator stats: members by join route, new sign-ups, attendance, member games and time', s.members.total === 4 && s.members.beta === 3 && s.members.one === 1 && s.members.invite === 0
+        && JSON.stringify(memberStats([{ code: 'I', via: 'invite' }, { code: 'O', via: 'one' }], [], now).members).startsWith('{"total":2,"beta":0,"invite":1,"one":1')
         && s.members.today === 1 && s.members.d7 === 2 && s.members.d30 === 3 && s.attended.today === 1 && s.attended.d7 === 2 && s.attended.d30 === 2
         && s.games.total === 4 && s.games.today === 2 && s.games.d7 === 3 && s.games.d30 === 4 && s.games.sec === 170, s);
       check('ST1 14-day chart, games by mode, age groups, countries', s.daily.length === 14 && last.day === '2026-11-18' && last.joins === 1 && last.games === 2 && last.players === 1

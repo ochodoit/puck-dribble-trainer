@@ -96,8 +96,8 @@ const skipSetup = async (page, touch = false) => {
   await page.goto(`${base}/index.html?c=beta-2026`);
   await page.waitForSelector('#invite-card:not(.hidden)');
   const inv = await inviteState();
-  const invOk = !inv.bad && inv.title === '베타 초대 링크예요' && /까지 가입하면 바로 정회원$/.test(inv.sub) && inv.code === 'BETA-2026' && inv.codeShown && inv.reg && inv.search === '';
-  console.log(`${invOk ? 'PASS' : 'FAIL'} beta invite link opens sign-up with the code filled in (${JSON.stringify(inv)})`);
+  const invOk = !inv.bad && inv.title === '오픈베타 초대 링크예요' && /까지 가입하면 바로 정회원$/.test(inv.sub) && inv.code === 'BETA-2026' && inv.codeShown && inv.reg && inv.search === '';
+  console.log(`${invOk ? 'PASS' : 'FAIL'} open beta invite link opens sign-up with the code filled in (${JSON.stringify(inv)})`);
   if (!invOk) failed = true;
   // 회원가입 (별명 + 6자리 비밀번호 + 국가/팀/나이 + 가입 코드)
   await fillReg('12345');
@@ -368,12 +368,13 @@ const skipSetup = async (page, touch = false) => {
   const adminOk = adminBtn && /^[2-9A-Z]{4}-[2-9A-Z]{4}$/.test(issued.code) && issued.link.endsWith(`/index.html?c=${issued.code}`) && issued.rows === 3 && issued.members.includes('정회원 2명');
   console.log(`${adminOk ? 'PASS' : 'FAIL'} operator panel: issue a one-time code link, list codes, turn one off (${JSON.stringify(issued)})`);
   if (!adminOk) failed = true;
-  // 베타 종료일 -> 베타 멤버에게 '의견 보내고 정회원 유지' 칩 -> [개발자에게] 보내면 '정회원 유지', 운영자 화면에 의견이 보임
+  // 베타 종료일 -> '정회원 ○월 ○일까지 · 의견 보내고 3개월 이용권 추첨' 칩 -> [개발자에게] 보내면 추첨 응모, 운영자 화면에 의견이 보임
   const endDay = await page.evaluate(() => { const d = new Date(Date.now() + 7 * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
   await page.fill('#adm-beta-end', endDay);
   await page.click('#adm-save-beta-end');
-  await page.waitForFunction(() => document.querySelector('#adm-beta-sum').textContent.includes('기다리는 중 2명'));
+  await page.waitForFunction(() => !document.querySelector('#adm-beta-sum').textContent.includes('아직 정하지'));
   const betaRows = await page.evaluate(() => document.querySelectorAll('#adm-betas tr[data-uid]').length);
+  const sum1 = await page.textContent('#adm-beta-sum');
   await page.click('[data-close="panel-admin"]');
   const chip1 = await page.evaluate(() => document.querySelector('#auth-who [data-feedback]')?.textContent || '');
   await page.evaluate(() => document.querySelector('#auth-who [data-feedback]').click());
@@ -388,16 +389,52 @@ const skipSetup = async (page, touch = false) => {
   await page.click('[data-close="panel-community"]');
   await page.click('#btn-settings'); await page.click('#btn-settings-admin');
   await page.waitForFunction(() => document.querySelector('#adm-feedback').textContent.includes('어두우면 퍽을 놓쳐요'));
-  const sum2 = await page.textContent('#adm-beta-sum');
+  await page.waitForFunction(() => document.querySelector('#adm-lot-sum').textContent.includes('추첨 대상 1명'));
+  // 의견 추첨 -> 확정(확인 창) -> 당첨자에게 3개월 이용권
+  await page.click('#adm-lot-draw');
+  await page.waitForSelector('#adm-lot-ok:not(.hidden)');
+  const draft = await page.textContent('#adm-lot-out');
+  page.once('dialog', (d) => d.accept());
+  await page.click('#adm-lot-ok');
+  await page.waitForFunction(() => document.querySelector('#adm-lot-out').textContent.includes('확정된 당첨자 1명'));
+  const won = await page.evaluate(() => ({ row: document.querySelector('#adm-betas tr[data-nick="test123"] td:nth-child(5)').textContent, sum: document.querySelector('#adm-beta-sum').textContent,
+    ok: document.querySelector('#adm-lot-ok').classList.contains('hidden'), copy: !document.querySelector('#adm-lot-copy').classList.contains('hidden') }));
   await page.click('[data-close="panel-admin"]');
-  const fbOk = betaRows === 2 && chip1.includes('의견 보내고 정회원 유지') && intro.includes('끝나기 전에 보내 주시면') && toastFb.includes('정회원 등급이 유지됩니다')
-    && chip2 === '정회원 유지' && sum2.includes('유지 1명') && sum2.includes('기다리는 중 1명');
-  console.log(`${fbOk ? 'PASS' : 'FAIL'} beta end date -> beta member sends [To the developer] feedback -> membership kept, operator reads it (${JSON.stringify({ betaRows, chip1, chip2, toastFb, sum2 })})`);
+  const chipWin = await page.evaluate(() => document.querySelector('#auth-who .beta-chip')?.textContent || '');
+  const fbOk = betaRows === 2 && sum1.includes('오픈베타 링크 2명') && chip1.includes('의견 보내고 3개월 이용권 추첨') && intro.includes('30명을 추첨해 3개월 이용권') && toastFb.includes('추첨에 응모되었어요')
+    && chip2.includes('이용권 추첨 응모 완료');
+  console.log(`${fbOk ? 'PASS' : 'FAIL'} beta end date -> member sends [To the developer] feedback -> entered in the 3-month pass draw, operator reads it (${JSON.stringify({ betaRows, chip1, chip2, toastFb, sum1 })})`);
   if (!fbOk) failed = true;
+  const lotOk = draft.includes('추첨 결과 1명') && draft.includes('test123') && won.row.includes('이용권') && won.sum.includes('이용권 1명') && won.ok && won.copy && chipWin.startsWith('3개월 이용권 ·');
+  console.log(`${lotOk ? 'PASS' : 'FAIL'} operator draws among feedback senders, confirms -> winner gets a 3-month pass (${JSON.stringify({ draft: draft.slice(0, 40), won, chipWin })})`);
+  if (!lotOk) failed = true;
+  // 내 정보 > 친구 초대: 내 초대 링크(3명) -> 다른 탭에서 그 링크로 들어오면 '○○님의 초대 링크예요' + 가입하면 바로 정회원
+  await page.click('#btn-me');
+  await page.waitForFunction(() => document.querySelector('#me-invite input')?.value.includes('?c='));
+  const myInv = await page.evaluate(() => ({ text: document.querySelector('#me-invite').textContent, link: document.querySelector('#me-invite input').value }));
+  await page.click('[data-close="panel-me"]');
+  const p2 = await context.newPage();
+  await p2.goto(`${base}/index.html`);
+  await p2.evaluate(() => window.__puckTrainer.account.logout()); // 같은 브라우저: 로그인 기록을 지우고 초대 링크로
+  await p2.goto(myInv.link);
+  await p2.waitForSelector('#invite-card:not(.hidden)');
+  const card2 = await p2.evaluate(() => ({ title: document.querySelector('#invite-title').textContent, sub: document.querySelector('#invite-sub').textContent, code: document.querySelector('#auth-code').value }));
+  await p2.fill('#auth-nick', '친구1'); await p2.fill('#auth-pin', '123456');
+  await p2.selectOption('#auth-country', 'KR'); await p2.fill('#auth-team', '서울 유스'); await p2.fill('#auth-age', '12');
+  await p2.click('#auth-stick [data-stick="R"]');
+  await p2.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await p2.waitForSelector('#auth-logged:not(.hidden)');
+  const who2 = await p2.textContent('#auth-who');
+  const used = await p2.evaluate(async (c) => (await window.__puckTrainer.account.checkCode(c)).uses, card2.code);
+  await p2.close();
+  const invLinkOk = /\?c=[2-9A-Z]{4}-[2-9A-Z]{4}$/.test(myInv.link) && myInv.text.includes('0/3명 가입 · 남은 자리 3명') && card2.title === 'test123님의 초대 링크예요'
+    && card2.sub.includes('가입하면 바로 정회원') && card2.sub.includes('남은 자리 3명') && myInv.link.endsWith(card2.code) && who2.includes('친구1') && who2.includes('정회원 No.') && used === 1;
+  console.log(`${invLinkOk ? 'PASS' : 'FAIL'} My info -> my invite link (3 people) -> a friend opens it, sees who invited them and joins as a member (${JSON.stringify({ myInv, card2, who2: who2.trim().slice(0, 40), used })})`);
+  if (!invLinkOk) failed = true;
   const relogin = await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); try { await a.login('번개손', '123456'); return !!a.current(); } catch { return false; } });
   console.log(`${loggedOut && relogin ? 'PASS' : 'FAIL'} logout and login again`);
   if (!(loggedOut && relogin)) failed = true;
-  // 베타 종료일이 지났는데 의견을 안 보낸 베타 멤버(번개손): 결과가 랭킹에 안 올라가고 안내 + 프로필 줄에 '베타 종료'
+  // 베타 종료일이 지난 무료 정회원(번개손): 결과가 랭킹에 안 올라가고 안내 + 프로필 줄에 '베타 종료'
   await page.evaluate(() => { const k = 'puck-trainer.site.v1'; localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k)), betaEndsAt: Date.now() - 1000 })); });
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 99, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 99]] }); });
   await page.waitForSelector('#result-guest:not(.hidden)');
@@ -406,8 +443,8 @@ const skipSetup = async (page, touch = false) => {
   await page.click('[data-close="panel-result"]');
   await page.click('#btn-settings'); await page.click('[data-close="panel-settings"]');
   const chip3 = await page.evaluate(() => document.querySelector('#auth-who .beta-chip')?.textContent || '');
-  const lapsedOk = lapsed.text.includes('베타 기간이 끝나 정회원 등급이 유지되지 않았습니다') && lapsed.text.includes('인스타 DM') && !lapsed.rank && !lapsed.best.includes(99) && chip3.includes('베타 종료');
-  console.log(`${lapsedOk ? 'PASS' : 'FAIL'} beta ended without feedback: score not ranked, notice + Instagram DM, profile says beta ended (${JSON.stringify({ ...lapsed, text: lapsed.text.slice(0, 40), chip3 })})`);
+  const lapsedOk = lapsed.text.includes('베타 기간이 끝나 정회원 기간이 끝났습니다') && lapsed.text.includes('인스타 DM') && !lapsed.rank && !lapsed.best.includes(99) && chip3.includes('베타 종료');
+  console.log(`${lapsedOk ? 'PASS' : 'FAIL'} beta ended: free member's score not ranked, notice + Instagram DM, profile says beta ended (${JSON.stringify({ ...lapsed, text: lapsed.text.slice(0, 40), chip3 })})`);
   if (!lapsedOk) failed = true;
   await page.evaluate(() => { const k = 'puck-trainer.site.v1'; const c = JSON.parse(localStorage.getItem(k)); delete c.betaEndsAt; localStorage.setItem(k, JSON.stringify(c)); });
   // 8자 드리블 방향: 게임 화면에서 고르면(오른쪽 먼저 · 반시계 = 오른쪽 콘을 아래로) 저장되고, 고른 방향의 코스가 미리 보인다

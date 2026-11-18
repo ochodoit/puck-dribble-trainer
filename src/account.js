@@ -55,10 +55,13 @@ export const jerseyLabel = (n) => (Number.isInteger(n) ? `#${n}` : '');
 
 // ---------- 가입 코드 · 정회원 ----------
 // 정회원 = 가입 코드로 가입한 계정. 코드가 없으면 게스트로 플레이(랭킹·글쓰기 없음).
-// 코드 종류: beta(베타 링크, 여러 명·마감일), one(1회용, 운영자가 SNS 인증한 게스트에게 발급)
+// 코드 종류: beta(오픈베타 링크, 여러 명·마감일·인원 상한), one(1회용, 운영자가 SNS 인증한 게스트에게 발급),
+//           invite(정회원의 초대 코드: 한 사람당 하나, 3명까지, 추가 없음)
 // 헷갈리는 글자(0/O, 1/I/L)를 뺀 31자
 export const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 export const CODE_RE = /^[0-9A-Z]{4,20}$/;
+/** 정회원 한 사람이 초대할 수 있는 인원 (초대 코드는 한 사람당 하나, 추가 지급 없음) */
+export const INVITE_MAX = 3;
 /** 입력값 -> 저장 형태 (대문자, 글자·숫자만): ' k7mp-q2xd ' -> 'K7MPQ2XD' */
 export const normCode = (s) => String(s ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
 /** 화면 표시용: 'K7MPQ2XD' -> 'K7MP-Q2XD' */
@@ -75,25 +78,29 @@ export function makeCode() {
 /** 숫자·Firestore Timestamp·Date -> 밀리초 (없으면 null) */
 export const toMs = (v) => (v == null ? null : typeof v === 'number' ? v : typeof v.toMillis === 'function' ? v.toMillis() : v instanceof Date ? v.getTime() : Number(v));
 
-/** 코드를 지금 쓸 수 있는가: ok | missing | off | expired | full */
-export function codeStatus(c, now = Date.now()) {
+/**
+ * 코드를 지금 쓸 수 있는가: ok | missing | off | expired | full
+ * 초대 코드(invite)는 베타 종료일(betaEndsAt)이 지나면 마감 (무료 정회원이 베타 종료일까지라서)
+ */
+export function codeStatus(c, now = Date.now(), betaEndsAt = null) {
   if (!c) return 'missing';
   if (c.off) return 'off';
-  const exp = toMs(c.expiresAt);
+  const exp = toMs(c.expiresAt), end = toMs(betaEndsAt);
   if (exp != null && now >= exp) return 'expired';
+  if (c.type === 'invite' && end != null && now >= end) return 'expired';
   if (c.maxUses > 0 && (c.uses || 0) >= c.maxUses) return 'full';
   return 'ok';
 }
-/** 가입 화면용 코드 정보 (운영자 메모는 넣지 않음) */
-export function codeInfo(code, c, now = Date.now()) {
-  return { code, status: codeStatus(c, now), type: c?.type || null, uses: c?.uses || 0, maxUses: c?.maxUses || 0, expiresAt: toMs(c?.expiresAt) };
+/** 가입 화면용 코드 정보 (운영자 메모는 넣지 않음). nick: 초대 코드를 준 정회원의 별명 */
+export function codeInfo(code, c, now = Date.now(), betaEndsAt = null) {
+  return { code, status: codeStatus(c, now, betaEndsAt), type: c?.type || null, uses: c?.uses || 0, maxUses: c?.maxUses || 0, expiresAt: toMs(c?.expiresAt), nick: c?.type === 'invite' ? String(c.nick || '') : '' };
 }
 export function codeError(status, c) {
   switch (status) {
     case 'none': return '가입 코드가 필요합니다';
     case 'format': return '가입 코드를 확인하세요';
     case 'expired': return '마감된 코드입니다';
-    case 'full': return c?.maxUses === 1 ? '이미 사용된 코드입니다' : '인원이 다 찬 코드입니다';
+    case 'full': return c?.maxUses === 1 ? '이미 사용된 코드입니다' : c?.type === 'invite' ? '초대 인원(3명)이 다 찬 코드입니다' : '인원이 다 찬 코드입니다';
     case 'off': return '쓸 수 없는 코드입니다';
     case 'error': return '코드를 확인하지 못했습니다. 잠시 뒤 다시 시도하세요';
     default: return '없는 코드입니다';
@@ -124,26 +131,62 @@ export function instaId(s) {
 /** 게스트 -> 공식 인스타 계정 DM 열기 (플레이 인증 후 정회원 코드를 받는 곳) */
 export const instaDmLink = (s) => (instaId(s) ? `https://ig.me/m/${instaId(s)}` : '');
 
-// ---- 베타 기간이 끝날 때 정회원 유지: 커뮤니티 [개발자에게]로 의견을 보낸 베타 멤버만 ----
+// ---- 베타 기간: 무료 정회원은 가입 경로(오픈베타·초대·1회용 코드)와 상관없이 베타 종료일까지 ----
+// 베타가 끝나면 구독으로 바뀐다. 그 뒤에도 정회원인 계정: 운영자가 유지(kept)한 계정, 이용권 기한(until)이 남은 계정.
+// 커뮤니티 [개발자에게]로 베타 종료일 전에 의견을 보낸 회원 중 30명을 추첨해 3개월 이용권을 준다 (운영자 화면)
 export const FEEDBACK_MAX = 500;
-/** 베타 멤버였던 계정인가 (코드 없이 가입했던 예전 계정 포함) */
+/** 베타 멤버였던 계정인가: 오픈베타 링크로 가입 또는 코드 없이 가입했던 예전 계정 (배지·통계용) */
 export const isBetaUser = (u) => !!u && (!!u.beta || !u.code);
 /**
  * 정회원 등급 상태
- *  guest(로그인 안 함) | member(정회원) | beta(베타 멤버, 마감 전·의견 아직) | kept(마감 전에 의견을 보냄 또는 운영자가 유지) | lapsed(마감까지 의견 없음)
+ *  guest(로그인 안 함) | beta(베타 기간 중 정회원) | kept(운영자가 유지, 기한 없음) | coupon(베타 종료 뒤 이용권 기한 안) | lapsed(베타 종료)
  */
 export function betaState(u, betaEndsAt, now = Date.now()) {
   if (!u) return 'guest';
-  if (!isBetaUser(u)) return 'member';
+  if (u.kept) return 'kept';
   const end = toMs(betaEndsAt);
-  const fb = toMs(u.feedbackAt);
-  if (u.kept || (fb != null && (end == null || fb < end))) return 'kept';
   if (end == null || now < end) return 'beta';
+  const until = toMs(u.until);
+  if (until != null && now < until) return 'coupon';
   return 'lapsed';
 }
 /** 랭킹 등록·글쓰기·응원을 할 수 있는 상태인가 */
-export const isActiveMember = (st) => st === 'member' || st === 'beta' || st === 'kept';
-export const LAPSED = '베타 기간이 끝나 정회원 등급이 유지되지 않았습니다';
+export const isActiveMember = (st) => st === 'beta' || st === 'kept' || st === 'coupon';
+export const LAPSED = '베타 기간이 끝나 정회원 기간이 끝났습니다';
+
+// ---- 의견 추첨 · 3개월 이용권 ----
+export const LOTTERY_WINNERS = 30;
+export const COUPON_MONTHS = 3;
+/** ms 에 n달 더하기 (이 기기 시간대, 달 끝을 넘으면 그 달 마지막 날: 12월 31일 + 2달 = 2월 28일) */
+export function addMonths(ms, n) {
+  const d = new Date(ms), day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+  return d.getTime();
+}
+/** 이용권 기한: 베타 종료일(이미 지났거나 정하지 않았으면 지금)부터 3개월 */
+export function couponUntil(betaEndsAt, now = Date.now()) {
+  const end = toMs(betaEndsAt);
+  return addMonths(end != null && end > now ? end : now, COUPON_MONTHS);
+}
+/** 추첨 대상: 베타 종료일 전에(종료일이 없으면 언제든) 의견을 보냈고, 아직 이용권이 없는 회원 */
+export function lotteryPool(members = [], betaEndsAt = null) {
+  const end = toMs(betaEndsAt);
+  return members.filter((u) => { const fb = toMs(u.feedbackAt); return fb != null && (end == null || fb < end) && toMs(u.until) == null; });
+}
+/** 0 이상 n 미만 정수 (crypto 난수) */
+function randomIndex(n) {
+  if (globalThis.crypto?.getRandomValues) { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; }
+  return Math.floor(Math.random() * n);
+}
+/** 무작위로 n명 뽑기 (뽑힌 순서도 무작위). rand(k) = 0..k-1 */
+export function drawLottery(pool = [], n = LOTTERY_WINNERS, rand = randomIndex) {
+  const a = pool.slice();
+  const k = Math.max(0, Math.min(Math.floor(Number(n) || 0), a.length));
+  for (let i = 0; i < k; i++) { const j = i + rand(a.length - i); [a[i], a[j]] = [a[j], a[i]]; }
+  return a.slice(0, k);
+}
 export function validateFeedback({ good, fix } = {}) {
   const g = String(good || '').trim(), f = String(fix || '').trim();
   if (!g && !f) return '좋았던 점이나 고쳤으면 하는 점을 적어 주세요';
@@ -207,6 +250,7 @@ export class LocalAccountStore {
     this.CONFIG = 'puck-trainer.site.v1';     // 게스트 안내(공식 인스타 등) · 베타 종료일
     this.FEEDBACK = 'puck-trainer.feedback.v1'; // { uid: { uid, nick, memberNo, good, fix, at, updatedAt } } 개발자에게
     this.ACTIVITY = 'puck-trainer.activity.v1'; // { uid: 활동 기록 } 출석·최근 기록·누적 (activity.js)
+    this.LOTTERY = 'puck-trainer.lottery.v1';   // { at, until, winners: [{ id, nick, memberNo }] } 의견 추첨
     this.user = null;
     const nick = this._get(this.SESSION, null);
     if (nick) { const u = this._users()[normNick(nick)]; if (u) this.user = this._public(u); }
@@ -223,11 +267,13 @@ export class LocalAccountStore {
       stick: STICKS.includes(u.stick) ? u.stick : null, joinedAt: u.joinedAt || u.createdAt || null,
       memberNo: Number.isInteger(u.memberNo) ? u.memberNo : null, beta: !!u.beta, code: u.code || null, via: u.via || null,
       kept: !!u.kept, feedbackAt: this._get(this.FEEDBACK, {})[u.id]?.at ?? null,
+      invite: u.invite || null, until: toMs(u.until), coupon: u.coupon || null,
       admin: ADMIN_NICKS.includes(normNick(u.nick)),
     };
   }
   /** 지금 로그인한 계정의 정회원 등급 상태 (betaState 참고) */
-  memberState(now = Date.now()) { return betaState(this.user, this._get(this.CONFIG, {}).betaEndsAt, now); }
+  memberState(now = Date.now()) { return betaState(this.user, this._betaEnd(), now); }
+  _betaEnd() { return this._get(this.CONFIG, {}).betaEndsAt ?? null; }
   _needAdmin() { if (!isAdmin(this.user)) throw new Error('운영자만 할 수 있습니다'); }
   /** 코드를 그대로 저장 (운영자 발급과 테스트 준비에 씀) */
   _putCode(code, data) {
@@ -244,7 +290,26 @@ export class LocalAccountStore {
   async checkCode(code) {
     const key = normCode(code);
     if (!CODE_RE.test(key)) return { code: key, status: 'format' };
-    return codeInfo(key, this._codes()[key] || null);
+    return codeInfo(key, this._codes()[key] || null, Date.now(), this._betaEnd());
+  }
+
+  /**
+   * 내 초대 코드 (3명까지). 없으면 처음 한 번 만든다 — 정회원(베타 기간 중·유지·이용권)만.
+   * 반환: codeInfo + { code } 또는 null (만들 수 없음)
+   */
+  async myInvite() {
+    if (!this.user) return null;
+    const users = this._users(), u = users[this.user.id];
+    const codes = this._codes(), end = this._betaEnd();
+    if (u.invite && codes[u.invite]) return codeInfo(u.invite, codes[u.invite], Date.now(), end);
+    if (!isActiveMember(this.memberState())) return null;
+    let code = makeCode();
+    while (codes[code]) code = makeCode();
+    const c = this._putCode(code, { type: 'invite', uses: 0, maxUses: INVITE_MAX, expiresAt: null, off: false, note: '', createdAt: Date.now(), by: u.id, nick: u.nick });
+    u.invite = code;
+    this._set(this.USERS, users);
+    this.user = this._public(u);
+    return codeInfo(code, c, Date.now(), end);
   }
 
   async register({ nick, pin, country, team, age, number, code, stick }) {
@@ -258,7 +323,7 @@ export class LocalAccountStore {
     if (users[key]) throw new Error('이미 사용 중인 별명입니다');
     const codes = this._codes();
     const c = codes[ckey] || null;
-    const st = codeStatus(c);
+    const st = codeStatus(c, Date.now(), this._betaEnd());
     if (st !== 'ok') throw new Error(codeError(st, c));
     if (!this._get(this.META, null)) this._numberLegacy(); // 기기 내 저장소는 운영자 준비 없이 바로 번호를 매긴다
     const meta = this._get(this.META, { count: 0 });
@@ -287,9 +352,10 @@ export class LocalAccountStore {
     return this._putCode(code, { type, uses: 0, maxUses: type === 'one' ? 1 : Math.max(0, Math.floor(Number(maxUses) || 0)), expiresAt: expiresAt ?? null, off: false, note: String(note || '').slice(0, 60), createdAt: Date.now(), by: this.user.id });
   }
 
+  /** 운영자가 만든 코드(오픈베타·1회용)만. 회원들의 초대 코드는 넣지 않는다 */
   async listCodes() {
     this._needAdmin();
-    return Object.entries(this._codes()).map(([code, c]) => ({ code, ...c, expiresAt: toMs(c.expiresAt) })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return Object.entries(this._codes()).filter(([, c]) => c.type !== 'invite').map(([code, c]) => ({ code, ...c, expiresAt: toMs(c.expiresAt) })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }
 
   async updateCode(code, patch) {
@@ -396,7 +462,7 @@ export class LocalAccountStore {
     await this.deleteFeedback(uid);
   }
 
-  /** 운영자: 의견을 못 보낸 베타 멤버도 정회원으로 유지 */
+  /** 운영자: 베타가 끝나도 정회원으로 유지 (기한 없음) */
   async keepMember(uid, kept = true) {
     this._needAdmin();
     const users = this._users();
@@ -406,6 +472,21 @@ export class LocalAccountStore {
     if (this.user?.id === uid) this.user = this._public(users[uid]);
     return this._public(users[uid]);
   }
+
+  /** 운영자: 이용권 주기(until = 기한 ms) / 거두기(until = null) */
+  async grantCoupon(uid, until) {
+    this._needAdmin();
+    const users = this._users();
+    if (!users[uid]) throw new Error('없는 계정입니다');
+    users[uid].until = until ?? null;
+    users[uid].coupon = until ? `${COUPON_MONTHS}m` : null;
+    this._set(this.USERS, users);
+    if (this.user?.id === uid) this.user = this._public(users[uid]);
+    return this._public(users[uid]);
+  }
+  /** 의견 추첨 결과 (없으면 null) */
+  async getLottery() { return this._get(this.LOTTERY, null); }
+  async saveLottery(data) { this._needAdmin(); this._set(this.LOTTERY, data); return data; }
 
   async login(nick, pin) {
     const users = this._users();

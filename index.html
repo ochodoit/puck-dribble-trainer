@@ -403,7 +403,7 @@
       </div>
     </div>
 
-    <!-- 내 정보: 프로필·회원 등급, 출석, 누적 훈련, 게임별 기록, 커뮤니티 활동 -->
+    <!-- 내 정보: 프로필·회원 등급, 친구 초대, 출석, 누적 훈련, 게임별 기록, 커뮤니티 활동 -->
     <div id="panel-me" class="panel modal hidden">
       <div class="modal-card me-card">
         <header><h2>My Info</h2><button class="btn btn-ghost btn-close" data-close="panel-me">닫기</button></header>
@@ -431,6 +431,11 @@
               <p id="me-edit-msg" class="error hidden"></p>
               <div class="row"><button type="submit" id="me-edit-save" class="btn btn-primary">저장</button><button type="button" id="me-edit-cancel" class="btn btn-ghost">취소</button></div>
             </form>
+          </section>
+          <section class="me-sec">
+            <h3>친구 초대</h3>
+            <p class="muted">내 초대 링크로 친구 3명까지 바로 정회원으로 가입할 수 있어요. 추가 코드는 없어요.</p>
+            <div id="me-invite" class="me-invite"></div>
           </section>
           <section class="me-sec">
             <h3>출석</h3>
@@ -462,7 +467,7 @@
       </div>
     </div>
 
-    <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견 -->
+    <!-- 운영자: 가입 준비, 가입 코드 발급·관리, 게스트 안내, 베타 기간·개발자에게 온 의견·의견 추첨 -->
     <div id="panel-admin" class="panel modal hidden">
       <div class="modal-card admin">
         <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">닫기</button></header>
@@ -496,7 +501,7 @@
         </section>
         <section class="adm-sec">
           <h3>1회용 코드</h3>
-          <p class="muted">인스타 플레이 인증을 확인한 게스트에게 DM으로 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
+          <p class="muted">SNS 플레이 인증(올린 영상 링크)을 DM으로 확인한 게스트에게 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
           <div class="adm-row">
             <input id="adm-one-note" type="text" maxlength="60" placeholder="메모 (예: 인스타 아이디)" aria-label="메모" />
             <button type="button" id="adm-one" class="btn btn-primary">만들기</button>
@@ -504,8 +509,8 @@
           <div id="adm-one-out" class="adm-out hidden"></div>
         </section>
         <section class="adm-sec">
-          <h3>베타 링크</h3>
-          <p class="muted">여러 명이 같은 링크로 가입합니다. 마감일이 지나면 자동으로 막힙니다.</p>
+          <h3>오픈베타 링크</h3>
+          <p class="muted">여러 명이 같은 링크로 가입합니다(예: 12월 31일까지 100명). 마감일이 지나거나 인원이 차면 자동으로 막힙니다.</p>
           <div class="adm-row">
             <label>마감일<input id="adm-beta-date" type="date" /></label>
             <label>인원 상한<input id="adm-beta-max" type="number" min="0" inputmode="numeric" placeholder="0 = 제한 없음" /></label>
@@ -516,7 +521,7 @@
         </section>
         <section class="adm-sec">
           <h3>게스트 안내</h3>
-          <p class="muted">게스트의 결과 화면에 나오는 정회원 코드 받는 방법입니다. 플레이 영상을 인스타에 올리고 공식 계정으로 DM을 보내도록 안내합니다.</p>
+          <p class="muted">게스트의 결과 화면에 나오는 정회원 코드 받는 방법입니다. 정회원 친구의 초대 링크로 가입하거나, 플레이 영상을 SNS에 올리고 그 링크를 공식 인스타 DM으로 보내도록 안내합니다.</p>
           <div class="adm-row">
             <label>공식 인스타 계정<input id="adm-sns" type="text" maxlength="60" placeholder="예: puck.official" /></label>
             <label>해시태그<input id="adm-hashtag" type="text" maxlength="40" placeholder="예: 퍽드리블챌린지" /></label>
@@ -525,7 +530,7 @@
         </section>
         <section class="adm-sec">
           <h3>베타 기간</h3>
-          <p class="muted">종료일까지 커뮤니티의 [개발자에게]로 의견을 보낸 베타 멤버만 정회원으로 남습니다. 보내지 않은 멤버는 종료일 다음부터 랭킹 등록·글쓰기가 막힙니다. 1회용 코드로 가입한 회원은 처음부터 정회원이라 베타 기간과 상관없습니다.</p>
+          <p class="muted">무료 정회원은 가입 경로(오픈베타 링크·친구 초대·1회용 코드)와 상관없이 종료일까지입니다. 종료일 다음부터는 랭킹 등록·글쓰기가 막히고, '정회원 유지'(기한 없음)와 '3개월 이용권' 회원만 정회원으로 남습니다. 친구 초대 코드도 종료일에 마감됩니다.</p>
           <div class="adm-row">
             <label>베타 종료일<input id="adm-beta-end" type="date" /></label>
             <button type="button" id="adm-save-beta-end" class="btn">저장</button>
@@ -536,6 +541,18 @@
         <section class="adm-sec">
           <h3>개발자에게 온 의견</h3>
           <div id="adm-feedback" class="adm-feedback"></div>
+        </section>
+        <section class="adm-sec">
+          <h3>의견 추첨 · 3개월 이용권</h3>
+          <p class="muted">베타 종료일 전에 [개발자에게] 의견을 보낸 회원 중에서 무작위로 뽑습니다(이미 이용권이 있는 회원은 빼고). 확정하면 당첨자는 베타 종료일(이미 지났으면 오늘)부터 3개월 동안 정회원으로 남습니다.</p>
+          <p id="adm-lot-sum" class="muted"></p>
+          <div class="adm-row">
+            <label>당첨 인원<input id="adm-lot-n" type="number" min="1" max="500" inputmode="numeric" value="30" /></label>
+            <button type="button" id="adm-lot-draw" class="btn">추첨</button>
+            <button type="button" id="adm-lot-ok" class="btn btn-primary hidden">당첨 확정 (이용권 주기)</button>
+            <button type="button" id="adm-lot-copy" class="btn btn-ghost hidden">당첨자 목록 복사</button>
+          </div>
+          <div id="adm-lot-out" class="adm-lot-out"></div>
         </section>
         <section class="adm-sec">
           <h3>코드 목록</h3>

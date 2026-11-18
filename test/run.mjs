@@ -301,6 +301,17 @@ const skipSetup = async (page, touch = false) => {
   await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '73'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   const po = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.puckAlpha, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).puckTransparency, out: document.querySelector('#out-puckTransparency').value }));
   await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '0'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  // 투명도 미리보기: 설정 창이 열려 게임이 멈춘 동안에도 카메라 영상이 흐르고, 배경 투명도 슬라이더대로 바로 바뀐다
+  const setTp = (id, v) => page.evaluate(([id, v]) => { const el = document.querySelector('#set-' + id); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, [id, v]);
+  const tpSample = () => page.evaluate(() => { const c = document.querySelector('#set-preview'); const d = c.getContext('2d').getImageData(Math.round(c.width * 0.08), Math.round(c.height * 0.1), 1, 1).data; return { w: c.width, h: c.height, rgb: [d[0], d[1], d[2]], t: window.__puckTrainer.app.lastVideoTime, paused: window.__puckTrainer.app.paused }; });
+  const bgWas = await page.evaluate(() => document.querySelector('#set-bgTransparency').value);
+  await setTp('bgTransparency', 0); await page.waitForTimeout(150); const tp0 = await tpSample();
+  await setTp('bgTransparency', 100); await page.waitForTimeout(500); const tp100 = await tpSample();
+  await setTp('bgTransparency', bgWas);
+  const paper = [0xf4, 0xf1, 0xea];
+  const tpOk = tp0.w > 100 && tp0.h > 50 && tp0.rgb.every((c, i) => Math.abs(c - paper[i]) <= 3) && tp100.rgb.some((c, i) => Math.abs(c - paper[i]) > 30) && tp100.t > tp0.t && tp100.paused;
+  console.log(`${tpOk ? 'PASS' : 'FAIL'} settings preview shows the live camera under the background wash while the game is paused ${JSON.stringify({ tp0, tp100 })}`);
+  if (!tpOk) failed = true;
   await page.click('[data-close="panel-settings"]');
   const poOk = sliderAttr.min === '0' && sliderAttr.max === '100' && sliderAttr.step === '1' && sliderAttr.value === '0' && Math.abs(po.a - 0.27) < 1e-9 && po.saved === 73 && po.out === '73';
   console.log(`${poOk ? 'PASS' : 'FAIL'} puck transparency slider 0..100 step 1 (73% -> alpha ${po.a})`);

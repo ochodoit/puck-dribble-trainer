@@ -61,7 +61,8 @@ export const EN = {
   '정회원이 되려면': 'How to become a member',
   // 설정·보정
   '내 퍽 투명도 % (0 또렷이 · 100 안 보임)': 'My puck transparency % (0 clear · 100 invisible)',
-  '배경 투명도 % (아케이드·퍽 피하기)': 'Background transparency % (Arcade, Puck Dodge)',
+  '배경 투명도 % (와이드 드리블·퀵 핸즈 제외)': 'Background transparency % (all but Wide Dribble, Quick Hands)',
+  '미리보기 (실시간 카메라)': 'Preview (live camera)',
   '인식 세부 조정 (퍽이 잘 안 잡힐 때만)': 'Detection fine-tuning (only if the puck is not tracked well)',
   '설정을 처음 값으로 되돌릴까요? (맞춰 둔 영역과 등록한 퍽도 처음으로)': 'Reset settings to defaults? (Your fitted area and registered puck are reset too)',
   '이 기기에 저장된 최고 기록을 모두 지울까요? (온라인 랭킹 기록은 그대로)': 'Clear all best scores saved on this device? (Online ranking records stay)',
@@ -268,7 +269,7 @@ export const EN = {
   '인식 마스크 표시(디버그)': 'Show detection mask (debug)',
   '효과음': 'Sound effects',
   '핸즈프리 시작 (퍽을 원 안에 3초)': 'Hands-free start (puck in the circle for 3 s)',
-  '카메라 쪽으로 밀면 화면 위로 (아케이드·퍽 피하기·와이드 드리블·자유 연습)': 'Push toward the camera = up on screen (Arcade, Puck Dodge, Wide Dribble, Free Practice)',
+  '카메라 쪽으로 밀면 화면 위로 (와이드 드리블·퀵 핸즈 제외)': 'Push toward the camera = up on screen (all but Wide Dribble, Quick Hands)',
   '일반': 'Normal',
   '투명 모드': 'Invisible mode',
   '투명': 'Invisible',

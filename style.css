@@ -300,6 +300,13 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px 22px; }
 .settings-grid label.switch { flex-direction: row; font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--ink); }
+/* 투명도 두 슬라이더 + 실시간 미리보기 (좁으면 위아래로) */
+.tp-group { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 250px); gap: 14px 22px; align-items: center; }
+.tp-sliders { display: flex; flex-direction: column; gap: 14px; }
+.tp-preview { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.tp-preview canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: var(--line) solid var(--ink); border-radius: 10px; background: var(--paper-2); }
+.tp-preview figcaption { font-size: 11px; color: var(--mute); text-align: center; }
+@media (max-width: 560px) { .tp-group { grid-template-columns: 1fr; } .tp-preview { max-width: 320px; width: 100%; justify-self: center; } }
 .settings-grid output { float: right; margin-left: 6px; font-family: var(--display); font-weight: 900; font-size: 14px; color: var(--ink); letter-spacing: 0; }
 input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
 

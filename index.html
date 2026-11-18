@@ -291,19 +291,25 @@
           <label class="switch"><input type="checkbox" id="set-mirror" checked /><span>좌우 반전(거울 모드)</span></label>
           <label class="switch"><input type="checkbox" id="set-sound" checked /><span>효과음</span></label>
           <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>핸즈프리 시작 (퍽을 원 안에 3초)</span></label>
-          <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>카메라 쪽으로 밀면 화면 위로 (아케이드·퍽 피하기·와이드 드리블·자유 연습)</span></label>
+          <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>카메라 쪽으로 밀면 화면 위로 (와이드 드리블·퀵 핸즈 제외)</span></label>
           <label>조작 대상
             <select id="set-controller">
               <option value="puck">퍽</option>
               <option value="stick">스틱 블레이드 (퍽 없이 연습)</option>
             </select>
           </label>
-          <label>내 퍽 투명도 % (0 또렷이 · 100 안 보임) <output id="out-puckTransparency"></output>
-            <input type="range" id="set-puckTransparency" min="0" max="100" step="1" />
-          </label>
-          <label>배경 투명도 % (아케이드·퍽 피하기) <output id="out-bgTransparency"></output>
-            <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
-          </label>
+          <div class="tp-group">
+            <div class="tp-sliders">
+              <label>내 퍽 투명도 % (0 또렷이 · 100 안 보임) <output id="out-puckTransparency"></output>
+                <input type="range" id="set-puckTransparency" min="0" max="100" step="1" />
+              </label>
+              <label>배경 투명도 % (와이드 드리블·퀵 핸즈 제외) <output id="out-bgTransparency"></output>
+                <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
+              </label>
+            </div>
+            <!-- 두 투명도를 움직이는 대로 바로 보이는 미리보기 (실시간 카메라 영상 + 종이 배경 + 목표 + 내 퍽) -->
+            <figure class="tp-preview"><canvas id="set-preview" aria-hidden="true"></canvas><figcaption>미리보기 (실시간 카메라)</figcaption></figure>
+          </div>
           <label>게임 영역 실제 폭 (m) <output id="out-floorWidthM"></output>
             <input type="range" id="set-floorWidthM" min="0.5" max="6" step="0.1" />
           </label>

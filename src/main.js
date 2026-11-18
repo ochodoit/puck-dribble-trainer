@@ -3,7 +3,8 @@ import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨
 import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
-import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel } from './game.js';
+import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R } from './game.js';
+import { C, rgba } from './theme.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
@@ -33,7 +34,7 @@ const els = {
   panelRank: $('#panel-rank'), rankMode: $('#rank-mode'), rankAge: $('#rank-age'), rankScope: $('#rank-scope'), rankBody: $('#rank-body'), rankMe: $('#rank-me'), resultRank: $('#result-rank'), btnCalib: $('#btn-calib'), btnSettings: $('#btn-settings'), btnStart: $('#btn-start'),
   splash: $('#splash'), btnCamera: $('#btn-camera'), splashError: $('#splash-error'),
   panelMode: $('#panel-mode'), modeList: $('#mode-list'), versusToggle: $('#versus-toggle'), invisibleToggle: $('#invisible-toggle'), versusNames: $('#versus-names'), p1: $('#p1-name'), p2: $('#p2-name'),
-  panelSettings: $('#panel-settings'), selCamera: $('#sel-camera'),
+  panelSettings: $('#panel-settings'), selCamera: $('#sel-camera'), tpPreview: $('#set-preview'),
   panelCalib: $('#panel-calib'), swatchPuck: $('#swatch-puck'), swatchStick: $('#swatch-stick'), calibPuckDesc: $('#calib-puck-desc'), calibStickDesc: $('#calib-stick-desc'),
   panelCommunity: $('#panel-community'),
   panelResult: $('#panel-result'), resultTitle: $('#result-title'), resultBody: $('#result-body'), btnAgain: $('#btn-result-again'), btnNext: $('#btn-result-next'),
@@ -744,7 +745,7 @@ function bindUI() {
   $('#btn-mouse').addEventListener('click', startMouse);
   els.btnStart.addEventListener('click', toggleRun);
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
-  els.btnSettings.addEventListener('click', () => { refreshAuthUI(); open(els.panelSettings); }); // 계정 줄·운영자 버튼은 열 때 새로
+  els.btnSettings.addEventListener('click', () => { refreshAuthUI(); open(els.panelSettings); requestAnimationFrame(() => drawTransparencyPreview(app.lastVision)); }); // 계정 줄·운영자 버튼은 열 때 새로. 카메라 전에도 미리보기
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleAreaEdit);
   $('#area-done').addEventListener('click', () => endAreaEdit());
@@ -801,7 +802,7 @@ function bindUI() {
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
   for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
     const input = $('#set-' + key), out = $('#out-' + key);
-    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); });
+    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); drawTransparencyPreview(app.lastVision); });
   }
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
@@ -1130,6 +1131,7 @@ function loop(raw) {
   // 설정·운영자·보정·랭킹·로그인·커뮤니티 창이 떠 있으면 뒤의 모든 것을 멈춘다 (게임 시간·날아오는 퍽·대기 원 모두)
   if (optionPanelOpen()) {
     if (clock.pausedAt == null) { clock.pausedAt = raw; app.paused = true; pauseIdle(); updateHud(); }
+    previewWhilePaused();
     return;
   }
   if (clock.pausedAt != null) { clock.offset += raw - clock.pausedAt; clock.pausedAt = null; app.paused = false; }
@@ -1194,6 +1196,7 @@ function loop(raw) {
   game.arcade.idleHold = app.idleHold;
   updatePuckCover(result, now);
   renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null });
+  drawTransparencyPreview(result);
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
   if (now - app.hudAt > 100) { app.hudAt = now; updateHud(); updateChips(result); }
@@ -2163,7 +2166,63 @@ function applySettingsToUI() {
   applyFloorMode();
 }
 
-/** 배경 투명도 설정 -> 아케이드·퍽 피하기의 종이 배경 불투명도 */
+/**
+ * 설정 창의 투명도 미리보기: 실시간 카메라 영상 위에 게임과 같은 순서로 그린다 —
+ * 영상 속 진짜 퍽 가리기(내 퍽 투명도만큼) → 종이 배경(배경 투명도) → 빨간 목표 → 내 퍽(내 퍽 투명도).
+ * 슬라이더를 움직이면 applyWash() 가 값을 바꾸고, 다음 프레임에 바로 보인다 (설정 창이 열려 있을 때만 그림)
+ */
+function drawTransparencyPreview(result) {
+  const cv = els.tpPreview;
+  if (!cv || els.panelSettings.classList.contains('hidden')) return;
+  const v = els.video, dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (v.videoWidth && v.videoHeight) {
+    const ar = `${v.videoWidth} / ${v.videoHeight}`;
+    if (cv.dataset.ar !== ar) { cv.dataset.ar = ar; cv.style.aspectRatio = ar; }
+  }
+  const w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+  if (!w || !h) return;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d');
+  const live = !app.mouseMode && v.readyState >= 2;
+  if (live) { ctx.save(); if (settings.mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); } ctx.drawImage(v, 0, 0, w, h); ctx.restore(); }
+  else { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, w, h); }
+  const pa = renderer.puckAlpha;
+  // 영상 속 진짜 퍽을 둘레 바닥색으로 덮기 (게임 중 퍽 투명도와 같은 방식)
+  const p = result?.puck;
+  if (live && p && pa < 0.999 && settings.controller === 'puck') {
+    const r = Math.max(3, Math.sqrt((p.area || settings.puckModel.area || 40) / Math.PI));
+    const ring = vision.ringColor(p.x, p.y, r * 2.2, r * 3.4) || { r: 236, g: 233, b: 226 };
+    const col = `${Math.round(ring.r)},${Math.round(ring.g)},${Math.round(ring.b)}`;
+    const cx = p.x * (w / vision.PW), cy = p.y * (h / vision.PH), rr = r * (w / vision.PW) * 2.4;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+    g.addColorStop(0, `rgba(${col},${1 - pa})`); g.addColorStop(0.62, `rgba(${col},${1 - pa})`); g.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = rgba(C.paper, renderer.wash); ctx.fillRect(0, 0, w, h); // 평면 판의 종이 배경
+  ctx.beginPath(); ctx.arc(w * 0.72, h * 0.4, w * 0.045, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill(); // 목표 하나
+  // 내 퍽: 지금 보이는 자리(평면 판에서와 같은 자리). 못 찾으면 왼쪽 아래
+  const obj = settings.controller === 'stick' ? result?.stick : p, m = result?.floor?.mapping;
+  let uv = null;
+  if (obj && m) { const [u, v] = m.toUV(obj.x, obj.y); if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) uv = { x: u, y: v }; }
+  else if (tracker.pos && tracker.state !== 'lost') uv = tracker.pos;
+  const pos = uv ? { x: uv.x, y: game.plane.flip ? 1 - uv.y : uv.y } : { x: 0.3, y: 0.62 };
+  ctx.globalAlpha = pa;
+  ctx.beginPath(); ctx.arc(pos.x * w, pos.y * h, Math.max(4 * dpr, PUCK_R * w), 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+/** 설정 창이 열려 모든 것이 멈춘 동안에도 투명도 미리보기는 실시간으로: 영상에서 퍽만 찾고, 게임·추적·대기 원은 그대로 멈춰 둔다 */
+function previewWhilePaused() {
+  if (els.panelSettings.classList.contains('hidden')) return;
+  const video = els.video;
+  if (!app.mouseMode && video.readyState >= 2 && video.currentTime !== app.lastVideoTime) {
+    app.lastVideoTime = video.currentTime;
+    app.lastVision = vision.process(video, settings);
+  }
+  drawTransparencyPreview(app.lastVision);
+}
+
+/** 배경 투명도 설정 -> 아케이드·평면 판 게임의 종이 배경 불투명도 (와이드 드리블·퀵 핸즈는 카메라 그대로) */
 function applyWash() {
   const alpha = clamp(1 - settings.bgTransparency / 100, 0, 1);
   game.arcade.wash = alpha;

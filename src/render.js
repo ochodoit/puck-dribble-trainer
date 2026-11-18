@@ -56,7 +56,7 @@ export class Renderer {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     const pa = game.running || peek ? this.puckAlpha : 1; // 내 퍽 표시 농도: 대기·등록 화면에서는 항상 또렷이
     // 지금 그리는 화면: 'setup'(영역·등록·움직여 보기) · 'arcade' · 'floor'(바닥 위에 원근대로) · 'flat'(평면 판)
-    const playing = mapping && !areaEditing && !(calib?.active && calib.circle) && !setupTest;
+    const playing = mapping && !areaEditing && !(calib?.active && calib.circle && !calib.plane) && !setupTest; // calib.plane: 8자 대기 원은 흰 훈련 화면 위에
     const view = !playing ? 'setup' : game.mode.id === 'arcade' ? 'arcade' : FLOOR_MODES.has(game.mode.id) ? 'floor' : 'flat';
 
     // ---- 게임 영역 (평면 판 모드에서는 그리지 않음: 평면 판이 곧 영역이라 뒤에 비치는 사다리꼴은 헷갈리기만 한다) ----
@@ -86,7 +86,7 @@ export class Renderer {
     }
 
     // ---- 가운데 원: 물체 등록 / 핸즈프리 시작 ----
-    if (calib?.active && calib.circle) {
+    if (calib?.active && calib.circle && !calib.plane) {
       this._drawCalib(ctx, calib, toC, sx, unit, fs, hair, idleHold);
       if (mapping && !calib.manual) { this._drawStick(ctx, vision.stick, toC, unit, hair); this._drawPuck(ctx, puck, uvToC, unit, hair, now, PUCK_R * this._floorPx(uvToC)); }
       return;
@@ -118,7 +118,7 @@ export class Renderer {
         free: this._drawCourse, obstacle: this._drawDodge,
         figure8: this._drawFigure8, reaction: this._drawReaction,
       }[game.mode.id] || this._drawCourse;
-      drawField.call(this, ctx, W, H, game, puck, now);
+      drawField.call(this, ctx, W, H, game, puck, now, { calib, idleHold });
     }
 
     // ---- 디버그: 퍽 후보 (카메라 좌표) ----
@@ -133,7 +133,8 @@ export class Renderer {
 
   /** 카메라 영상 속 실제 퍽 자리: 작은 레드 고리 (평면 경기장과 영상의 관계를 보여 준다) */
   _cameraPuck(ctx, vision, toC, unit, hair, pa) {
-    if (!vision.puck || pa <= 0.001) return;
+    // 배경이 흰 화면으로 다 덮이면(배경 투명도 0) 카메라 속 자리를 알려 줄 필요가 없다 (빨간 고리가 피할 퍽처럼 보이지 않게)
+    if (!vision.puck || pa <= 0.001 || this.wash >= 0.999) return;
     const [cx, cy] = toC(vision.puck.x, vision.puck.y);
     ctx.beginPath(); ctx.arc(cx, cy, unit * 0.012, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.7 * pa); ctx.stroke();
   }
@@ -207,10 +208,10 @@ export class Renderer {
     }
   }
 
-  /** 지금 가야 할 목표: 진한 빨강 정원 + 맥박 고리 (8자 게이트·반응 타겟 공통) */
-  _nextDot(ctx, cx, cy, r, pulse, hair) {
-    ctx.beginPath(); ctx.arc(cx, cy, r * (1.35 + 0.15 * pulse), 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.3 + 0.3 * pulse); ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill();
+  /** 지금 가야 할 목표: 진한 정원 + 맥박 고리 (8자 게이트 = 빨강, 반응 타겟 = 잉크) */
+  _nextDot(ctx, cx, cy, r, pulse, hair, color = C.red) {
+    ctx.beginPath(); ctx.arc(cx, cy, r * (1.35 + 0.15 * pulse), 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(color, 0.3 + 0.3 * pulse); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
   }
 
   /** 자유 연습 코스 평면: 번호 포인트(DOM)가 놓인 경기장에 경로선·다음 목표·내 퍽을 그린다 */
@@ -264,6 +265,11 @@ export class Renderer {
     const pxPerX = (x, y) => { const a = P(x - 0.01, y), b = P(x + 0.01, y); return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.02; };
     const cs = [P(0, 0), P(1, 0), P(1, A), P(0, A)], xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
     const f = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    // 배경 투명도 (와이드 = 0 이면 흰 화면, 아니면 칠하지 않음 · 퀵 핸즈 = 설정대로): 카메라 영상 위에 종이색. 바닥 틀은 그 위에 다시 그린다
+    if (this.wash > 0.001) {
+      ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(0, 0, W, H);
+      path([[0, 0], [1, 0], [1, A], [0, A]]); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.25 + 0.5 * this.wash); ctx.stroke();
+    }
     return { f, S: this._floorPx(uvToC), A, P, hair, fs, dpr, path, rect, pxPerX };
   }
 
@@ -401,7 +407,7 @@ export class Renderer {
    * 8자 드리블 평면: 두 콘(위에서 본 충돌 범위 + 콘 모양), 게이트 = 다음 진한 빨강 · 그다음 옅은 빨강 · 나머지 옅은 잉크 고리(코스 모양).
    * 게이트는 평면 좌표 그대로 — 화면의 위·아래 = 8자 방향의 위로·아래로
    */
-  _drawFigure8(ctx, W, H, game, puck, now) {
+  _drawFigure8(ctx, W, H, game, puck, now, { calib = null, idleHold = 0 } = {}) {
     ctx.save();
     const K = this._field(ctx, W, H, game);
     const { S, P, hair, fs } = K;
@@ -435,6 +441,8 @@ export class Renderer {
     }
     // 시작 대기: 가운데 원에 퍽을 둔 채로 3·2·1 (원이 시계 방향으로 차오름) -> 다 세면 시작
     if (game.running && game.f8Hold) this._drawHoldCircle(ctx, P(game.center.x, game.center.y), F8_HOLD_R * S, game.f8Hold.t / F8_HOLD_SEC, hair, fs, true);
+    // 대기 중 핸즈프리 시작도 같은 흰 훈련 화면의 가운데 원에서 (카메라 화면으로 바꾸지 않는다)
+    else if (!game.running && calib?.active && calib.plane) this._drawHoldCircle(ctx, P(game.center.x, game.center.y), F8_HOLD_R * S, Math.min(1, idleHold / 3), hair, fs, true);
     this._drawMe(ctx, game, puck, now, K);
     this._fieldEffects(ctx, game, K, W, 0.05);
     ctx.restore();
@@ -459,7 +467,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** 반응 타겟 평면: 진한 빨강 정원 하나. 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다 */
+  /** 반응 타겟 평면: 진한 잉크 정원 하나. 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다 */
   _drawReaction(ctx, W, H, game, puck, now) {
     ctx.save();
     const K = this._field(ctx, W, H, game);
@@ -470,9 +478,9 @@ export class Renderer {
       const age = (now - t.born) / 1000;
       if (age >= 0 && age < 0.3) {
         const k = 1 - age / 0.3;
-        ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 2.2 * k), 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.red, 0.15 + 0.7 * k); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 2.2 * k), 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.ink, 0.15 + 0.7 * k); ctx.stroke();
       }
-      this._nextDot(ctx, cx, cy, r, pulse, hair);
+      this._nextDot(ctx, cx, cy, r, pulse, hair, C.ink);
     }
     this._drawMe(ctx, game, puck, now, K);
     if (!game.running) text(ctx, game.mode.desc, f.x + f.w / 2, f.y + f.h / 2, fs, { weight: 600, color: C.inkSoft, halo: true });

@@ -13,7 +13,7 @@
 - Leaderboards: world, country, team and age group (U8–U18, adult, senior).
 
 ## The 7 games
-- **Arcade** (아케이드): Dodge the black pucks falling down the lane and collect coins. Every change of direction (a touch) scores, and you compete on your score over 1, 3 or 5 minutes. Trains: Side-to-side stickhandling · seeing the play while handling the puck · quick decisions.
+- **Arcade** (아케이드): Dodge the red pucks falling down the lane and collect coins. Every change of direction (a touch) scores, and you compete on your score over 1, 3 or 5 minutes. Trains: Side-to-side stickhandling · seeing the play while handling the puck · quick decisions.
 - **Dodge** (퍽 피하기): Avoid the red pucks flying in from all four sides of the field. More of them come at once as time goes on. Trains: 360° puck control · stops and changes of direction · reading danger.
 - **Wide Dribble** (와이드 드리블): Three drills in a row that take the puck all the way to each side (edge to edge · short touches at both ends · both ends and the middle). The red zones are drawn on the real floor in the camera view, and a touch counts when the center of the puck enters the zone. Each drill starts when you hold the puck in the center for 3 seconds. Trains: Wide stickhandling · reach · rhythm.
 - **Figure 8** (8자 드리블): Skate the puck through the gates in a figure 8 around two cones. Pick which cone comes first (left or right) and clockwise or counterclockwise on the game screen. Trains: Forehand–backhand transitions · protecting the puck · keeping control through turns.

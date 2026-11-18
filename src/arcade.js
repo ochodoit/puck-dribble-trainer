@@ -1,6 +1,6 @@
 // 아케이드: 웹캠으로 추적한 퍽의 (X, Y)를 화면 하단 플레이 존에 매핑하는 체감형 스틱핸들링 게임
 // 좌표계: 화면 폭 = 1 단위, 높이 = aspect (H/W). 좌우 테두리 안쪽이 경기장 레인, 플레이 존은 하단 30%.
-// 규칙: 검정 퍽들이 같은 속도로, 서로 겹치지 않게 내려온다. coin(노란 원)만 먹고, 검정 퍽은 피한다. 빨간 원 = 나.
+// 규칙: 빨간 퍽들이 같은 속도로, 서로 겹치지 않게 내려온다. coin(노란 원)만 먹고, 빨간 퍽은 피한다. 검정 원 = 나 (퍽 피하기와 같은 색·크기).
 //       일부 퍽은 내 퍽이 있는 줄을 겨냥해 떨어지므로 가만히 있으면 맞는다 (잦은 터치로 피한다).
 //       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점.
 import { C, F, rgba, text, sparks, font, alphaLayer } from './theme.js';
@@ -8,7 +8,7 @@ import { clockNow } from './clock.js';
 
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
-export const PUCK_R = 0.022;         // 내 퍽 반지름 (화면 폭 단위)
+export const PUCK_R = 0.01125;       // 내 퍽 반지름 (화면 폭 단위) = 퍽 피하기의 내 퍽 (경기장 폭 0.9 × 0.0125)
 // 점수: 더하기만 한다 (배율·보너스 없음). coin을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
 //       가만히 있으면 점수가 나지 않는다. 나를 겨냥한 퍽을 피한 것 자체에는 점수가 없다(피한 수는 기록만).
 export const HIT_PENALTY = 10;       // 충돌 감점
@@ -25,8 +25,8 @@ const INVULN_MS = 1500;              // 피격 후 무적
 const COUNTDOWN_S = 3;               // 헤드업 카운트다운 (페이스오프 서클에 정지)
 const PAUSE_AFTER_LOST_MS = 600;     // 추적 끊김이 이 시간을 넘으면 일시정지 (시간도 멈춤)
 
-// 피해야 하는 퍽의 색: 모두 잉크 블랙. 레드 = 나, 옐로 = 먹는 coin.
-export const PUCK_COLORS = [C.ink];
+// 피해야 하는 퍽의 색: 모두 레드 (퍽 피하기와 같게). 잉크 블랙 = 나, 옐로 = 먹는 coin.
+export const PUCK_COLORS = [C.red];
 
 // speed: 낙하 속도(화면 폭/초) — 한 판 내내 일정. 난이도는 '개수'로만 올라간다.
 // 난이도별로 '개수'(interval: 퍽이 나오는 간격, 짧을수록 많음)와 '속도'가 다르다.
@@ -37,7 +37,7 @@ const DIFF = {
   hard:   { speed: 0.36, interval: 0.20, minInterval: 0.08, aim: 0.40 },   // 빠르고 촘촘하게
 };
 const AIM_SPREAD = 0.04;                // 겨냥한 퍽이 내 퍽 x에서 벗어나는 범위 (화면 폭 단위)
-export const FALL_R = [0.013, 0.021];   // 내려오는 퍽 반지름 범위 (이전의 절반)
+export const FALL_R = [0.01575, 0.01575]; // 내려오는 퍽 반지름 = 퍽 피하기의 빨간 퍽 (경기장 폭 0.9 × 0.0175)
 export const COIN_R = 0.013;            // coin 반지름 (이전의 절반)
 const SPAWN_GAP = 0.012;                // 퍽끼리 최소 간격 (겹치지 않게)
 
@@ -176,7 +176,7 @@ export class Arcade {
     }
     this.pickups = this.pickups.filter((p) => !p.taken && p.y - p.r < this.aspect + 0.05);
 
-    this.instruction = 'coin은 먹고, 검정 퍽은 좌우로 쳐서 피하기';
+    this.instruction = 'coin은 먹고, 빨간 퍽은 좌우로 쳐서 피하기';
   }
 
   _updateCountdown(dt, tracked) {
@@ -210,7 +210,7 @@ export class Arcade {
   }
 
   /**
-   * 검정 퍽 하나를 맨 위에서 떨어뜨린다 (속도는 모두 같고, 서로 겹치지 않음).
+   * 빨간 퍽 하나를 맨 위에서 떨어뜨린다 (속도는 모두 같고, 서로 겹치지 않음).
    * 일부(난이도별 aim 비율)는 내 퍽이 있는 x 근처를 겨냥해, 가만히 있으면 맞도록 한다.
    */
   _spawnPuck(vy, avatar) {
@@ -291,7 +291,7 @@ export class Arcade {
   }
 
   // =================== 렌더링 (화면 좌표, 폭 = W) ===================
-  // 종이색 화면 + 좌우 헤어라인 테두리. 모든 퍽은 외곽선 없는 정원. 레드 = 나, 옐로 = 먹는 퍽.
+  // 종이색 화면 + 좌우 헤어라인 테두리. 모든 퍽은 테두리 없는 정원. 잉크 = 나, 레드 = 피할 퍽, 옐로 = 먹는 coin.
   draw(ctx, W, H, now, puck) {
     const S = W; // 1 단위 = 화면 폭
     const dpr = W / (ctx.canvas.clientWidth || W);
@@ -346,8 +346,6 @@ export class Arcade {
       const x = o.x * S, y = o.y * S, r = o.r * S;
       if (o.hit && Math.floor(now / 80) % 2 === 0) ctx.globalAlpha = 0.25;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = o.color; ctx.fill();
-      // 퍽 윗면: 종이색 가는 고리 하나
-      ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.35); ctx.stroke();
       ctx.globalAlpha = 1;
     }
     // coin: 동전 모양 (톱니 테두리 + 안쪽 고리 + 가운데 'coin' 글자)
@@ -388,7 +386,7 @@ export class Arcade {
     ctx.restore();
   }
 
-  /** 규칙 범례: coin은 먹고, 검정 퍽은 피한다 */
+  /** 규칙 범례: coin은 먹고, 빨간 퍽은 피한다 */
   _drawLegend(ctx, S, zt, fs) {
     const W = S, y = zt - W * 0.2, r = fs * 0.55;
     let x = W / 2 - fs * 9.5;
@@ -411,7 +409,7 @@ export class Arcade {
     }
   }
 
-  /** 내 퍽: 레드 정원 + 한 겹 떨어진 잉크 헤어라인 고리 */
+  /** 내 퍽: 테두리 없는 잉크 정원 (퍽 피하기의 내 퍽과 같은 크기) */
   _drawAvatar(ctx, S, now, puck, ghost, hair) {
     const W = S;
     const a = this.avatar;
@@ -420,7 +418,7 @@ export class Arcade {
       return;
     }
     const x = a.x * S, y = a.y * S, r = PUCK_R * S;
-    // 궤적: 레드 헤어라인
+    // 궤적: 잉크 헤어라인
     if (puck?.trail?.length > 1) {
       ctx.lineWidth = hair;
       for (let i = 1; i < puck.trail.length; i++) {
@@ -428,16 +426,14 @@ export class Arcade {
         const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.5;
         if (alpha <= 0) continue;
         ctx.beginPath(); ctx.moveTo(p0.x * S, p0.y * S); ctx.lineTo(p1.x * S, p1.y * S);
-        ctx.strokeStyle = rgba(C.red, alpha); ctx.stroke();
+        ctx.strokeStyle = rgba(C.ink, alpha); ctx.stroke();
       }
     }
     const invuln = now < this.invulnUntil;
     if (invuln && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
     const predicted = puck?.state === 'predicted';
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = ghost ? rgba(C.red, 0.3) : predicted ? rgba(C.red, 0.45) : C.red; ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, r * 1.5, 0, Math.PI * 2);
-    ctx.lineWidth = hair; ctx.strokeStyle = predicted || ghost ? rgba(C.ink, 0.4) : C.ink; ctx.stroke();
+    ctx.fillStyle = ghost ? rgba(C.ink, 0.3) : predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
     ctx.globalAlpha = 1;
   }
 }

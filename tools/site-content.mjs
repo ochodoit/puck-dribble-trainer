@@ -41,8 +41,8 @@ export const HOME = {
 /** 7가지 게임 (게임 페이지·구조화 데이터·llms.txt) */
 export const GAMES = [
   { id: 'arcade',
-    ko: { name: '아케이드', what: '내려오는 검정 퍽을 좌우로 피하고 coin을 모읍니다. 퍽의 방향을 바꿀 때마다(터치) 점수가 오르고, 1·3·5분 동안의 점수로 겨룹니다.', skills: '좌우 스틱핸들링 · 퍽을 다루면서 주변 보기 · 순간 판단' },
-    en: { name: 'Arcade', what: 'Dodge the black pucks falling down the lane and collect coins. Every change of direction (a touch) scores, and you compete on your score over 1, 3 or 5 minutes.', skills: 'Side-to-side stickhandling · seeing the play while handling the puck · quick decisions' } },
+    ko: { name: '아케이드', what: '내려오는 빨간 퍽을 좌우로 피하고 coin을 모읍니다. 퍽의 방향을 바꿀 때마다(터치) 점수가 오르고, 1·3·5분 동안의 점수로 겨룹니다.', skills: '좌우 스틱핸들링 · 퍽을 다루면서 주변 보기 · 순간 판단' },
+    en: { name: 'Arcade', what: 'Dodge the red pucks falling down the lane and collect coins. Every change of direction (a touch) scores, and you compete on your score over 1, 3 or 5 minutes.', skills: 'Side-to-side stickhandling · seeing the play while handling the puck · quick decisions' } },
   { id: 'obstacle',
     ko: { name: '퍽 피하기', what: '경기장 네 변에서 날아오는 빨간 퍽을 피합니다. 시간이 갈수록 동시에 날아오는 퍽이 늘어납니다.', skills: '360° 퍽 컨트롤 · 급정지와 방향 전환 · 위험 읽기' },
     en: { name: 'Dodge', what: 'Avoid the red pucks flying in from all four sides of the field. More of them come at once as time goes on.', skills: '360° puck control · stops and changes of direction · reading danger' } },

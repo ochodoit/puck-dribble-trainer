@@ -301,9 +301,10 @@
               <label>My puck transparency % (0 clear · 100 invisible) <output id="out-puckTransparency"></output>
                 <input type="range" id="set-puckTransparency" min="0" max="100" step="1" />
               </label>
-              <label>Background transparency % (all but Wide Dribble, Quick Hands) <output id="out-bgTransparency"></output>
+              <label>Background transparency % (how much camera shows through on the field) <output id="out-bgTransparency"></output>
                 <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
               </label>
+              <p id="visual-note" class="muted visual-note hidden"></p>
             </div>
             <!-- 두 투명도를 움직이는 대로 바로 보이는 미리보기 (실시간 카메라 영상 + 종이 배경 + 목표 + 내 퍽) -->
             <figure class="tp-preview"><canvas id="set-preview" aria-hidden="true"></canvas><figcaption>Preview (live camera)</figcaption></figure>

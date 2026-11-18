@@ -303,9 +303,10 @@
               <label>내 퍽 투명도 % (0 또렷이 · 100 안 보임) <output id="out-puckTransparency"></output>
                 <input type="range" id="set-puckTransparency" min="0" max="100" step="1" />
               </label>
-              <label>배경 투명도 % (와이드 드리블·퀵 핸즈 제외) <output id="out-bgTransparency"></output>
+              <label>배경 투명도 % (경기장에 카메라가 비치는 정도) <output id="out-bgTransparency"></output>
                 <input type="range" id="set-bgTransparency" min="0" max="100" step="5" />
               </label>
+              <p id="visual-note" class="muted visual-note hidden"></p>
             </div>
             <!-- 두 투명도를 움직이는 대로 바로 보이는 미리보기 (실시간 카메라 영상 + 종이 배경 + 목표 + 내 퍽) -->
             <figure class="tp-preview"><canvas id="set-preview" aria-hidden="true"></canvas><figcaption>미리보기 (실시간 카메라)</figcaption></figure>

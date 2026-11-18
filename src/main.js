@@ -3,7 +3,7 @@ import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨
 import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
-import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R } from './game.js';
+import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
 import { C, rgba } from './theme.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
@@ -745,7 +745,7 @@ function bindUI() {
   $('#btn-mouse').addEventListener('click', startMouse);
   els.btnStart.addEventListener('click', toggleRun);
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
-  els.btnSettings.addEventListener('click', () => { refreshAuthUI(); open(els.panelSettings); requestAnimationFrame(() => drawTransparencyPreview(app.lastVision)); }); // 계정 줄·운영자 버튼은 열 때 새로. 카메라 전에도 미리보기
+  els.btnSettings.addEventListener('click', () => { refreshAuthUI(); refreshVisualLocks(); open(els.panelSettings); requestAnimationFrame(() => drawTransparencyPreview(app.lastVision)); }); // 계정 줄·운영자 버튼은 열 때 새로. 카메라 전에도 미리보기
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleAreaEdit);
   $('#area-done').addEventListener('click', () => endAreaEdit());
@@ -802,7 +802,7 @@ function bindUI() {
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
   for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
     const input = $('#set-' + key), out = $('#out-' + key);
-    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); drawTransparencyPreview(app.lastVision); });
+    input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); refreshVisualLocks(); drawTransparencyPreview(app.lastVision); });
     if (key === 'bgTransparency' || key === 'puckTransparency') {
       // 끄는 동안만 설정 창 대신 실제 화면 (손을 떼면 다시 설정 창)
       const label = input.closest('label'), on = () => setTpPeek(true, label), off = () => setTpPeek(false);
@@ -1202,6 +1202,7 @@ function loop(raw) {
 
   game.arcade.idleAutoStart = settings.autoStart;
   game.arcade.idleHold = app.idleHold;
+  applyWash(); // 게임마다 다른 배경·퍽 투명도 규칙 (모드가 바뀌어도 바로)
   updatePuckCover(result, now);
   renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null });
   drawTransparencyPreview(result);
@@ -1479,12 +1480,19 @@ function updateIdleCircle(dt) {
   c.active = true; c.manual = false; c.target = 'puck';
   c.circle = vision.calibCircle();
   c.registered = app.mouseMode ? { r: 224, g: 60, b: 49, area: 1 } : settings.puckModel.area > 0 ? settings.puckModel : null; // 마우스 모드: 커서가 곧 등록된 퍽
+  // 8자 드리블: 등록된 퍽이 있으면 시작 원과 퍽 인식을 흰 훈련 화면(평면 경기장)의 가운데 원에서 한다
+  c.plane = game.mode.id === 'figure8' && !!c.registered;
   const circle = c.circle;
   const mapping = app.lastVision?.floor?.mapping;
   let puckInCircle = false;
   if (tracker.state === 'tracked' && tracker.pos && mapping) {
-    const [px, py] = mapping.toPx(tracker.pos.x, tracker.pos.y);
-    puckInCircle = Math.hypot(px - circle.x, py - circle.y) < circle.r * 1.3;
+    if (c.plane) {
+      const me = game.toPlane(tracker.pos.x, tracker.pos.y);
+      puckInCircle = Math.hypot(me.x - game.center.x, me.y - game.center.y) < F8_HOLD_R * 1.25;
+    } else {
+      const [px, py] = mapping.toPx(tracker.pos.x, tracker.pos.y);
+      puckInCircle = Math.hypot(px - circle.x, py - circle.y) < circle.r * 1.3;
+    }
   }
   if (tracker.state === 'tracked' && tracker.pos && !puckInCircle) app.idleBlocked = false;
   if (puckInCircle && app.idleBlocked) {
@@ -1506,6 +1514,8 @@ function updateIdleCircle(dt) {
     return;
   }
   app.idleHold = 0; app.idleTick = -1;
+  // 8자 흰 화면 시작 원: 카메라 원 안의 물체 학습은 하지 않는다 (퍽 교체는 다른 게임 화면이나 보정에서)
+  if (c.plane) { autoCal.reset(); c.hold = 0; c.status = 'none'; c.sample = null; $('#btn-replace-puck').classList.add('hidden'); return; }
   if (app.mouseMode) { autoCal.reset(); c.hold = 0; c.status = 'none'; c.sample = null; return; } // 마우스 모드: 물체 학습 없음
   const sample = vision.autoCalibSample();
   const registered = settings.puckModel.area > 0;
@@ -1633,7 +1643,7 @@ function startRun(opts = {}) {
   game.start(tracker, opts);
   if (!app.mouseMode) track('game_start', { mode: game.mode.name, member: app.account?.current() ? 'member' : 'guest' });
   if (settings.invisible) toast('투명 모드 — 화면에 내 퍽이 보이지 않습니다. 손의 감각으로!', 2600);
-  else if (settings.puckTransparency > 0) toast(settings.puckTransparency === 100 ? '내 퍽 투명도 100% — 화면에 퍽이 보이지 않습니다. 감각으로 영역에 들어가세요!' : `내 퍽 투명도 ${settings.puckTransparency}%`, 2600);
+  else if (visualRules().puck > 0) { const pt = visualRules().puck; toast(pt === 100 ? '내 퍽 투명도 100% — 화면에 퍽이 보이지 않습니다. 감각으로 영역에 들어가세요!' : `내 퍽 투명도 ${pt}%`, 2600); }
   updateHud();
 }
 
@@ -2260,15 +2270,52 @@ function drawPeek(now) {
   renderer.draw({ vision: result, puck, game, procSize: { PW: vision.PW, PH: vision.PH }, now, cover: app.cover, peek: true });
 }
 
-/** 배경 투명도 설정 -> 아케이드·평면 판 게임의 종이 배경 불투명도 (와이드 드리블·퀵 핸즈는 카메라 그대로) */
+/**
+ * 게임마다 배경·퍽 투명도 규칙 (bg·puck: 실제로 쓰는 투명도 %, bgLock·puckLock: 이 게임에서 설정을 못 바꾸는지)
+ *  - 아케이드·퍽 피하기·8자 드리블: 배경 0 고정 (흰 화면), 퍽만 조절
+ *  - 와이드 드리블: 배경 0 이면 퍽 0~100, 배경을 1 이상 주면 흰 칠 없이 카메라 그대로 + 퍽 투명도 0 고정
+ *  - 퀵 핸즈: 배경만 조절, 퍽 투명도 0 고정
+ *  - 반응 타겟·자유 연습: 둘 다 조절
+ */
+function visualRules(modeId = game.mode.id) {
+  const bgSet = settings.bgTransparency, puckSet = settings.puckTransparency;
+  switch (modeId) {
+    case 'arcade': case 'obstacle': case 'figure8':
+      return { bg: 0, puck: puckSet, bgLock: true, puckLock: false };
+    case 'wide':
+      return bgSet > 0 ? { bg: 100, puck: 0, bgLock: false, puckLock: true } : { bg: 0, puck: puckSet, bgLock: false, puckLock: false };
+    case 'quick':
+      return { bg: bgSet, puck: 0, bgLock: false, puckLock: true };
+    default:
+      return { bg: bgSet, puck: puckSet, bgLock: false, puckLock: false };
+  }
+}
+
+/** 배경·퍽 투명도 -> 종이 배경 불투명도와 내 퍽 표시 농도 (게임마다 규칙은 visualRules). 매 프레임 불러 모드가 바뀌어도 바로 맞춘다 */
 function applyWash() {
-  const alpha = clamp(1 - settings.bgTransparency / 100, 0, 1);
+  const v = visualRules();
+  const alpha = clamp(1 - v.bg / 100, 0, 1);
   game.arcade.wash = alpha;
   renderer.wash = alpha;
   // 내 퍽 표시 농도: 플레이 중 화면의 내 퍽을 흐리게/안 보이게 (감각으로 플레이하는 헤드업 훈련). 투명 모드는 항상 0
-  const pa = settings.invisible ? 0 : clamp(1 - settings.puckTransparency / 100, 0, 1);
+  const pa = settings.invisible ? 0 : clamp(1 - v.puck / 100, 0, 1);
   game.arcade.puckAlpha = pa;
   renderer.puckAlpha = pa;
+}
+
+/** 설정 창: 지금 게임에서 못 바꾸는 투명도 슬라이더는 잠그고 이유를 적는다 */
+function refreshVisualLocks() {
+  const v = visualRules(), name = game.mode.name;
+  const bgIn = $('#set-bgTransparency'), puckIn = $('#set-puckTransparency');
+  bgIn.disabled = v.bgLock; puckIn.disabled = v.puckLock;
+  bgIn.closest('label').classList.toggle('locked', v.bgLock);
+  puckIn.closest('label').classList.toggle('locked', v.puckLock);
+  const note = $('#visual-note');
+  const msg = v.bgLock ? `${name}: 배경 투명도 0 고정 (흰 화면) · 퍽 투명도만 조절`
+    : game.mode.id === 'quick' ? `${name}: 배경 투명도만 조절 · 퍽 투명도 0 고정`
+      : game.mode.id === 'wide' ? (v.puckLock ? `${name}: 배경 투명도를 주면 카메라 그대로 · 퍽 투명도 0 고정` : `${name}: 배경 투명도 0 일 때만 퍽 투명도 조절`)
+        : '';
+  note.textContent = msg; note.classList.toggle('hidden', !msg);
 }
 
 /**

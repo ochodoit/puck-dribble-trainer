@@ -198,6 +198,32 @@ export function validateFeedback({ good, fix } = {}) {
 export const STICKS = ['L', 'R'];
 export const stickLabel = (s) => (s === 'L' ? '레프트' : s === 'R' ? '라이트' : '');
 
+// ---- 순위 색인 (온라인 랭킹의 읽기를 아끼려고 순위를 Firestore count 쿼리로 센다) ----
+// 연령대·국가·팀 안의 순위는 기록 문서의 색인 칸(ags·cts·tms = '묶음|10자리 점수')의 범위로 센다.
+// 칸 하나의 범위만 쓰므로 복합 색인 없이 Firestore 기본 색인으로 된다. 규칙(firestore.rules rankIdxOk)과 같은 모양.
+/** 점수 최댓값 (규칙 scoreOk 와 같음) */
+export const SCORE_MAX = 1000000;
+const RANK_BASE = 1000000000;
+/** 필터 -> 색인 칸 */
+export const RANK_FIELDS = { ageGroup: 'ags', country: 'cts', team: 'tms' };
+/** 묶음 값: 팀은 대소문자를 가리지 않는다 (matches 와 같음) */
+export const rankGroup = (key, v) => (key === 'team' ? String(v).toLowerCase() : String(v));
+/** 묶음 + 점수 -> 그 묶음 안에서 점수순으로 정렬되는 문자열. 예: ('U12', 1234) -> 'U12|1000001234' */
+export const rankIdx = (group, score) => `${group}|${RANK_BASE + Math.max(0, Math.min(SCORE_MAX, Math.round(Number(score) || 0)))}`;
+/** 기록 문서에 붙이는 순위 색인 칸 { ags, cts, tms } (값이 없는 묶음은 뺀다) */
+export function rankIdxFields(e) {
+  const f = {};
+  for (const [k, field] of Object.entries(RANK_FIELDS)) if (e[k] != null && e[k] !== '') f[field] = rankIdx(rankGroup(k, e[k]), e.score);
+  return f;
+}
+/** 쓰는 필터 (연령대·국가·팀 중 값이 있는 것) */
+export const activeFilters = (f = {}) => Object.keys(RANK_FIELDS).filter((k) => f[k]);
+/** 점수 높은 순 행에 순위 매기기: 같은 점수는 같은 순위 (1, 2, 2, 4) — count 로 센 '내 순위'와 맞춘다 */
+export function competitionRanks(rows) {
+  let last = null, rank = 0;
+  return rows.map((r, i) => { if (r.score !== last) { rank = i + 1; last = r.score; } return { ...r, rank }; });
+}
+
 /** 리더보드(점수 높은 순) -> 내 순위 요약: 전체·내 국가·내 팀. 기록이 없으면 null */
 export function rankSummaryOf(rows, u) {
   if (!u) return null;

@@ -871,6 +871,14 @@ const skipSetup = async (page, touch = false) => {
   if (missing.length) failed = true;
 }
 
+// ---- 8) 온라인 랭킹 순위 계산 (가짜 Firestore): count 쿼리·순위 색인 칸·읽기 수·복합 색인 없는 쿼리 ----
+{
+  const { checkRanks } = await import('./rank-firebase.mjs');
+  const { ok, logs } = await checkRanks().catch((e) => ({ ok: false, logs: [`FAIL online ranking check threw: ${e.stack || e}`] }));
+  for (const l of logs) console.log(l);
+  if (!ok) failed = true;
+}
+
 await browser.close();
 server.close();
 console.log(failed ? '\nSOME TESTS FAILED' : '\nALL TESTS PASSED');

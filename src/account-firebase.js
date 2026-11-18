@@ -6,8 +6,9 @@
 //         config/lottery 의견 추첨 결과, admins/{uid} 운영자(콘솔에서 만듦),
 //         feedback/{uid} 개발자에게 (베타 종료일 전에 보내면 3개월 이용권 추첨 대상)
 import {
-  validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, rankAmong, NOT_READY,
-  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, rankSummaryOf, validateEdit, INVITE_MAX, COUPON_MONTHS,
+  validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, NOT_READY,
+  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, validateEdit, INVITE_MAX, COUPON_MONTHS,
+  SCORE_MAX, RANK_FIELDS, rankGroup, rankIdx, rankIdxFields, activeFilters, competitionRanks,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
 
@@ -17,10 +18,12 @@ const nickLocal = (nick) => `u-${[...new TextEncoder().encode(normNick(nick))].m
 // 예전 로그인 주소의 도메인. 우리가 가진 도메인이 아니라서(누구나 살 수 있음) 새 계정에는 쓰지 않는다.
 // 새 계정은 이 프로젝트의 Firebase 도메인(authDomain)을 쓴다: 아무도 그 주소로 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없다.
 const LEGACY_DOMAIN = 'puck-trainer.app';
+/** 리더보드를 다시 읽지 않는 시간 (랭킹 화면에서 조건을 바꿔 보는 동안) */
+const BOARD_TTL = 60 * 1000;
 const BAD_LOGIN = ['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong-password', 'auth/invalid-login-credentials', 'auth/invalid-email'];
 
 export class FirebaseAccountStore {
-  constructor(config) { this.kind = 'firebase'; this.config = config; this.user = null; this.site = {}; }
+  constructor(config) { this.kind = 'firebase'; this.config = config; this.user = null; this.site = {}; this._boards = new Map(); this._mine = null; }
 
   async ready() {
     const [{ initializeApp }, auth, fs] = await Promise.all([
@@ -180,6 +183,52 @@ export class FirebaseAccountStore {
     return this.user;
   }
 
+  // ---- 랭킹 ----
+  // 읽기를 아끼려고 순위는 count 쿼리로 센다 (일치하는 기록 1,000개당 읽기 1건). 연령대·국가·팀 안의 순위는
+  // 기록 문서의 색인 칸(ags·cts·tms, account.js rankIdx)의 범위로 센다: 칸 하나의 범위라 복합 색인이 필요 없다.
+  // 그래서 게임 한 판 끝(회원): 내 기록 1 + 전체 순위 2 + 연령대 순위 2 ≈ 읽기 5건 (예전: 상위 300개를 두 번 ≈ 600건)
+  _scoreCol(mode) { return this.F.collection(this.db, `scores_${mode}`); }
+  /** 묶음(연령대·국가·팀) 안의 범위 조건: 색인 칸이 lo(포함, op '>=') 또는 lo 초과(op '>')부터 그 묶음의 끝까지 */
+  _groupWhere(key, value, lo = 0, op = '>=') {
+    const { where } = this.F, field = RANK_FIELDS[key], g = rankGroup(key, value);
+    return [where(field, op, rankIdx(g, lo)), where(field, '<=', rankIdx(g, SCORE_MAX))];
+  }
+  async _count(mode, ...cons) { return (await this.F.getCountFromServer(this.F.query(this._scoreCol(mode), ...cons))).data().count; }
+  /** score 보다 높은 기록 수 (key 가 있으면 그 묶음 안에서) */
+  _above(mode, score, key = null, value = null) {
+    return key ? this._count(mode, ...this._groupWhere(key, value, score, '>')) : this._count(mode, this.F.where('score', '>', score));
+  }
+  /** 기록 수 (key 가 있으면 그 묶음 안에서) */
+  _total(mode, key = null, value = null) { return key ? this._count(mode, ...this._groupWhere(key, value)) : this._count(mode); }
+
+  /** 내 기록 문서를 기억해 둔다 (같은 판의 순위 계산·내 정보에서 다시 읽지 않게). data = null 이면 기록 없음 */
+  _remember(mode, data) {
+    if (!this._mine || this._mine.uid !== this.user?.id) this._mine = { uid: this.user?.id, docs: new Map() };
+    this._mine.docs.set(mode, data ? { ...data, t: null } : null);
+  }
+  /** 내 기록 문서 (기억해 둔 것이 있으면 읽지 않음). 색인 칸이 없거나 틀리면 채워 둔다 */
+  async _myScore(mode) {
+    if (this._mine?.uid === this.user.id && this._mine.docs.has(mode)) return this._mine.docs.get(mode);
+    const snap = await this.F.getDoc(this._doc(`scores_${mode}`, this.user.id));
+    const data = snap.exists() ? snap.data() : null;
+    this._remember(mode, data);
+    if (data) this._fixIdx(mode, data);
+    return data;
+  }
+  /**
+   * 예전에 쓴 내 기록 문서에 순위 색인 칸 채우기 (규칙: 색인 칸만 바꾸는 수정은 본인이 할 수 있음).
+   * 색인 칸이 없는 문서는 연령대·국가·팀 순위에서 빠지므로, 내 정보를 열거나 순위를 볼 때 조용히 채운다
+   */
+  _fixIdx(mode, d) {
+    const want = rankIdxFields(d);
+    if (d.uid !== this.user?.id || Object.keys(want).every((f) => d[f] === want[f])) return;
+    this.F.updateDoc(this._doc(`scores_${mode}`, d.uid), want).then(() => {
+      const c = this._mine?.docs.get(mode);
+      if (c) Object.assign(c, want);
+    }).catch(() => {});
+  }
+  _dropBoards(mode) { for (const k of this._boards.keys()) if (k.startsWith(`${mode}|`)) this._boards.delete(k); }
+
   async submitScore(mode, score) {
     if (!this.user) throw new Error('로그인이 필요합니다');
     if (!isActiveMember(this.memberState())) throw new Error(LAPSED);
@@ -193,26 +242,65 @@ export class FirebaseAccountStore {
       entry.plays = (p.plays || 1) + 1;
       if (p.score >= entry.score) { improved = false; entry.score = p.score; entry.at = p.at; }
     }
-    await this.F.setDoc(ref, entry);
+    Object.assign(entry, rankIdxFields(entry));
+    try {
+      await this.F.setDoc(ref, entry);
+    } catch (err) {
+      // 새 규칙(순위 색인 칸)을 아직 게시하지 않았으면 색인 칸 없이 다시 쓴다 (옛 규칙과 호환)
+      if (err?.code !== 'permission-denied') throw err;
+      for (const f of Object.values(RANK_FIELDS)) delete entry[f];
+      await this.F.setDoc(ref, entry);
+    }
+    this._remember(mode, entry);
+    this._dropBoards(mode);
     return { best: entry.score, improved, entry };
   }
 
+  /**
+   * 리더보드 (점수 높은 순, 같은 점수는 같은 순위). 필터 하나는 서버에서 색인 칸으로 거르고,
+   * 겹친 조건(연령대 + 국가·팀)은 그 묶음의 상위 300개를 받아 화면에서 거른다. 1분 동안은 다시 읽지 않는다
+   */
   async leaderboard(mode, filters = {}, limit = 100) {
-    // 단일 필드 인덱스만 사용(복합 인덱스 불필요): 상위 300개를 가져와 클라이언트에서 필터
-    const q = this.F.query(this.F.collection(this.db, `scores_${mode}`), this.F.orderBy('score', 'desc'), this.F.limit(300));
-    const snap = await this.F.getDocs(q);
-    const rows = snap.docs.map((d) => d.data()).filter((s) => matches(s, filters));
-    return rows.slice(0, limit).map((r, i) => ({ ...r, rank: i + 1 }));
+    const keys = activeFilters(filters);
+    const n = keys.length > 1 ? Math.max(limit, 300) : limit; // 받아 올 개수 (겹친 조건은 항상 300개: 랭킹 표와 내 순위가 같이 씀)
+    const key = `${mode}|${keys.map((k) => `${k}=${rankGroup(k, filters[k])}`).join('&')}|${n}`;
+    let hit = this._boards.get(key);
+    if (!hit || Date.now() - hit.at >= BOARD_TTL) {
+      const { query, orderBy, limit: lim, getDocs } = this.F;
+      let q;
+      if (!keys.length) q = query(this._scoreCol(mode), orderBy('score', 'desc'), lim(n));
+      else {
+        const k = ['team', 'country', 'ageGroup'].find((x) => keys.includes(x)); // 가장 좁은 묶음으로 서버에서 거름
+        q = query(this._scoreCol(mode), ...this._groupWhere(k, filters[k]), orderBy(RANK_FIELDS[k], 'desc'), lim(n));
+      }
+      const snap = await getDocs(q);
+      hit = { at: Date.now(), rows: competitionRanks(snap.docs.map((d) => d.data()).filter((s) => matches(s, filters))) };
+      this._boards.set(key, hit);
+    }
+    return hit.rows.slice(0, limit);
   }
 
+  /** 내 순위 { rank, total, score } (이 조건에 내 기록이 없으면 null) */
   async myRank(mode, filters = {}) {
     if (!this.user) return null;
-    const rows = await this.leaderboard(mode, filters, 300);
-    const me = rows.find((r) => r.uid === this.user.id);
-    return me ? { rank: me.rank, total: rows.length, score: me.score } : null;
+    const mine = await this._myScore(mode);
+    if (!mine || !matches(mine, filters)) return null;
+    const keys = activeFilters(filters);
+    if (keys.length > 1) { // 겹친 조건: 그 묶음의 상위 300개 안에서
+      const rows = await this.leaderboard(mode, filters, 300);
+      const me = rows.find((r) => r.uid === this.user.id);
+      return me ? { rank: me.rank, total: rows.length, score: me.score } : null;
+    }
+    const [k] = keys;
+    const [above, total] = await Promise.all([this._above(mode, mine.score, k, filters[k]), this._total(mode, k, filters[k])]);
+    return { rank: above + 1, total: Math.max(total, above + 1), score: mine.score };
   }
 
-  async wouldRank(mode, score) { return rankAmong(await this.leaderboard(mode, {}, 300), score); }
+  /** 게스트 점수가 정회원 랭킹에 있었다면 몇 위였을까 (같은 점수는 앞에 둠) — account.js rankAmong 과 같은 값 */
+  async wouldRank(mode, score) {
+    const [above, total] = await Promise.all([this._above(mode, Math.round(score)), this._total(mode)]);
+    return { rank: above + 1, total: total + 1 };
+  }
 
   // ---- 내 정보 (활동 기록은 activity/{uid}: 본인만 읽고 씀) ----
   /** 내 게임별 최고 기록. keys: 확인할 랭킹 키 목록 (scores_{key}/{uid} 를 한 번에 읽음) */
@@ -220,10 +308,19 @@ export class FirebaseAccountStore {
     if (!this.user) return [];
     const uid = this.user.id;
     const snaps = await Promise.all(keys.map((k) => this.F.getDoc(this._doc(`scores_${k}`, uid)).catch(() => null)));
+    snaps.forEach((s, i) => { if (!s) return; const d = s.exists() ? s.data() : null; this._remember(keys[i], d); if (d) this._fixIdx(keys[i], d); });
     return snaps.map((s, i) => (s && s.exists() ? { mode: keys[i], score: s.data().score, at: s.data().at, plays: s.data().plays || 1 } : null)).filter(Boolean);
   }
-  /** 이 게임에서 내 순위 (상위 300명 안에서): { world, country, team } */
-  async rankSummary(mode) { return rankSummaryOf(await this.leaderboard(mode, {}, 300), this.user); }
+  /** 이 게임에서 내 순위: { world: { rank, total }, country: { rank }, team: { rank } } (내 국가·팀 기록이 없으면 null) */
+  async rankSummary(mode) {
+    const u = this.user;
+    if (!u) return null;
+    const mine = await this._myScore(mode);
+    if (!mine) return null;
+    const part = async (k) => (u[k] && matches(mine, { [k]: u[k] }) ? { rank: (await this._above(mode, mine.score, k, u[k])) + 1 } : null);
+    const [above, total, country, team] = await Promise.all([this._above(mode, mine.score), this._total(mode), part('country'), part('team')]);
+    return { world: { rank: above + 1, total: Math.max(total, above + 1) }, country, team };
+  }
   async getActivity() {
     if (!this.user) return null;
     const uid = this.user.id;

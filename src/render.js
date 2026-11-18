@@ -9,6 +9,9 @@ export function dodgeField(W, H, topInset = 0) {
   return { x: m, y: top, w: W - 2 * m, h: Math.max(10, H - top - m) };
 }
 
+/** 평면 판 대신 카메라 영상 위 실제 바닥에 원근대로 그리는 모드 */
+export const FLOOR_MODES = new Set(['wide', 'quick']);
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -51,9 +54,12 @@ export class Renderer {
     const hair = Math.max(this.dpr, unit * 0.0014);   // 헤어라인 (화면상 약 1px)
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     const pa = game.running ? this.puckAlpha : 1; // 내 퍽 표시 농도: 대기·등록 화면에서는 항상 또렷이
+    // 지금 그리는 화면: 'setup'(영역·등록·움직여 보기) · 'arcade' · 'floor'(바닥 위에 원근대로) · 'flat'(평면 판)
+    const playing = mapping && !areaEditing && !(calib?.active && calib.circle) && !setupTest;
+    const view = !playing ? 'setup' : game.mode.id === 'arcade' ? 'arcade' : FLOOR_MODES.has(game.mode.id) ? 'floor' : 'flat';
 
-    // ---- 게임 영역 ----
-    if (floor?.quad) {
+    // ---- 게임 영역 (평면 판 모드에서는 그리지 않음: 평면 판이 곧 영역이라 뒤에 비치는 사다리꼴은 헷갈리기만 한다) ----
+    if (floor?.quad && view !== 'flat') {
       const full = floor.mode === 'full' || floor.fallback;
       ctx.beginPath();
       floor.quad.forEach(([x, y], i) => { const [cx, cy] = toC(x, y); i ? ctx.lineTo(cx, cy) : ctx.moveTo(cx, cy); });
@@ -66,7 +72,7 @@ export class Renderer {
       }
     }
     // 원근 격자: 영역 편집 중에는 또렷하게, 평소에는 은은하게
-    if (mapping && (areaEditing || floor.mode === 'manual' || (floor.mode === 'auto' && !floor.fallback))) {
+    if (mapping && (view === 'setup' || view === 'arcade') && (areaEditing || floor.mode === 'manual' || (floor.mode === 'auto' && !floor.fallback))) {
       const strong = areaEditing;
       const N = strong ? 6 : 4;
       ctx.lineWidth = strong ? hair : hair * 0.6; ctx.strokeStyle = rgba(C.ink, strong ? 0.55 : 0.16);
@@ -102,13 +108,17 @@ export class Renderer {
       return;
     }
 
-    // ---- 나머지 모드는 모두 평면 경기장에서 (카메라 원근 대신 위에서 내려다본 판. 판정도 같은 평면 좌표) ----
-    const drawField = {
-      free: this._drawCourse, obstacle: this._drawDodge, wide: this._drawWide,
-      figure8: this._drawFigure8, quick: this._drawQuick, reaction: this._drawReaction,
-    }[game.mode.id] || this._drawCourse;
-    drawField.call(this, ctx, W, H, game, puck, now);
-    this._cameraPuck(ctx, vision, toC, unit, hair, pa);
+    // ---- 와이드 드리블·퀵 핸즈: 카메라 영상 위 실제 바닥에 원근대로 (내 퍽 = 영상 속 진짜 퍽 자리) ----
+    if (view === 'floor') {
+      (game.mode.id === 'wide' ? this._drawWide : this._drawQuick).call(this, ctx, W, H, game, puck, now, uvToC);
+    } else {
+      // ---- 나머지 모드는 평면 경기장에서 (위에서 내려다본 판 = 영역 전체. 판정도 같은 평면 좌표) ----
+      const drawField = {
+        free: this._drawCourse, obstacle: this._drawDodge,
+        figure8: this._drawFigure8, reaction: this._drawReaction,
+      }[game.mode.id] || this._drawCourse;
+      drawField.call(this, ctx, W, H, game, puck, now);
+    }
 
     // ---- 디버그: 퍽 후보 (카메라 좌표) ----
     if (showCandidates && vision.puckCandidates) {
@@ -146,7 +156,7 @@ export class Renderer {
   }
 
   /**
-   * 나: 잉크 정원(반지름 PUCK_R = 목표 판정에 쓰는 크기 그대로) + 한 겹 떨어진 헤어라인 고리, 궤적은 헤어라인.
+   * 나: 잉크 정원(반지름 PUCK_R = 목표 판정에 쓰는 크기 그대로. 바깥 고리 없음), 궤적은 헤어라인.
    * 플레이 중에는 설정한 농도로 (퍽 투명도). before(ctx, me): 같은 농도로 먼저 그릴 것 (자유 연습의 목표까지 선)
    */
   _drawMe(ctx, game, puck, now, { P, S, hair }, before = null) {
@@ -169,14 +179,14 @@ export class Renderer {
       // 충돌 직후 무적 시간(퍽 피하기·8자 콘)에는 깜빡임
       if (game.running && now < game.invulnUntil && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
-      ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, Math.PI * 2); ctx.lineWidth = hair; ctx.strokeStyle = predicted ? rgba(C.ink, 0.4) : C.ink; ctx.stroke();
       ctx.globalAlpha = 1;
     });
     return me;
   }
 
   /** 평면 경기장 이펙트: 글자(pop) · 테두리 번쩍(flash) · 지나간 목표 자리에 퍼지는 고리(ring). script: 필기체 글자 크기(가로 대비) */
-  _fieldEffects(ctx, game, { f, S, A, P, hair }, W, script = 0.05) {
+  _fieldEffects(ctx, game, K, W, script = 0.05) {
+    const { f, S, A, P, hair } = K;
     for (const e of game.effects) {
       if (e.type === 'pop') {
         const [cx, cy] = P(Math.min(0.88, Math.max(0.12, e.x)), Math.min(A, Math.max(0.07, e.y)));
@@ -185,11 +195,12 @@ export class Renderer {
         text(ctx, e.text, cx, cy - e.age * W * 0.04, sc ? W * script : W * 0.026, { family: sc ? F.script : F.display, weight: sc ? 700 : 800, color: e.color });
         ctx.globalAlpha = 1;
       } else if (e.type === 'flash') {
-        ctx.fillStyle = rgba(C.red, 0.1 * (1 - e.age)); ctx.fillRect(f.x, f.y, f.w, f.h);
-        ctx.lineWidth = hair * 3; ctx.strokeStyle = rgba(C.red, 1 - e.age); ctx.strokeRect(f.x, f.y, f.w, f.h);
+        if (K.rect) K.rect({ x: 0.5, y: A / 2, w: 1, h: A }); else { ctx.beginPath(); ctx.rect(f.x, f.y, f.w, f.h); }
+        ctx.fillStyle = rgba(C.red, 0.1 * (1 - e.age)); ctx.fill();
+        ctx.lineWidth = hair * 3; ctx.strokeStyle = rgba(C.red, 1 - e.age); ctx.stroke();
       } else if (e.type === 'ring') {
-        const [cx, cy] = P(e.x, e.y);
-        ctx.beginPath(); ctx.arc(cx, cy, e.r * S * (1 + e.age * 1.4), 0, Math.PI * 2);
+        const [cx, cy] = P(e.x, e.y), k = (1 + e.age * 1.4) * (K.pxPerX ? K.pxPerX(e.x, e.y) : S);
+        ctx.beginPath(); ctx.arc(cx, cy, e.r * k, 0, Math.PI * 2);
         ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.ink, 0.7 * (1 - e.age)); ctx.stroke();
       }
     }
@@ -238,6 +249,46 @@ export class Renderer {
   }
 
   /**
+   * 바닥 위 경기장 (와이드 드리블·퀵 핸즈): 카메라 영상은 그대로 두고, 구역을 실제 바닥에 원근대로 그린다.
+   * 평면 좌표(가로 1 × 세로 A) → 바닥 uv → 화면. 판정과 같은 좌표라 그린 사각 구역이 곧 판정 범위.
+   * 동그라미(대기 원·내 퍽)는 세로 비율 A가 실제 바닥 비율과 달라 찌그러지므로, 그 자리의 가로 축척(pxPerX)으로 둥글게 그린다.
+   * f: 바닥 영역을 감싸는 화면 사각형 (안내 글자 자리)
+   */
+  _floorField(ctx, W, H, game, uvToC) {
+    const dpr = this.dpr, hair = Math.max(1, dpr), fs = Math.max(11 * dpr, W * 0.017);
+    const A = game.plane.A, flip = game.plane.flip;
+    const P = (x, y) => uvToC(x, flip ? 1 - y / A : y / A);
+    const path = (pts) => { ctx.beginPath(); pts.forEach(([x, y], i) => { const [cx, cy] = P(x, y); if (i) ctx.lineTo(cx, cy); else ctx.moveTo(cx, cy); }); ctx.closePath(); };
+    const rect = (z) => path([[z.x - z.w / 2, z.y - z.h / 2], [z.x + z.w / 2, z.y - z.h / 2], [z.x + z.w / 2, z.y + z.h / 2], [z.x - z.w / 2, z.y + z.h / 2]]);
+    const pxPerX = (x, y) => { const a = P(x - 0.01, y), b = P(x + 0.01, y); return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.02; };
+    const cs = [P(0, 0), P(1, 0), P(1, A), P(0, A)], xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
+    const f = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    return { f, S: this._floorPx(uvToC), A, P, hair, fs, dpr, path, rect, pxPerX };
+  }
+
+  /** 바닥 위 경기장의 내 퍽: 카메라 속 진짜 퍽 자리에 잉크 정원 (그 자리의 바닥 축척대로 — 먼 쪽은 작게). 궤적은 헤어라인 */
+  _drawMeFloor(ctx, game, puck, now, { hair }, uvToC) {
+    if (!puck.pos) return;
+    alphaLayer(ctx, game.running ? this.puckAlpha : 1, (ctx) => {
+      if (puck.trail.length > 1) {
+        ctx.lineWidth = hair;
+        for (let i = 1; i < puck.trail.length; i++) {
+          const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.45;
+          if (alpha <= 0) continue;
+          const [ax, ay] = uvToC(puck.trail[i - 1].x, puck.trail[i - 1].y), [bx, by] = uvToC(puck.trail[i].x, puck.trail[i].y);
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.strokeStyle = rgba(C.ink, alpha); ctx.stroke();
+        }
+      }
+      const { x: u, y: v } = puck.pos;
+      const [cx, cy] = uvToC(u, v), [ax, ay] = uvToC(u - 0.01, v), [bx, by] = uvToC(u + 0.01, v);
+      const r = Math.max(3 * this.dpr, PUCK_R * Math.hypot(bx - ax, by - ay) / 0.02); // 그 자리의 바닥 가로 축척 (u = 평면 x)
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = puck.state === 'predicted' ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
+      ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.9); ctx.stroke(); // 어두운 바닥에서도 보이게 얇은 종이색 가장자리
+    });
+  }
+
+  /**
    * 가운데 시작 원 (와이드 드리블 훈련 시작·8자 드리블 시작): 퍽을 둔 채로 3초.
    * k = 0..1 채운 정도. 채우는 동안 가운데에 3·2·1, 비어 있으면 점선 + 안내
    */
@@ -259,13 +310,15 @@ export class Renderer {
    * 와이드 드리블 평면: 숫자·칸 없이 구역만. 지금 가야 할 구역 = 진한 빨강, 그다음 구역 = 옅은 빨강 (8자 드리블과 같은 규칙).
    * 훈련 1은 좌우 끝 구역, 훈련 2·3은 판을 10칸으로 나눈 자리 순서 (칸은 그리지 않는다)
    */
-  _drawWide(ctx, W, H, game, puck, now) {
+  _drawWide(ctx, W, H, game, puck, now, uvToC) {
     ctx.save();
     const running = game.running && game.wide;
     const stage = running ? game.wide.stage : 0;
-    const K = this._field(ctx, W, H, game, { label: `DRILL ${stage + 1}/${WIDE_DRILLS.length}` });
-    const { f, S, A, P, hair, fs } = K;
+    const K = this._floorField(ctx, W, H, game, uvToC);
+    const { f, A, hair, fs } = K;
     const yc = A / 2, bh = WIDE_BAND * A;
+    // 훈련 번호: 바닥 영역 왼쪽 위 (위쪽 점수판에 가리지 않게)
+    text(ctx, `DRILL ${stage + 1}/${WIDE_DRILLS.length}`, f.x, Math.max(f.y - fs * 0.9, this.topInset * H + fs * 0.9), fs * 0.7, { weight: 700, color: C.ink, align: 'left', halo: true });
 
     // 구역만 그린다: 지금 가야 할 곳 = 진한 빨강(맥박), 그다음 = 옅은 빨강.
     // 훈련 시작 전 = 가운데 대기 동그라미(3초 동안 차오름). 게임 전에는 훈련 1의 시작 화면 미리보기
@@ -276,21 +329,21 @@ export class Renderer {
     const pulse = 0.5 + 0.5 * Math.sin(now / 200);
     for (const z of [...zones].sort((a, b) => a.active - b.active)) { // 그다음 구역을 먼저, 지금 구역을 위에
       if (z.hold) {
-        // 가운데 대기 동그라미: 퍽을 둔 채로 3·2·1 (시계 방향으로 차오름)
-        this._drawHoldCircle(ctx, P(z.x, z.y), z.r * S, z.progress || 0, hair, fs, running);
+        // 가운데 대기 동그라미: 퍽을 둔 채로 3·2·1 (시계 방향으로 차오름). 시작 원처럼 둥글게, 크기는 그 자리의 바닥 축척대로
+        this._drawHoldCircle(ctx, K.P(z.x, z.y), z.r * K.pxPerX(z.x, z.y), z.progress || 0, hair, fs, running);
         continue;
       }
-      const [x0, y0] = P(z.x - z.w / 2, z.y - z.h / 2), [x1, y1] = P(z.x + z.w / 2, z.y + z.h / 2);
+      K.rect(z); // 실제 바닥 위의 구역 (원근대로: 먼 쪽은 좁게)
       if (z.active) {
-        ctx.fillStyle = rgba(C.red, 0.68 + 0.12 * pulse); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-        ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        ctx.fillStyle = rgba(C.red, 0.5 + 0.14 * pulse); ctx.fill();
+        ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red; ctx.stroke();
       } else {
-        ctx.fillStyle = rgba(C.red, 0.2); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-        ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.55); ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        ctx.fillStyle = rgba(C.red, 0.16); ctx.fill();
+        ctx.lineWidth = hair * 1.2; ctx.strokeStyle = rgba(C.red, 0.6); ctx.stroke();
       }
     }
 
-    this._drawMe(ctx, game, puck, now, K);
+    this._drawMeFloor(ctx, game, puck, now, K, uvToC);
     if (!game.running) {
       const min = Math.round(game.playSeconds / 60);
       text(ctx, `시작하면 훈련 3가지를 ${min}분씩 이어서 합니다`, f.x + f.w / 2, f.y + f.h * 0.42, fs, { weight: 600, color: C.inkSoft, halo: true });
@@ -387,20 +440,19 @@ export class Renderer {
   }
 
   /** 퀵 핸즈 평면: 가운데 박스. 박스 안 = 옅은 빨강 맥박, 밖으로 나가면 빨강 점선 경고, 시작 전은 잉크 점선 */
-  _drawQuick(ctx, W, H, game, puck, now) {
+  _drawQuick(ctx, W, H, game, puck, now, uvToC) {
     ctx.save();
-    const K = this._field(ctx, W, H, game);
-    const { f, P, hair, fs } = K;
+    const K = this._floorField(ctx, W, H, game, uvToC);
+    const { f, hair, fs } = K;
     const unit = Math.min(W, H);
+    const pulse = 0.5 + 0.5 * Math.sin(now / 250);
     for (const z of game.zones) {
-      const [x0, y0] = P(z.x - z.w / 2, z.y - z.h / 2), [x1, y1] = P(z.x + z.w / 2, z.y + z.h / 2);
-      const pulse = 0.5 + 0.5 * Math.sin(now / 250);
-      ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0);
-      if (game.running && z.warn) { ctx.fillStyle = rgba(C.red, 0.16); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); ctx.lineWidth = hair * 1.6; ctx.strokeStyle = C.red; ctx.stroke(); ctx.setLineDash([]); }
-      else if (game.running) { ctx.fillStyle = rgba(C.red, 0.1 + 0.08 * pulse); ctx.fill(); ctx.lineWidth = hair * 1.8; ctx.strokeStyle = C.red; ctx.stroke(); }
-      else { ctx.fillStyle = rgba(C.paper, 0.22); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); ctx.lineWidth = hair; ctx.strokeStyle = C.ink; ctx.stroke(); ctx.setLineDash([]); }
+      K.rect(z); // 실제 바닥 위의 박스 (원근대로)
+      if (game.running && z.warn) { ctx.fillStyle = rgba(C.red, 0.24); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red; ctx.stroke(); ctx.setLineDash([]); }
+      else if (game.running) { ctx.fillStyle = rgba(C.red, 0.16 + 0.1 * pulse); ctx.fill(); ctx.lineWidth = hair * 2.2; ctx.strokeStyle = C.red; ctx.stroke(); }
+      else { ctx.fillStyle = rgba(C.paper, 0.3); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); inkStroke(ctx, hair * 1.4, C.ink); ctx.setLineDash([]); }
     }
-    this._drawMe(ctx, game, puck, now, K);
+    this._drawMeFloor(ctx, game, puck, now, K, uvToC);
     if (!game.running) text(ctx, game.mode.desc, f.x + f.w / 2, f.y + f.h / 2, fs, { weight: 600, color: C.inkSoft, halo: true });
     this._fieldEffects(ctx, game, K, W, 0.05);
     ctx.restore();

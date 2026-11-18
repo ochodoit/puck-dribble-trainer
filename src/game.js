@@ -53,11 +53,15 @@ export const WIDE_HOLD_SEC = 3;
 export const WIDE_HOLD_R = 0.06; // 가운데 대기 동그라미 반지름 (경기장 가로 대비). 판정은 조금 넉넉하게 1.25배
 export const WIDE_LANES = 10;
 export const WIDE_BAND = 0.6;   // 구역 높이 (경기장 세로 대비, 위아래 가운데)
-export const WIDE_END = { x: 0.105, w: 0.13 }; // 훈련 1의 끝 구역: 예전(폭 0.26)의 절반 두께, 바깥 끝은 그대로
+export const WIDE_END = { x: 0.1375, w: 0.065 }; // 훈련 1의 끝 구역 (0.105~0.17): 안쪽 선(0.17)은 그대로 두고 폭만 절반
+/** 와이드 칸 사이 틈 (경기장 가로 대비): 붙은 두 칸을 한 번에 읽지 않게 칸마다 이만큼 띄워 그린다 (판정도 같은 칸) */
+export const WIDE_GAP = 0.02;
+/** 한 칸을 읽은 뒤 다음 칸을 읽기까지 쉬는 시간(ms): 경계에서 흔들려도 두 칸이 연달아 읽히지 않게 */
+export const WIDE_REARM_MS = 120;
 /** n번 칸의 가로 가운데 (1 ~ 10) */
 export const laneX = (n) => (n - 0.5) / WIDE_LANES;
 
-export const PUCK_R = 0.025; // 평면 경기장에 그리는 내 퍽(잉크 정원) 반지름 = 목표 판정에 쓰는 크기 (경기장 가로 대비)
+export const PUCK_R = 0.0125; // 내 퍽(잉크 정원) 반지름 = 목표 판정에 쓰는 크기 (경기장 가로 대비). 예전(0.025)의 절반 — 구역이 겹쳐 읽히지 않게
 const CONE_R = 0.045;
 // 목표 지점 크기 (경기장 가로 대비): 예전의 절반
 export const TARGET_DRAW_R = 0.02125; // 반응 타겟 원 반지름 (예전의 절반)
@@ -66,8 +70,8 @@ export const GATE_DRAW_R = 0.01875; // 8자 게이트 원 반지름 (예전의 �
 export const F8_HOLD_R = 0.055;     // 8자 시작 대기 원 반지름 (가운데). 판정은 1.25배
 export const F8_HOLD_SEC = 3;       // 가운데 원에 퍽을 둔 채로 3초(3·2·1을 세며 원이 차오름) -> 시작. 그동안 게임 시계는 멈춤
 const F8_CONES = [0.3, 0.7];       // 두 콘의 가로 위치 (세로는 가운데)
-/** 퀵 핸즈 박스 (경기장 가로·세로 대비. 가운데) */
-const QUICK_BOX = { w: 0.34, h: 0.5 };
+/** 퀵 핸즈 박스 (경기장 가로·세로 대비. 가운데). 예전(0.34 × 0.5)의 80% */
+export const QUICK_BOX = { w: 0.272, h: 0.4 };
 
 /**
  * 목표 통과 판정: 내 퍽(원)과 목표(원·사각형)가 겹친 넓이가 둘 중 작은 쪽 넓이의 이만큼 이상이면 통과.
@@ -113,6 +117,27 @@ export function discRectOverlap(c, r, z, n = 32) {
 
 /** 사각형 목표 판정: 내 퍽 원이 사각형과 (작은 쪽 넓이 대비) frac 이상 겹치면 true */
 export const discInRect = (c, r, z, frac = HIT_OVERLAP) => discRectOverlap(c, r, z) >= frac * Math.min(Math.PI * r * r, z.w * z.h);
+
+/** 선분 a→b 가 상자 [x0,x1]×[y0,y1] 를 지나는지 (한 프레임 사이에 빠르게 지나쳐도 인정) */
+export function segHitsBox(a, b, [x0, x1, y0, y1]) {
+  let t0 = 0, t1 = 1;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  for (const [p, q] of [[-dx, a.x - x0], [dx, x1 - a.x], [-dy, a.y - y0], [dy, y1 - a.y]]) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+    else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return true;
+}
+
+/**
+ * 와이드 구역의 판정 상자: 퍽 가운데(점)가 빨간 구역 안에 들어가면 인정.
+ * 양 끝 구역(edge)은 바깥(벽 쪽)으로 끝까지 — 안쪽 선만 넘으면 더 밀어도 인정
+ */
+export function wideHitBox(z) {
+  return [z.edge === 'L' ? -1 : z.x - z.w / 2, z.edge === 'R' ? 2 : z.x + z.w / 2, z.y - z.h / 2, z.y + z.h / 2];
+}
 
 /** 반응 타겟 하나 (평면 좌표: 세로는 A배. 무작위 자리) */
 const newTarget = (A = 1) => ({ x: rand(0.12, 0.88), y: rand(0.15, 0.85) * A, r: TARGET_DRAW_R, born: clockNow(), lastD: null, lastAt: 0, approachN: 0, approachAt: 0 });
@@ -448,7 +473,12 @@ export class Game {
           break;
         }
         const z = this.zones.find((zz) => zz.active);
-        if (me && tracked && z && discInRect(me, PUCK_R, z)) { // 퍽 원이 구역에 30% 이상 걸치면
+        // 퍽 가운데가 빨간 구역에 들어가면 (빠르게 지나쳐도 선분으로). 칸 사이 틈 + 읽은 뒤 잠깐 쉼 -> 붙은 두 칸을 한 번에 읽지 않음
+        const prevW = me && tracked && w.prev && dist(w.prev, me) < 0.15 ? w.prev : me; // 추적이 튄 큰 점프는 선분으로 보지 않음
+        w.prev = me && tracked ? { x: me.x, y: me.y } : null;
+        if (me && tracked && z && now >= (w.rearmAt || 0) && segHitsBox(prevW, me, wideHitBox(z))) {
+          w.rearmAt = now + WIDE_REARM_MS;
+          w.prev = null; // 다음 칸은 이 자리부터 새로
           this.stats.reps++; this.stats.drills[w.stage]++; this.score = this.stats.reps;
           this.sfx?.rep();
           if (w.seq) {
@@ -637,7 +667,7 @@ export class Game {
   _wideStage(i) {
     const first = !this.wide;
     const d = WIDE_DRILLS[i];
-    this.wide = { stage: i, seq: d.seq, idx: 0, hold: 0 }; // hold: 가운데에 둔 시간(초). null 이면 훈련 진행 중
+    this.wide = { stage: i, seq: d.seq, idx: 0, hold: 0, prev: null, rearmAt: 0 }; // hold: 가운데에 둔 시간(초). null 이면 훈련 진행 중
     this._wideZones();
     if (!first) {
       this._pop(0.5, this.plane.A * 0.5, d.label, C.red, 'script'); // 바뀐 훈련 이름만 (숫자 없이)
@@ -650,27 +680,25 @@ export class Game {
     const w = this.wide, A = this.plane.A;
     const y = A / 2, h = WIDE_BAND * A;
     w.A = A;
+    // 칸 k (1 ~ 10): 칸 폭에서 틈만큼 빼고 그린다. 1번·10번은 벽 쪽으로 열린 끝 칸
+    const lane = (k, active) => ({ id: k, n: k, x: laneX(k), y, w: 1 / WIDE_LANES - WIDE_GAP, h, active, next: !active, edge: k === 1 ? 'L' : k === WIDE_LANES ? 'R' : null });
+    // 훈련 1의 끝 구역 (L·R)
+    const end = (side, active) => ({ id: side, x: side === 'L' ? WIDE_END.x : 1 - WIDE_END.x, y, w: WIDE_END.w, h, active, edge: side });
     if (w.hold != null) {
       // 시작 전: 가운데 대기 구역(차오르는 정도 = progress) + 첫 목표를 옅게 미리
-      const first = w.seq
-        ? { id: w.seq[0], n: w.seq[0], x: laneX(w.seq[0]), y, w: 1 / WIDE_LANES, h, active: false, next: true }
-        : { id: 'L', x: WIDE_END.x, y, w: WIDE_END.w, h, active: false, next: true };
+      const first = w.seq ? { ...lane(w.seq[0], false) } : { ...end('L', false), next: true };
       this.zones = [{ id: 'C', x: 0.5, y, r: WIDE_HOLD_R, w: WIDE_HOLD_R * 2, h: WIDE_HOLD_R * 2, active: false, hold: true, progress: Math.min(1, w.hold / WIDE_HOLD_SEC) }, first];
       this.instruction = w.hold > 0 ? `그대로 두세요 · ${Math.ceil(WIDE_HOLD_SEC - w.hold)}` : '퍽을 가운데 동그라미에 3초 두세요';
       return;
     }
     if (!w.seq) {
       // 훈련 1: 좌우 끝 구역을 번갈아 (idx 0 = 왼쪽부터)
-      this.zones = [
-        { id: 'L', x: WIDE_END.x, y, w: WIDE_END.w, h, active: w.idx === 0 },
-        { id: 'R', x: 1 - WIDE_END.x, y, w: WIDE_END.w, h, active: w.idx === 1 },
-      ];
+      this.zones = [end('L', w.idx === 0), end('R', w.idx === 1)];
       this.instruction = w.idx === 0 ? '← 왼쪽 끝으로' : '오른쪽 끝으로 →';
       return;
     }
     const n = w.seq[w.idx], next = w.seq[(w.idx + 1) % w.seq.length];
     const prev = w.seq[(w.idx + w.seq.length - 1) % w.seq.length];
-    const lane = (k, active) => ({ id: k, n: k, x: laneX(k), y, w: 1 / WIDE_LANES, h, active, next: !active });
     this.zones = [lane(n, true), lane(next, false)];
     // 화면에 숫자를 쓰지 않으므로 안내도 방향으로 (직전 자리 기준)
     this.instruction = n < prev ? '← 진한 빨간 영역으로' : '진한 빨간 영역으로 →';

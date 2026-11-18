@@ -465,7 +465,7 @@
         let wEnd = null; w.onEnd = (res) => { wEnd = res; };
         const fp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
         let tw = 900000;
-        const go = (x, y = 0.5, n = 3) => { fp.pos = { x, y }; for (let i = 0; i < n && w.running; i++) { w.update(0.033, fp, tw); tw += 33; } };
+        const go = (x, y = 0.5, n = 5) => { fp.pos = { x, y }; for (let i = 0; i < n && w.running; i++) { w.update(0.033, fp, tw); tw += 33; } }; // 한 자리에 0.17초 (읽은 뒤 쉬는 0.12초보다 길게)
         const hold = () => go(0.5, 0.5, 95); // 가운데에 3초 넘게: 훈련 시작
         const toStage = (k) => { go(0.5, 0.5, 1); w.elapsed = 60 * k - 0.01; go(0.5, 0.5, 1); };
         w.start(fp);
@@ -489,7 +489,7 @@
           check('W0 auto-start: drill 1 runs at once, drill 2 waits in the middle', hz === 'L,false,true|R,false,false' && he > 0 && h.wide.stage === 1 && h.wide.hold === 0 && h.zones[0].hold, { hz, he, stage: h.wide.stage, hold: h.wide.hold });
         }
         const z = w.zones;
-        check('W2 drill 1 end boxes: half the old width, centered top-to-bottom', z.length === 2 && Math.abs(z[0].w - 0.13) < 1e-9 && Math.abs(z[0].x - 0.105) < 1e-9 && Math.abs(z[1].x - 0.895) < 1e-9
+        check('W2 drill 1 end boxes: half width, inner edge kept at 0.17, centered top-to-bottom', z.length === 2 && Math.abs(z[0].w - 0.065) < 1e-9 && Math.abs(z[0].x + z[0].w / 2 - 0.17) < 1e-9 && Math.abs(z[1].x - z[1].w / 2 - 0.83) < 1e-9 && z[0].edge === 'L' && z[1].edge === 'R'
           && Math.abs(z[0].y - w.plane.A / 2) < 1e-9 && Math.abs(z[0].h - 0.6 * w.plane.A) < 1e-9 && z[0].active && !z[1].active, z);
         go(0.1); go(0.5); go(0.9); go(0.1); go(0.9, 0.05);
         check('W2 drill 1 alternates left/right ends (outside the band does not count)', w.stats.drills[0] === 3 && w.score === 3, w.stats);
@@ -503,7 +503,7 @@
         const wrong = w.stats.drills[1];
         for (const n of [1, 2, 1, 10, 9, 10]) { order2.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
         check('W3 drill 2 sequence 1,2,1,10,9,10 (lanes 1..10 across the board)', w.wide.stage === 1 && z2.join('|') === '1,true|2,false' && wrong === 0 && order2.join() === '1,2,1,10,9,10'
-          && w.stats.drills[1] === 6 && w.stats.sets[1] === 1 && Math.abs(laneX(1) - 0.05) < 1e-9 && Math.abs(laneX(10) - 0.95) < 1e-9 && Math.abs(w.stageLeft - 60) < 1
+          && w.stats.drills[1] === 6 && w.stats.sets[1] === 1 && Math.abs(laneX(1) - 0.05) < 1e-9 && Math.abs(laneX(10) - 0.95) < 1e-9 && Math.abs(w.stageLeft - 60) < 2
           && wait2.zones === 'C,true,false|1,false,false' && wait2.stopped && wait2.reps === 0 && Math.abs(wait2.stageLeft - 60) < 0.1, { z2, order2, wait2, stats: w.stats, stageLeft: w.stageLeft });
         toStage(2);
         hold();
@@ -511,6 +511,23 @@
         for (const n of [1, 2, 1, 6, 5, 10, 9, 10, 5, 6, 1]) { order3.push(w.wide.seq[w.wide.idx]); go(laneX(n)); }
         check('W4 drill 3 sequence 1,2,1,6,5,10,9,10,5,6 repeats', w.wide.stage === 2 && order3.join() === '1,2,1,6,5,10,9,10,5,6,1' && w.stats.drills[2] === 11 && w.stats.sets[2] === 1, { order3, stats: w.stats });
         go(0.5, 0.5, 1); w.elapsed = 180 - 0.01; go(0.5, 0.5, 2);
+        {
+          // 붙은 두 칸을 한 번에 읽지 않음: 칸 사이 틈 + 퍽 가운데(점) 판정 + 읽은 뒤 0.12초 쉼. 빠르게 지나쳐도(선분) 인정
+          const d = new Game(null); d.setMode('wide'); d.playSeconds = 60; d.resetState();
+          const dp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
+          let td = 500000;
+          const mv = (x, n = 1) => { dp.pos = { x, y: 0.5 }; for (let i = 0; i < n; i++) { d.update(0.033, dp, td); td += 33; } };
+          d.start(dp, { handsFree: true }); d.elapsed = 60 - 0.01; mv(0.5); mv(0.5, 95); // 훈련 2 (1,2,1,10,9,10): 가운데 3초 뒤 시작
+          const lanes = d.zones.map((q) => [q.n, +q.w.toFixed(3)]).join('|');
+          mv(0.3, 2); mv(0.2, 2); mv(0.12, 2); mv(0.07, 6); const r1 = d.stats.drills[1];   // 천천히 1번 칸으로
+          mv(0.1, 6); const gap = d.stats.drills[1];                                           // 1·2번 칸 사이 틈에 서 있음: 2번을 읽지 않음
+          for (let k = 0; k <= 10; k++) mv(0.1 + k * 0.005, 1); const r2 = d.stats.drills[1];  // 2번 칸 가운데까지 천천히: 한 번만
+          mv(0.15, 10); const stay = d.stats.drills[1];                                        // 2번에 머묾: 다음(1번)을 읽지 않음
+          mv(0.05, 5); mv(0.95, 5); mv(0.93, 5); mv(0.79, 1); const swept = d.stats.drills[1]; // 한 프레임에 9번 칸을 지나쳐도 인정
+          mv(0.95, 1); const rest = d.stats.drills[1]; mv(0.95, 4); const after = d.stats.drills[1]; // 읽은 직후 0.12초는 쉼
+          check('W6 adjacent lanes are not read together (gap + puck center + short rest); a fast pass still counts', lanes === '1,0.08|2,0.08' && r1 === 1 && gap === 1 && r2 === 2 && stay === 2
+            && swept === 5 && rest === 5 && after === 6 && d.stats.sets[1] === 1, { lanes, r1, gap, r2, stay, swept, rest, after });
+        }
         const rows = wEnd ? Object.fromEntries(wEnd.items) : {};
         check('W5 ends after all 3 drills; result per drill', wEnd && wEnd.reason === 'time' && wEnd.score === 20 && wEnd.seconds === 60 && wEnd.rankKey === 'wide@60'
           && rows['훈련 1 · 좌우 끝'] === 3 && rows['훈련 2 · 양 끝 짧은 터치'] === '6 · 1세트' && rows['훈련 3 · 양 끝과 가운데'] === '11 · 1세트' && !WIDE_DRILLS.some((d) => /\d/.test(d.label)) && rows['게임 시간'] === '1분 × 3', wEnd && wEnd.items);
@@ -912,9 +929,9 @@
       const full = circleOverlap(0, 0.02, 0.03), none = circleOverlap(0.06, 0.02, 0.03);
       const half = discRectOverlap({ x: 0.5, y: 0.5 }, ME_R, { x: 0.25, y: 0.5, w: 0.5, h: 1 }) / (Math.PI * ME_R ** 2);
       const reach = overlapReach(ME_R, GATE_DRAW_R);
-      const reachAt = circleOverlap(reach, ME_R, GATE_DRAW_R) / (Math.PI * GATE_DRAW_R ** 2);
-      check('PL1 overlap areas (circle-circle, circle-rectangle); 30% reach is wider than the old center-point radius (0.0225)', near(full, Math.PI * 0.0004) && none === 0 && Math.abs(half - 0.5) < 0.01
-        && Math.abs(reachAt - HIT_OVERLAP) < 1e-4 && HIT_OVERLAP === 0.3 && reach > 0.0225 && reach < ME_R + GATE_DRAW_R, { full, half, reach, reachAt });
+      const reachAt = circleOverlap(reach, ME_R, GATE_DRAW_R) / (Math.PI * Math.min(ME_R, GATE_DRAW_R) ** 2); // 작은 쪽(이제는 내 퍽) 넓이 대비
+      check('PL1 overlap areas (circle-circle, circle-rectangle); my puck (half size) counts once 30% of it covers the target', near(full, Math.PI * 0.0004) && none === 0 && Math.abs(half - 0.5) < 0.01
+        && Math.abs(reachAt - HIT_OVERLAP) < 1e-4 && HIT_OVERLAP === 0.3 && ME_R === 0.0125 && reach > GATE_DRAW_R && reach < ME_R + GATE_DRAW_R, { full, half, reach, reachAt });
 
       // 8자: 경기장 세로 비율 A=0.5, 카메라 쪽으로 밀면 위(flip). 게이트·콘·가운데 원 모두 평면 좌표
       const g = new Game(null); g.plane = { A: 0.5, flip: true }; g.figure8Dir = 'L-up'; g.setMode('figure8');
@@ -929,21 +946,21 @@
       const started = g.f8Hold === null && g.stats.gates === 1;
       // 다음 게이트(0.3, 0.11): 퍽 가운데가 게이트 원 밖이어도 퍽 원이 게이트를 30% 넘게 덮으면 통과
       at(...uvOf(wp1.x + GATE_DRAW_R + ME_R * 0.6, wp1.y), 3); const g1 = g.stats.gates;  // 살짝만 걸침 (30% 미만)
-      at(...uvOf(wp1.x + GATE_DRAW_R + ME_R * 0.35, wp1.y)); const g2 = g.stats.gates;     // 30% 넘게 겹침
-      check('PL2 figure 8 on the flat field: course in plane coords, a gate counts once the puck circle covers 30% of it', shapeOk && started && g1 === 1 && g2 === 2, { shapeOk, started, g1, g2, wp1 });
+      at(...uvOf(wp1.x + GATE_DRAW_R + ME_R * 0.1, wp1.y)); const g2 = g.stats.gates;      // 퍽의 30% 넘게 겹침
+      check('PL2 figure 8 on the flat field: course in plane coords, a gate counts once 30% of the puck circle covers it', shapeOk && started && g1 === 1 && g2 === 2, { shapeOk, started, g1, g2, wp1 });
       const idx = g.wpIndex; g.plane = { A: 1.2, flip: true }; at(0.5, 0.5);
       check('PL2 figure 8 course follows a new field aspect (phone rotated) and keeps its progress', g.wpIndex === idx && near(g.waypoints[1].y, 0.22 * 1.2) && near(g.cones[0].y, 0.6), { idx, now: g.wpIndex, y: g.waypoints[1].y });
 
-      // 퀵 핸즈: 박스도 평면 좌표. 퍽 원이 박스에 30% 이상 걸치면 안 (가운데가 살짝 밖이어도)
+      // 퀵 핸즈: 박스도 평면 좌표 (예전 0.34 × 0.5 의 80%). 퍽 원이 박스에 30% 이상 걸치면 안 (가운데가 살짝 밖이어도)
       const q = new Game(null); q.plane = { A: 0.5, flip: false }; q.setMode('quick');
-      const preview = q.zones.length === 1 && !q.zones[0].active && near(q.zones[0].h, 0.25);
+      const preview = q.zones.length === 1 && !q.zones[0].active && near(q.zones[0].h, 0.2) && near(q.zones[0].w, 0.272);
       const qp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
       q.start(qp);
       const z = q.zones[0];
       const qa = (x, touches) => { qp.pos = { x, y: 0.5 }; qp.touches = touches; q.update(0.033, qp, (t += 33)); return !z.warn; };
       const inEdge = qa(z.x + z.w / 2 + ME_R * 0.2, 1);  // 가운데가 박스 밖 0.2r: 원의 37%가 안 -> 안
       const outFar = qa(z.x + z.w / 2 + ME_R * 0.9, 2);  // 거의 다 밖 -> 경고, 터치 안 셈
-      check('PL3 quick hands box on the flat field; the puck circle counts as inside while 30% of it is in the box', preview && near(z.y, 0.25) && near(z.h, 0.25) && inEdge && !outFar && q.stats.touches === 1,
+      check('PL3 quick hands box (80% size); the puck circle counts as inside while 30% of it is in the box', preview && near(z.y, 0.25) && near(z.h, 0.2) && inEdge && !outFar && q.stats.touches === 1,
         { preview, inEdge, outFar, touches: q.stats.touches, z });
 
       // 반응 타겟: 평면 경기장 안(세로 0~A)에 나타나고, 30% 겹치면 통과
@@ -954,7 +971,7 @@
       for (let i = 0; i < 30; i++) { r._spawnTarget({ x: 0.5, y: 0.25 }, 0.3, 0.5); const tt = r.targets[0]; inField.push(tt.y >= 0 && tt.y <= 0.5 && tt.x >= 0.12 && tt.x <= 0.88); }
       const tg = r.targets[0], dir = tg.x < 0.5 ? 1 : -1;
       const ra = (dx) => { rp.pos = { x: tg.x + dir * dx, y: tg.y / 0.5 }; r.update(0.033, rp, (t += 33)); return r.stats.hits; };
-      const h0 = ra(0.12), h1 = ra(0.035), h2 = ra(0.027); // 멀리 -> 살짝 걸침(통과 아님) -> 30% 넘게 겹침(통과)
+      const h0 = ra(0.12), h1 = ra(tg.r + ME_R * 0.6), h2 = ra(tg.r + ME_R * 0.1); // 멀리 -> 살짝 걸침(통과 아님) -> 퍽의 30% 넘게 겹침(통과)
       check('PL4 reaction targets appear inside the flat field and count at 30% overlap', inField.every(Boolean) && h0 === 0 && h1 === 0 && h2 === 1,
         { inField: inField.filter(Boolean).length, h0, h1, h2, tg });
 

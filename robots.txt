@@ -5,3 +5,5 @@ User-agent: *
 Allow: /
 
 Sitemap: https://puck-trainer.com/sitemap.xml
+
+#DaumWebMasterTool:f5d13dd3f05e5ec61ca7aec976c7c0147c56bcc9cb1b9eb63c1c8269523507dd:LSr9wi71I6+MYd9iMzmuXg==

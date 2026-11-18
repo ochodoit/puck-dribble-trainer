@@ -4,11 +4,12 @@
 
 export const SITE = 'https://puck-trainer.com';
 
-/** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구에서 받은 값 */
+/** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구·Daum 웹마스터도구에서 받은 값 */
 export const VERIFY = {
   google: 'YQj_GaA3rFU0ha0gGZaFWCM3gz7MWWwLLTVLIjkQLMc',
   googleFile: 'google3d8a4c89a20c8fb9.html',
   bing: '5A21EE30137A77A9FB261F99EBCD09D8',
+  daum: 'f5d13dd3f05e5ec61ca7aec976c7c0147c56bcc9cb1b9eb63c1c8269523507dd:LSr9wi71I6+MYd9iMzmuXg==', // robots.txt 맨 아래 #DaumWebMasterTool 줄
 };
 
 /** 공식 인스타그램 (운영자 화면의 게스트 안내에 설정된 계정) */

@@ -54,7 +54,7 @@ export async function checkSite() {
   const sm = await readFile(join(ROOT, 'sitemap.xml'), 'utf8'), robots = await readFile(join(ROOT, 'robots.txt'), 'utf8'), llms = await readFile(join(ROOT, 'llms.txt'), 'utf8');
   const locs = [...sm.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
   check('SEO5 sitemap lists every page once with hreflang; robots allows all crawlers and points to the sitemap; llms.txt summarizes the site', locs.length === pages.length && pages.every((p) => locs.includes(p.url))
-    && /User-agent: \*\nAllow: \/\n/.test(robots) && !/Disallow/.test(robots) && robots.includes(`Sitemap: ${SITE}/sitemap.xml`) && llms.startsWith('# Puck Dribble Trainer') && llms.includes(DEF.en) && llms.includes(DEF.ko), { locs: locs.length });
+    && /User-agent: \*\nAllow: \/\n/.test(robots) && !/Disallow/.test(robots) && robots.includes(`Sitemap: ${SITE}/sitemap.xml`) && robots.trimEnd().endsWith(`#DaumWebMasterTool:${VERIFY.daum}`) && llms.startsWith('# Puck Dribble Trainer') && llms.includes(DEF.en) && llms.includes(DEF.ko), { locs: locs.length });
 
   const yml = await readFile(join(ROOT, '.github/workflows/pages.yml'), 'utf8');
   const need = ['en', 'guide', 'games', 'faq', 'pages.css', 'robots.txt', 'sitemap.xml', 'llms.txt', '404.html', VERIFY.googleFile];

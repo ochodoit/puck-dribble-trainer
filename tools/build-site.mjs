@@ -262,7 +262,9 @@ User-agent: *
 Allow: /
 
 Sitemap: ${SITE}/sitemap.xml
-`;
+${VERIFY.daum ? `
+#DaumWebMasterTool:${VERIFY.daum}
+` : ''}`;
 
 function llms() {
   const link = (lang, slug, label) => `[${label}](${url(pathOf(lang, slug))})`;

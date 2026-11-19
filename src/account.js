@@ -58,6 +58,8 @@ export const ID_TAKEN = '이미 사용 중인 아이디입니다';
 /** 운영자가 임시 비밀번호를 준 계정: 로그인한 뒤 새 비밀번호를 정해야 들어갈 수 있다 */
 export const NEED_TEMP_MSG = '먼저 운영자에게 받은 임시 비밀번호로 로그인하세요';
 export const SAME_PW_MSG = '지금(임시) 비밀번호와 다른 비밀번호를 정하세요';
+/** 비밀번호를 바꾸려면 최근(Firebase 기준 약 5분 안)에 로그인했어야 한다. 오래된 로그인이면 내보내고 다시 로그인하게 한다 */
+export const RELOGIN_MSG = '보안을 위해 한 번 더 로그인해 주세요. 로그인하고 바로(5분 안에) 이어서 정하면 됩니다';
 /** 회원 비밀번호 검사: 8자 이상 영문+숫자, 운영자는 12자 이상도 함께 */
 export function validateNewPassword(pw, { id = null, nick = null, admin = false } = {}) {
   return validatePassword(pw, { id, nick }) || (admin ? validateStrongPassword(pw) : null);

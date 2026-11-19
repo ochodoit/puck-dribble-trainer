@@ -226,6 +226,29 @@ export async function checkRanks() {
       && t.wrongCur === '지금 비밀번호가 맞지 않습니다' && t.sameCur === '새 비밀번호가 지금 비밀번호와 같습니다' && t.change === 'ok' && t.changed === 'fresh2027'
       && t.nickTemp === L.USE_ID_MSG && t.idTemp
       && t.old2 === 'ok' && t.old2up?.kind === 'id' && t.old2same === L.SAME_PW_MSG && t.old2ok === 'ok' && t.old2doc.loginId === 'oldtwo' && !('tempPw' in t.old2doc), t);
+
+    // 오래된 로그인 (저장돼 있던 로그인으로 아이디 만들기 칸이 뜬 경우): Firebase 가 비밀번호 바꾸기를 막는다(requires-recent-login)
+    // -> 내보내고 다시 로그인하라고 알린다. 아무것도 바뀌지 않고, 다시 로그인하면 바로 이어서 된다
+    sa.logout();
+    accounts.set(sa._email('옛셋'), { uid: 'old3', password: '246810' });
+    FA.docs.set('users/old3', { nick: '옛셋', nickLower: '옛셋', country: 'KR', team: 'T', age: 15, ageGroup: 'U16' });
+    const s = {};
+    s.login = await msg(() => sa.login('옛셋', '246810'));
+    const realUpdate = A.updatePassword;
+    A.updatePassword = async () => { throw Object.assign(new Error('old'), { code: 'auth/requires-recent-login' }); };
+    s.stale = await msg(() => sa.upgradeLogin('oldthree', 'third2026'));
+    s.after = { cur: sa.current(), up: sa.needsUpgrade(), signedIn: !!auth.currentUser, ids: FA.docs.get('ids/oldthree') ?? null, pw: accounts.get(sa._email('옛셋')).password };
+    A.updatePassword = realUpdate;
+    s.again = await msg(() => sa.login('옛셋', '246810'));
+    s.ok = await msg(() => sa.upgradeLogin('oldthree', 'third2026'));
+    s.loginId = sa.current()?.loginId;
+    // 저장돼 있던 로그인이 얼마나 오래됐는지 (페이지를 열 때 오래됐으면 정하는 칸 대신 로그인부터)
+    const at = (msAgo) => ({ metadata: { lastSignInTime: new Date(Date.now() - msAgo).toUTCString() } });
+    const recent = (cu) => { const keep = auth.currentUser; auth.currentUser = cu; const r = sa._recentLogin(); auth.currentUser = keep; return r; };
+    s.fresh = recent(at(60 * 1000)); s.old = recent(at(10 * 60 * 1000)); s.unknown = recent({});
+    check('R13 stale login: changing the password is refused -> logged out with a re-login notice, nothing changed; after logging in again the ID is created. Old saved logins (4+ min) ask to log in first',
+      s.login === 'ok' && s.stale === L.RELOGIN_MSG && s.after.cur === null && s.after.up === null && !s.after.signedIn && s.after.ids === null && s.after.pw === '246810'
+      && s.again === 'ok' && s.ok === 'ok' && s.loginId === 'oldthree' && s.fresh === true && s.old === false && s.unknown === true, s);
   }
 
   check('R10 no query needs a composite index (single-field range/order or equality only)', F.queries.length > 0, { queries: F.queries.length });

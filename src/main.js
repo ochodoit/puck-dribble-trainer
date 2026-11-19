@@ -303,6 +303,8 @@ async function onAuthSubmit(e) {
     refreshAuthUI();
     if (app.authTab === 'upgrade') (app.account.needsUpgrade?.()?.kind === 'password' ? $('#auth-pin') : $('#auth-id')).focus();
   } catch (err) {
+    // 로그인이 오래돼 내보내졌으면(다시 로그인해야 함) 로그인 칸으로 돌아가 안내한다
+    if (tab === 'upgrade' && !app.account.needsUpgrade?.()) refreshAuthUI();
     fail(err.message || String(err));
   } finally { els.authSubmit.disabled = false; }
 }

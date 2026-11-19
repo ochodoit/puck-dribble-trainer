@@ -14,7 +14,7 @@ import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, NOT_READY,
   betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateEdit, INVITE_MAX, COUPON_MONTHS,
   SCORE_MAX, RANK_FIELDS, rankGroup, rankIdx, rankIdxFields, activeFilters, competitionRanks,
-  LOGIN_ID_RE, NICK_RE, normLoginId, validateLoginId, validateNewPassword, BAD_LOGIN_MSG, USE_ID_MSG, ID_TAKEN, NEED_TEMP_MSG, SAME_PW_MSG,
+  LOGIN_ID_RE, NICK_RE, normLoginId, validateLoginId, validateNewPassword, BAD_LOGIN_MSG, USE_ID_MSG, ID_TAKEN, NEED_TEMP_MSG, SAME_PW_MSG, RELOGIN_MSG,
   PendingPlays, PLAYS_FLUSH, PLAYS_STEP_MAX,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
@@ -48,7 +48,26 @@ export class FirebaseAccountStore {
     this.db = fs.getFirestore(this.app);
     await this.getSiteConfig(); // 베타 종료일 (정회원 유지 판단)
     await new Promise((resolve) => { const un = auth.onAuthStateChanged(this.auth, async (u) => { un(); if (u) await this._settle(); resolve(); }); });
+    // 저장돼 있던 로그인으로 들어왔는데 아이디·새 비밀번호를 정해야 하면: 로그인이 오래됐으면 비밀번호를 바꿀 수 없으니(requires-recent-login)
+    // 정하는 칸을 보여 주는 대신 로그인부터 다시 하게 한다
+    if (this.upgrade && !this._recentLogin()) this._staleLogout();
     return this;
+  }
+
+  /** 마지막 로그인이 비밀번호를 바꿀 수 있을 만큼 최근인가 (Firebase 는 약 5분. 여유를 두고 4분) */
+  _recentLogin(now = Date.now()) {
+    const t = Date.parse(this.auth.currentUser?.metadata?.lastSignInTime || '');
+    return Number.isFinite(t) ? now - t < 4 * 60 * 1000 : true;
+  }
+  /** 오래된 로그인: 내보내고 다시 로그인하게 한다 */
+  _staleLogout() { this.user = null; this.upgrade = null; this._mine = null; this.A.signOut(this.auth); }
+  /** 비밀번호 바꾸기 (아이디 만들기·임시 비밀번호): 로그인이 오래됐으면 내보내고 다시 로그인하라고 알린다 */
+  async _setPassword(cu, password) {
+    try { await this.A.updatePassword(cu, String(password)); }
+    catch (e) {
+      if (e.code === 'auth/requires-recent-login') { this._staleLogout(); throw new Error(RELOGIN_MSG); }
+      throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`);
+    }
   }
 
   /** 로그인한 계정의 프로필을 읽고, 아이디가 없는 예전 계정·임시 비밀번호 계정이면 새 비밀번호를 정할 때까지 로그인 전으로 둔다 */
@@ -230,8 +249,7 @@ export class FirebaseAccountStore {
     const lid = normLoginId(loginId), idRef = this._doc('ids', lid);
     if (await this._idTaken(idRef)) throw new Error(ID_TAKEN);
     if (up.temp && await this._samePassword(cu, password)) throw new Error(SAME_PW_MSG);
-    try { await this.A.updatePassword(cu, String(password)); }
-    catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }
+    await this._setPassword(cu, password);
     const b = this.F.writeBatch(this.db);
     b.set(idRef, { uid: cu.uid, email: cu.email });
     b.update(this._doc('users', cu.uid), up.temp ? { loginId: lid, tempPw: this.F.deleteField() } : { loginId: lid });
@@ -257,8 +275,7 @@ export class FirebaseAccountStore {
     const err = validateNewPassword(password, { id: up.loginId, nick: up.nick, admin: up.admin });
     if (err) throw new Error(err);
     if (await this._samePassword(cu, password)) throw new Error(SAME_PW_MSG);
-    try { await this.A.updatePassword(cu, String(password)); }
-    catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }
+    await this._setPassword(cu, password);
     try { await this.F.updateDoc(this._doc('users', cu.uid), { tempPw: this.F.deleteField() }); }
     catch (e) { throw new Error(`비밀번호는 바뀌었지만 마무리하지 못했습니다. 새 비밀번호로 다시 로그인하세요 (${e.code || e.message})`); }
     return this._settle();

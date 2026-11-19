@@ -182,6 +182,7 @@ export const EN = {
   '이미 사용 중인 별명입니다': 'That nickname is already taken',
   '서버 준비가 아직 끝나지 않아 아이디를 확인하지 못했습니다. 잠시 뒤 다시 해 보세요': 'The server is not ready yet, so the ID could not be checked. Please try again in a moment',
   '아이디를 확인하지 못했습니다 ({0})': 'Could not check the ID ({0})',
+  '보안을 위해 한 번 더 로그인해 주세요. 로그인하고 바로(5분 안에) 이어서 정하면 됩니다': 'For security, please log in once more, then finish this step right away (within 5 minutes)',
   '국가를 선택하세요': 'Select a country',
   '나이는 3~99 사이 숫자': 'Age must be a number from 3 to 99',
   '별명은 2~12자 (한글·영문·숫자·_-.)': 'Nickname: 2–12 characters (letters, numbers, _ - .)',

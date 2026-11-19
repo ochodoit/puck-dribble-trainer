@@ -13,6 +13,7 @@ import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-i
 import { makeFloorMapping } from './geometry.js';
 import { clock, clockNow } from './clock.js';
 import { initMe } from './me-ui.js';
+import { initMembers } from './members-ui.js';
 import { dayKey } from './activity.js';
 import { decideIdle, stepChoice, stepDwell, inCardCore, choiceSide, CHOICE_HOLD_S } from './idle-logic.js';
 import { initI18n, bindLangButtons, onLangChange, tr, setLang, getLang, missing as i18nMissing, redirecting, langUrl, savedLang, rememberLang } from './i18n.js';
@@ -153,6 +154,7 @@ async function setupAuth() {
   refreshAuthUI();
   setupAdmin();
   setupMe();
+  setupMembers();
   showInvite();
 }
 
@@ -478,6 +480,16 @@ async function renderGuestNotice(result, lapsed = false) {
 
 // =============== 내 정보 ===============
 let meUI = null;
+// =============== 운영자: 회원 현황 ===============
+let membersUI = null;
+function setupMembers() {
+  membersUI = initMembers({
+    $, $$, esc, tr, open, close, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
+    AGE_GROUPS, countryLabel, jerseyLabel, memberBadge, stickLabel, memberNoLabel, joinLabel, shortDate,
+  });
+  $('#adm-open-members').addEventListener('click', () => { if (isAdmin(app.account?.current())) membersUI.open(); });
+}
+
 function setupMe() {
   meUI = initMe({
     $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,

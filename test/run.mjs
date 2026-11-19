@@ -473,6 +473,48 @@ const skipSetup = async (page, touch = false) => {
   const lotOk = draft.includes('추첨 결과 1명') && draft.includes('test123') && won.row.includes('이용권') && won.id === 'opsadmin' && won.sum.includes('이용권 1명') && won.ok && won.copy && chipWin.startsWith('3개월 이용권 ·');
   console.log(`${lotOk ? 'PASS' : 'FAIL'} operator draws among feedback senders, confirms -> winner gets a 3-month pass (${JSON.stringify({ draft: draft.slice(0, 40), won, chipWin })})`);
   if (!lotOk) failed = true;
+  // 운영자 > 회원 현황: 팀·상태로 거르기 -> 회원을 누르면 회원 기록 창(출석률·달력·훈련 시간·게임별 판 수·게임별 기록) -> '‹ 회원 현황'으로 돌아감
+  const seedTeam = await page.evaluate(() => {
+    const users = JSON.parse(localStorage.getItem('puck-trainer.users.v1') || '{}'), bolt = users['번개손'];
+    const day = (ago) => { const d = new Date(Date.now() - ago * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+    const acts = JSON.parse(localStorage.getItem('puck-trainer.activity.v1') || '{}');
+    acts['번개손'] = { uid: '번개손', days: { [day(0)]: { n: 2, s: 300 }, [day(3)]: { n: 1, s: 120 }, [day(5)]: { n: 0, s: 0 } },
+      totals: { games: 3, sec: 420, dist: 35, touches: 40, modes: { arcade: 2, wide: 1 } }, recent: { 'arcade@60': [{ s: 10, at: Date.now() - 3 * 864e5 }, { s: 14, at: Date.now() }] }, updatedAt: Date.now() };
+    localStorage.setItem('puck-trainer.activity.v1', JSON.stringify(acts));
+    return bolt.team.toLowerCase();
+  });
+  await page.click('#btn-settings'); await page.click('#btn-settings-admin');
+  await page.waitForSelector('#panel-admin:not(.hidden)');
+  await page.click('#adm-open-members');
+  await page.waitForFunction(() => document.querySelectorAll('#mem-rows tr[data-uid]').length === 2);
+  const memRows = () => page.evaluate(() => [...document.querySelectorAll('#mem-rows tr[data-uid]')].map((r) => r.dataset.nick));
+  const allNicks = await memRows();
+  await page.selectOption('#mem-team', seedTeam);
+  const byTeam = await memRows();
+  await page.selectOption('#mem-team', '');
+  await page.selectOption('#mem-state', 'coupon');
+  const byState = await memRows();
+  await page.selectOption('#mem-state', '');
+  await page.selectOption('#mem-act', 'today');
+  const byAct = await memRows();
+  const memSum = await page.textContent('#mem-sum');
+  await page.click('#mem-reset');
+  await page.click('#mem-rows tr[data-nick="번개손"]');
+  await page.waitForSelector('#panel-member:not(.hidden)');
+  await page.waitForFunction(() => !document.querySelector('#mm-scores').textContent.includes('불러오는 중'));
+  const mm = await page.evaluate(() => ({
+    card: document.querySelector('#mm-card').textContent, att: document.querySelector('#mm-att').textContent, totals: document.querySelector('#mm-totals').textContent,
+    calOn: document.querySelectorAll('#mm-cal td.on').length, bars: document.querySelectorAll('#mm-chart rect').length, modes: document.querySelector('#mm-modes').textContent,
+    scores: document.querySelectorAll('#mm-scores tr').length, spark: !!document.querySelector('#mm-scores svg.spark'),
+  }));
+  await page.click('#mm-back');
+  const backToList = await page.evaluate(() => document.querySelector('#panel-member').classList.contains('hidden') && !document.querySelector('#panel-members').classList.contains('hidden'));
+  await page.click('[data-close="panel-members"]'); await page.click('[data-close="panel-admin"]');
+  const memOk = allNicks.length === 2 && byTeam.join() === '번개손' && byState.join() === 'test123' && byAct.includes('번개손') && memSum.includes('오늘 출석')
+    && mm.card.includes('번개손') && mm.att.includes('최근 30일 출석률') && /\d+%/.test(mm.att) && mm.totals.includes('3판') && mm.totals.includes('7분') && mm.totals.includes('훈련한 날')
+    && mm.calOn >= 1 && mm.bars === 28 && mm.modes.includes('게임별 판 수') && mm.scores >= 1 && mm.spark && backToList;
+  console.log(`${memOk ? 'PASS' : 'FAIL'} operator members: filter by team/status/activity, click a member -> record window (attendance rate, calendar, training time, 28-day chart, game records), back to list (${JSON.stringify({ allNicks, byTeam, byState, byAct, mm, backToList })})`);
+  if (!memOk) failed = true;
   // 내 정보 > 친구 초대: 내 초대 링크(3명) -> 다른 탭에서 그 링크로 들어오면 '○○님의 초대 링크예요' + 가입하면 바로 정회원
   await page.click('#btn-me');
   await page.waitForFunction(() => document.querySelector('#me-invite input')?.value.includes('?c='));

@@ -530,6 +530,11 @@
         <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">Close</button></header>
         <p id="adm-error" class="error hidden"></p>
         <section class="adm-sec">
+          <h3>Members</h3>
+          <p class="muted">Filter members by team, age group, country, status and activity. Click a member to see their attendance, training time and game records at a glance.</p>
+          <button type="button" id="adm-open-members" class="btn btn-primary">Open members</button>
+        </section>
+        <section class="adm-sec">
           <h3>Stats</h3>
           <p class="muted">Counted from member accounts (sign-ups, attendance, plays). Visitors and guest plays are in Google Analytics.</p>
           <div id="adm-stats" class="me-stats"></div>
@@ -618,6 +623,66 @@
       </div>
     </div>
 
+
+    <!-- 운영자: 회원 현황 (거르기·정렬, 회원을 누르면 회원 기록 창) -->
+    <div id="panel-members" class="panel modal hidden">
+      <div class="modal-card admin members-card">
+        <header><h2>Members</h2><button class="btn btn-ghost btn-close" data-close="panel-members">Close</button></header>
+        <p id="mem-error" class="error hidden"></p>
+        <div id="mem-sum" class="me-stats"></div>
+        <div class="mem-filters">
+          <label class="mem-q">Search<input id="mem-q" type="search" maxlength="40" placeholder="Nickname, ID or team" autocomplete="off" /></label>
+          <label>Team<select id="mem-team"></select></label>
+          <label>Age group<select id="mem-age"></select></label>
+          <label>Country<select id="mem-country"></select></label>
+          <label>Status<select id="mem-state">
+            <option value="">All statuses</option><option value="beta">Beta period</option><option value="kept">Kept</option><option value="coupon">Pass</option><option value="lapsed">Ended</option>
+            <option value="temp">Temp password</option><option value="noid">No ID</option>
+          </select></label>
+          <label>Activity<select id="mem-act">
+            <option value="">Any activity</option><option value="today">Attended today</option><option value="d7">Attended in 7 days</option><option value="d30">Attended in 30 days</option>
+            <option value="idle">Away 30+ days</option><option value="never">Never attended</option>
+          </select></label>
+          <label>Joined via<select id="mem-via">
+            <option value="">Any way</option><option value="beta">Open beta link</option><option value="invite">Friend invite</option><option value="one">One-time code</option><option value="old">Early sign-up</option>
+          </select></label>
+          <label>Sort<select id="mem-sort">
+            <option value="no">Joined No.</option><option value="recent">Last attended</option><option value="games">Games</option><option value="time">Training time</option><option value="rate">Attendance (30 d)</option><option value="nick">Nickname</option>
+          </select></label>
+        </div>
+        <div class="row mem-bar">
+          <p id="mem-count" class="muted"></p>
+          <button type="button" id="mem-reset" class="btn btn-ghost">Clear filters</button>
+          <button type="button" id="mem-refresh" class="btn">Refresh</button>
+        </div>
+        <p class="muted mem-hint">Click a member to open their records. Attendance rate = days attended / days since joining (last 30 days).</p>
+        <div class="rank-table-wrap"><table class="rank-table adm-table mem-table"><thead><tr><th>No.</th><th>Nickname</th><th>Team</th><th>Age group</th><th>Status</th><th>Last attended</th><th>Attendance (30 d)</th><th>Games</th><th>Training time</th></tr></thead><tbody id="mem-rows"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- 운영자: 회원 기록 창 (한 명의 프로필·출석률·출석 달력·훈련 시간·최근 28일·게임별 기록) -->
+    <div id="panel-member" class="panel modal hidden">
+      <div class="modal-card me-card member-card">
+        <header><h2>Member</h2><div class="row"><button type="button" id="mm-back" class="btn btn-ghost">‹ Members</button><button class="btn btn-ghost btn-close" data-close="panel-member">Close</button></div></header>
+        <section class="me-sec"><div id="mm-card" class="me-profile"></div></section>
+        <section class="me-sec">
+          <h3>Attendance</h3>
+          <div id="mm-att" class="me-stats"></div>
+          <div class="me-cal-nav"><button type="button" id="mm-prev" class="btn btn-ghost" aria-label="Previous month">‹</button><b id="mm-month"></b><button type="button" id="mm-next" class="btn btn-ghost" aria-label="Next month">›</button></div>
+          <div id="mm-cal" class="me-cal"></div>
+        </section>
+        <section class="me-sec">
+          <h3>Training</h3>
+          <div id="mm-totals" class="me-stats"></div>
+          <div id="mm-chart" class="adm-chart"></div>
+          <div id="mm-modes" class="adm-stats-more"></div>
+        </section>
+        <section class="me-sec">
+          <h3>Records by game</h3>
+          <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>Game</th><th>Best</th><th>Plays</th><th>Last 10</th></tr></thead><tbody id="mm-scores"></tbody></table></div>
+        </section>
+      </div>
+    </div>
     <!-- 커뮤니티: 코스·기록 공유, 코스 기록 게시판 -->
     <div id="panel-community" class="panel modal hidden">
       <div class="modal-card community">

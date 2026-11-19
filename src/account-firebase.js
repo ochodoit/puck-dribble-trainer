@@ -656,6 +656,13 @@ export class FirebaseAccountStore {
     return snap.docs.map((d) => cleanActivity(d.data(), d.id));
   }
 
+  /** 운영자: 회원 한 명의 게임별 최고 기록 (keys: 확인할 랭킹 키). 그 회원 기기에 모여 있는 판수는 아직 안 쓴 것이라 빠진다 */
+  async memberScores(uid, keys = []) {
+    this._needAdmin();
+    const snaps = await Promise.all(keys.map((k) => this.F.getDoc(this._doc(`scores_${k}`, uid)).catch(() => null)));
+    return snaps.map((s, i) => (s && s.exists() ? { mode: keys[i], score: s.data().score, at: s.data().at, plays: s.data().plays || 1 } : null)).filter(Boolean);
+  }
+
   /** 운영자: 코드 하나 지우기 */
   async deleteCode(code) {
     this._needAdmin();

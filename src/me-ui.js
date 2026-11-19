@@ -6,6 +6,24 @@ const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
 
 /**
+ * 게임(랭킹 키) 도구: 내 정보와 운영자 회원 기록 창이 같이 쓴다. deps: { MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel }
+ * KEYS = 확인할 랭킹 키 (시간제 모드는 1·3·5분, 모두 일반/투명), keyLabel = 보이는 이름, keyOrder = 정렬 순서
+ */
+export function gameKeyTools(deps) {
+  const KEYS = [];
+  for (const m of deps.MODES.filter((x) => x.id !== 'free')) {
+    for (const inv of [false, true]) for (const sec of m.timed ? deps.PLAY_MINUTES.map((n) => n * 60) : [0]) KEYS.push(deps.rankKey(m.id, sec, inv));
+  }
+  const keyLabel = (key) => {
+    const k = keyInfo(key), m = deps.MODES.find((x) => x.id === k.modeId);
+    return [m ? m.name : k.modeId, m?.timed ? deps.timeLabel(m, k.seconds) : '', k.level !== 'normal' ? deps.levelLabel(k.level) : '', k.invisible ? '투명' : ''].filter(Boolean).join(' · ');
+  };
+  const LV_ORDER = { easy: 0, normal: 1, hard: 2 };
+  const keyOrder = (key) => { const k = keyInfo(key); return deps.MODES.findIndex((x) => x.id === k.modeId) * 100000 + k.seconds * 10 + (k.invisible ? 5 : 0) + LV_ORDER[k.level]; };
+  return { KEYS, keyLabel, keyOrder };
+}
+
+/**
  * deps: { $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
  *         COUNTRIES, countryLabel, jerseyLabel, memberBadge, stickLabel, boardOf, shortDate, refreshAuthUI, openLogin,
  *         codeLabel, inviteLink, copyText }
@@ -17,17 +35,7 @@ export function initMe(deps) {
   const view = { y: now.getFullYear(), m: now.getMonth() + 1, act: null, editStick: null };
   const ymd = (ms) => dayKey(ms).replace(/-/g, '.');
 
-  // 확인할 게임 목록 (랭킹 키): 시간제 모드는 1·3·5분, 모두 일반/투명
-  const KEYS = [];
-  for (const m of deps.MODES.filter((x) => x.id !== 'free')) {
-    for (const inv of [false, true]) for (const sec of m.timed ? deps.PLAY_MINUTES.map((n) => n * 60) : [0]) KEYS.push(deps.rankKey(m.id, sec, inv));
-  }
-  const keyLabel = (key) => {
-    const k = keyInfo(key), m = deps.MODES.find((x) => x.id === k.modeId);
-    return [m ? m.name : k.modeId, m?.timed ? deps.timeLabel(m, k.seconds) : '', k.level !== 'normal' ? deps.levelLabel(k.level) : '', k.invisible ? '투명' : ''].filter(Boolean).join(' · ');
-  };
-  const LV_ORDER = { easy: 0, normal: 1, hard: 2 };
-  const keyOrder = (key) => { const k = keyInfo(key); return deps.MODES.findIndex((x) => x.id === k.modeId) * 100000 + k.seconds * 10 + (k.invisible ? 5 : 0) + LV_ORDER[k.level]; };
+  const { KEYS, keyLabel, keyOrder } = gameKeyTools(deps);
 
   // 프로필 수정 칸 (국가 목록·스틱 버튼)
   const sel = $('#me-country');

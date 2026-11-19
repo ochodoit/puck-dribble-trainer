@@ -548,6 +548,13 @@ export class LocalAccountStore {
     return Object.entries(this._get(this.ACTIVITY, {})).map(([uid, a]) => cleanActivity(a, uid));
   }
 
+  /** 운영자: 회원 한 명의 게임별 최고 기록 [{ mode: 랭킹 키, score, at, plays }] */
+  async memberScores(uid, keys = []) {
+    this._needAdmin();
+    const want = new Set(keys);
+    return this._scores().filter((s) => s.uid === uid && (!keys.length || want.has(s.mode))).map((s) => ({ mode: s.mode, score: s.score, at: s.at, plays: s.plays || 1 }));
+  }
+
   /** 운영자: 코드 하나 지우기 */
   async deleteCode(code) {
     this._needAdmin();

@@ -532,6 +532,11 @@
         <header><h2>Operator</h2><button class="btn btn-ghost btn-close" data-close="panel-admin">닫기</button></header>
         <p id="adm-error" class="error hidden"></p>
         <section class="adm-sec">
+          <h3>회원 현황</h3>
+          <p class="muted">팀·연령대·국가·상태·활동으로 회원을 걸러 보고, 회원을 누르면 그 회원의 출석·훈련 시간·게임별 기록을 한눈에 봅니다.</p>
+          <button type="button" id="adm-open-members" class="btn btn-primary">회원 현황 열기</button>
+        </section>
+        <section class="adm-sec">
           <h3>통계</h3>
           <p class="muted">회원 기준(가입·출석·플레이)입니다. 방문자 수와 게스트 플레이는 Google 애널리틱스에서 봅니다.</p>
           <div id="adm-stats" class="me-stats"></div>
@@ -620,6 +625,66 @@
       </div>
     </div>
 
+
+    <!-- 운영자: 회원 현황 (거르기·정렬, 회원을 누르면 회원 기록 창) -->
+    <div id="panel-members" class="panel modal hidden">
+      <div class="modal-card admin members-card">
+        <header><h2>Members</h2><button class="btn btn-ghost btn-close" data-close="panel-members">닫기</button></header>
+        <p id="mem-error" class="error hidden"></p>
+        <div id="mem-sum" class="me-stats"></div>
+        <div class="mem-filters">
+          <label class="mem-q">검색<input id="mem-q" type="search" maxlength="40" placeholder="별명·아이디·팀" autocomplete="off" /></label>
+          <label>팀<select id="mem-team"></select></label>
+          <label>연령대<select id="mem-age"></select></label>
+          <label>국가<select id="mem-country"></select></label>
+          <label>상태<select id="mem-state">
+            <option value="">모든 상태</option><option value="beta">베타 기간</option><option value="kept">유지</option><option value="coupon">이용권</option><option value="lapsed">종료</option>
+            <option value="temp">임시 비밀번호</option><option value="noid">아이디 없음</option>
+          </select></label>
+          <label>활동<select id="mem-act">
+            <option value="">모든 활동</option><option value="today">오늘 출석</option><option value="d7">7일 안에 출석</option><option value="d30">30일 안에 출석</option>
+            <option value="idle">30일 넘게 안 옴</option><option value="never">출석 기록 없음</option>
+          </select></label>
+          <label>가입 경로<select id="mem-via">
+            <option value="">모든 경로</option><option value="beta">오픈베타 링크</option><option value="invite">친구 초대</option><option value="one">1회용 코드</option><option value="old">예전 가입</option>
+          </select></label>
+          <label>정렬<select id="mem-sort">
+            <option value="no">가입 번호</option><option value="recent">최근 출석</option><option value="games">판 수</option><option value="time">훈련 시간</option><option value="rate">출석률 (30일)</option><option value="nick">별명</option>
+          </select></label>
+        </div>
+        <div class="row mem-bar">
+          <p id="mem-count" class="muted"></p>
+          <button type="button" id="mem-reset" class="btn btn-ghost">조건 지우기</button>
+          <button type="button" id="mem-refresh" class="btn">새로 고침</button>
+        </div>
+        <p class="muted mem-hint">회원을 누르면 그 회원의 기록 창이 열립니다. 출석률 = 출석한 날 / 가입한 날부터 지난 날 (최근 30일 기준).</p>
+        <div class="rank-table-wrap"><table class="rank-table adm-table mem-table"><thead><tr><th>번호</th><th>별명</th><th>팀</th><th>연령대</th><th>상태</th><th>마지막 출석</th><th>출석 (30일)</th><th>판 수</th><th>훈련 시간</th></tr></thead><tbody id="mem-rows"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- 운영자: 회원 기록 창 (한 명의 프로필·출석률·출석 달력·훈련 시간·최근 28일·게임별 기록) -->
+    <div id="panel-member" class="panel modal hidden">
+      <div class="modal-card me-card member-card">
+        <header><h2>Member</h2><div class="row"><button type="button" id="mm-back" class="btn btn-ghost">‹ 회원 현황</button><button class="btn btn-ghost btn-close" data-close="panel-member">닫기</button></div></header>
+        <section class="me-sec"><div id="mm-card" class="me-profile"></div></section>
+        <section class="me-sec">
+          <h3>출석</h3>
+          <div id="mm-att" class="me-stats"></div>
+          <div class="me-cal-nav"><button type="button" id="mm-prev" class="btn btn-ghost" aria-label="이전 달">‹</button><b id="mm-month"></b><button type="button" id="mm-next" class="btn btn-ghost" aria-label="다음 달">›</button></div>
+          <div id="mm-cal" class="me-cal"></div>
+        </section>
+        <section class="me-sec">
+          <h3>훈련</h3>
+          <div id="mm-totals" class="me-stats"></div>
+          <div id="mm-chart" class="adm-chart"></div>
+          <div id="mm-modes" class="adm-stats-more"></div>
+        </section>
+        <section class="me-sec">
+          <h3>게임별 기록</h3>
+          <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>게임</th><th>최고</th><th>플레이</th><th>최근 10판</th></tr></thead><tbody id="mm-scores"></tbody></table></div>
+        </section>
+      </div>
+    </div>
     <!-- 커뮤니티: 코스·기록 공유, 코스 기록 게시판 -->
     <div id="panel-community" class="panel modal hidden">
       <div class="modal-card community">

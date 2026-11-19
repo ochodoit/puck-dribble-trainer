@@ -386,7 +386,7 @@
     ar.avatar = { x: 0.5, y: 0.5 }; ar.score = 30; ar._onHit({}, t);
     check('A6 hit subtracts penalty, never below zero', ar.score === 30 - HIT_PENALTY && (ar.score = 5, ar._onHit({}, t), ar.score === 0), ar.score);
 
-    // A7) 스폰: 막대 없이 정원 퍽만, 색은 여러 가지, 속도는 모두 같고 테두리 안쪽 무작위 위치
+    // A7) 스폰: 막대 없이 정원 퍽만, 색은 빨강 하나(퍽 피하기와 같게), 속도는 모두 같고 테두리 안쪽 무작위 위치
     ar = mk(); t = toPlay(ar, 60000); ar.spawnTimer = 0; ar.pickupTimer = 0.3;
     const seen = []; let overlaps = 0, coinsSeen = 0;
     for (let i = 0; i < 600; i++) {
@@ -399,11 +399,14 @@
       if (ar.pickupTimer > 0.6) ar.pickupTimer = 0.6;
     }
     check('A7 falling pucks and coins never overlap each other', overlaps === 0 && coinsSeen >= 1 && seen.length > 60, { overlaps, pucks: seen.length });
-    check('A7 falling pucks are half size', seen.every((o) => o.r >= FALL_R[0] && o.r <= FALL_R[1]) && FALL_R[1] === 0.021 && COIN_R === 0.013 && ar.pickups.every((p) => p.r === COIN_R));
+    // 크기는 퍽 피하기와 같게: 퍽 피하기 평면 폭 단위 -> 아케이드 화면 폭 단위 (경기장 폭 = 1 - 2 × FIELD_MARGIN = 0.9)
+    const fieldW = 1 - 2 * FIELD_MARGIN, avoidFallR = FLYER_R * fieldW, avoidMeR = ME_R * fieldW;
+    check('A7 falling pucks are the same size as puck-avoid red pucks', seen.every((o) => Math.abs(o.r - avoidFallR) < 1e-9) && Math.abs(FALL_R[0] - avoidFallR) < 1e-9 && Math.abs(FALL_R[1] - avoidFallR) < 1e-9 && COIN_R === 0.013 && ar.pickups.every((p) => p.r === COIN_R), { FALL_R, avoidFallR });
+    check('A7 my puck is the same size as the puck-avoid player puck', Math.abs(PUCK_R - avoidMeR) < 1e-9, { PUCK_R, avoidMeR });
     const vys = new Set(seen.map((o) => o.vy.toFixed(6))), cols = new Set(seen.map((o) => o.color));
     check('A7 only round pucks spawn (no bars)', seen.length > 40 && seen.every((o) => o.type === undefined && o.r > 0 && o.w === undefined), seen.length);
     check('A7 all pucks fall at the same constant speed', vys.size === 1 && Math.abs(seen[0].vy - 0.26) < 1e-9, [...vys]);
-    check('A7 falling pucks are all ink black (never red or yellow)', cols.size === 1 && [...cols][0] === C.ink && !PUCK_COLORS.includes(C.red) && !PUCK_COLORS.includes(C.yellow), [...cols]);
+    check('A7 falling pucks are all red like puck-avoid (never ink or yellow)', cols.size === 1 && [...cols][0] === C.red && !PUCK_COLORS.includes(C.ink) && !PUCK_COLORS.includes(C.yellow), [...cols]);
     check('A7 random x inside the side borders', seen.every((o) => o.x - o.r >= FIELD_MARGIN - 1e-9 && o.x + o.r <= 1 - FIELD_MARGIN + 1e-9) && Math.max(...seen.map((o) => o.x)) - Math.min(...seen.map((o) => o.x)) > 0.6, { min: Math.min(...seen.map((o) => o.x)), max: Math.max(...seen.map((o) => o.x)) });
     // 앞뒤 방향: 기본은 카메라 쪽(v 큼)으로 밀면 화면 위로, 몸쪽(v 작음)으로 당기면 아래로. 설정으로 반전 가능
     check('A8 push toward camera moves the puck up (default)', ar.flipY === true && Math.abs(ar.toZone(0.5, 1).y - ar.zoneTop) < 1e-9 && Math.abs(ar.toZone(0.5, 0).y - ar.aspect) < 1e-9);
@@ -597,17 +600,18 @@
       const paint = (a) => { cx2.fillStyle = '#ffffff'; cx2.fillRect(0, 0, cv.width, cv.height); alphaLayer(cx2, a, (c) => { c.fillStyle = '#000000'; c.fillRect(100, 100, 50, 50); }); return px(120, 120)[0]; };
       const v1 = paint(1), v0 = paint(0), vh = paint(0.5);
       check('H1 alpha layer: 1 opaque, 0 hidden, 0.5 half', v1 === 0 && v0 === 255 && vh > 110 && vh < 145, { v1, v0, vh });
-      // 아케이드: 플레이 중 내 퍽(빨간 원)이 농도 0이면 화면에 없음, 카운트다운 중에는 항상 보임
+      // 아케이드: 플레이 중 내 퍽(잉크 정원)이 농도 0이면 화면에 없음, 카운트다운 중에는 항상 보임
       const ar2 = new Arcade(null); ar2.aspect = cv.height / cv.width; ar2.wash = 1; ar2.start({ distance: 0 }, 'normal', true);
       ar2.avatar = ar2.toZone(0.5, 0.5);
       const ax2 = ar2.avatar.x * cv.width, ay2 = ar2.avatar.y * cv.width;
       const drawAr = (alpha, phase) => { ar2.puckAlpha = alpha; ar2.phase = phase; ar2.effects = []; cx2.clearRect(0, 0, cv.width, cv.height); ar2.draw(cx2, cv.width, cv.height, 1000, { trail: [], state: 'tracked' }); return px(ax2, ay2); };
-      const isRed = (p) => p[0] > 190 && p[1] < 110 && p[2] < 100;
+      const isInk = (p) => p[0] < 60 && p[1] < 60 && p[2] < 60; // C.ink = #161616
+      const isGrey = (p) => Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2]) < 25; // 잉크가 종이 위에 흐려져도 붉은 기 없이 회색
       const pFull = drawAr(1, 'play'), pZero = drawAr(0, 'play'), pHalf = drawAr(0.5, 'play'), pCount = drawAr(0, 'countdown');
-      check('H1 arcade puck visible at 100%', isRed(pFull), pFull);
-      check('H1 arcade puck hidden at 0% during play', !isRed(pZero) && pZero[1] > 200, pZero);
-      check('H1 arcade puck faded at 50%', !isRed(pHalf) && pHalf[0] > pHalf[1] + 25 && pHalf[1] > 120, pHalf);
-      check('H1 puck always visible during countdown (needed to place it)', isRed(pCount), pCount);
+      check('H1 arcade puck visible at 100%', isInk(pFull), pFull);
+      check('H1 arcade puck hidden at 0% during play', !isInk(pZero) && pZero[1] > 200, pZero);
+      check('H1 arcade puck faded at 50%', !isInk(pHalf) && isGrey(pHalf) && pHalf[1] > 90 && pHalf[1] < 180, pHalf);
+      check('H1 puck always visible during countdown (needed to place it)', isInk(pCount), pCount);
       const tp = (o) => sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), ...o }).puckTransparency;
       check('H1 puck transparency setting sanitized (0~100 step 1, old visibility setting migrated)', tp({ puckTransparency: 30 }) === 30 && tp({ puckTransparency: 100 }) === 100 && tp({ puckTransparency: 35 }) === 35 && tp({ puckTransparency: 33.5 }) === 0 && tp({ puckTransparency: 130 }) === 0 && tp({ puckOpacity: 30 }) === 70 && tp({ puckOpacity: 100 }) === 0);
     }

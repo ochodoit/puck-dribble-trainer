@@ -285,14 +285,27 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${keptOk ? 'PASS' : 'FAIL'} area edit keeps the fitted frame; reset returns to the starting frame (${kept.toFixed(3)})`);
   if (!keptOk) failed = true;
 
-  // 배경 투명도 슬라이더 -> 아케이드·퍽 피하기 배경 불투명도에 반영되고 저장됨
+  // 배경 투명도 슬라이더: 아케이드는 배경 0 고정(흰 화면) — 슬라이더가 잠기고 이유가 보이며, 설정값이 있어도 배경은 불투명 그대로.
+  // 배경을 조절하는 게임(반응 타겟)에서는 불투명도에 바로 반영되고 저장됨
+  const setTp = (id, v) => page.evaluate(([id, v]) => { const el = document.querySelector('#set-' + id); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, [id, v]);
+  const bgState = () => page.evaluate(() => { const el = document.querySelector('#set-bgTransparency'), n = document.querySelector('#visual-note'); return { mode: window.__puckTrainer.game.mode.id, disabled: el.disabled, locked: el.closest('label').classList.contains('locked'), note: n.classList.contains('hidden') ? '' : n.textContent }; });
+  const modeBeforeBg = await page.evaluate(() => window.__puckTrainer.game.mode.id);
   await page.click('#btn-settings');
-  await page.evaluate(() => { const el = document.querySelector('#set-bgTransparency'); el.value = '60'; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  const wash = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.wash, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).bgTransparency, out: document.querySelector('#out-bgTransparency').value }));
-  await page.evaluate(() => { const el = document.querySelector('#set-bgTransparency'); el.value = '10'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const bgArc = await bgState();
   await page.click('[data-close="panel-settings"]');
-  const washOk = Math.abs(wash.a - 0.4) < 1e-9 && wash.saved === 60 && wash.out === '60';
-  console.log(`${washOk ? 'PASS' : 'FAIL'} background transparency slider (60% -> wash ${wash.a})`);
+  await page.evaluate(() => window.__puckTrainer.game.setMode('reaction'));
+  await page.click('#btn-settings');
+  const bgRx = await bgState();
+  await setTp('bgTransparency', 60);
+  const wash = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.wash, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).bgTransparency, out: document.querySelector('#out-bgTransparency').value }));
+  await setTp('bgTransparency', 10);
+  await page.click('[data-close="panel-settings"]');
+  await page.evaluate((m) => window.__puckTrainer.game.setMode(m), modeBeforeBg);
+  await page.waitForTimeout(200); // 매 프레임 applyWash: 아케이드로 돌아오면 배경 투명도 10 이 저장돼 있어도 흰 화면
+  const washArc = await page.evaluate(() => window.__puckTrainer.game.arcade.wash);
+  const washOk = bgArc.mode === 'arcade' && bgArc.disabled && bgArc.locked && bgArc.note !== '' && !bgRx.disabled && !bgRx.locked && bgRx.note === ''
+    && Math.abs(wash.a - 0.4) < 1e-9 && wash.saved === 60 && wash.out === '60' && washArc === 1;
+  console.log(`${washOk ? 'PASS' : 'FAIL'} background transparency slider (reaction 60% -> wash ${wash.a}; arcade locked at 0 -> wash ${washArc}) ${JSON.stringify({ bgArc, bgRx })}`);
   if (!washOk) failed = true;
 
   // 내 퍽 투명도 슬라이더 (1 단위, 0~100, 0 = 또렷이) -> 아케이드·평면 렌더러에 반영되고 저장됨
@@ -302,7 +315,10 @@ const skipSetup = async (page, touch = false) => {
   const po = await page.evaluate(() => ({ a: window.__puckTrainer.game.arcade.puckAlpha, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).puckTransparency, out: document.querySelector('#out-puckTransparency').value }));
   await page.evaluate(() => { const el = document.querySelector('#set-puckTransparency'); el.value = '0'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   // 투명도 미리보기: 설정 창이 열려 게임이 멈춘 동안에도 카메라 영상이 흐르고, 배경 투명도 슬라이더대로 바로 바뀐다
-  const setTp = (id, v) => page.evaluate(([id, v]) => { const el = document.querySelector('#set-' + id); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, [id, v]);
+  // (아케이드는 배경 0 고정이라, 배경을 조절하는 반응 타겟에서 본다)
+  await page.click('[data-close="panel-settings"]');
+  await page.evaluate(() => window.__puckTrainer.game.setMode('reaction'));
+  await page.click('#btn-settings');
   const tpSample = () => page.evaluate(() => { const c = document.querySelector('#set-preview'); const d = c.getContext('2d').getImageData(Math.round(c.width * 0.08), Math.round(c.height * 0.1), 1, 1).data; return { w: c.width, h: c.height, rgb: [d[0], d[1], d[2]], t: window.__puckTrainer.app.lastVideoTime, paused: window.__puckTrainer.app.paused }; });
   const bgWas = await page.evaluate(() => document.querySelector('#set-bgTransparency').value);
   await setTp('bgTransparency', 0); await page.waitForTimeout(150); const tp0 = await tpSample();
@@ -313,6 +329,7 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${tpOk ? 'PASS' : 'FAIL'} settings preview shows the live camera under the background wash while the game is paused ${JSON.stringify({ tp0, tp100 })}`);
   if (!tpOk) failed = true;
   await page.click('[data-close="panel-settings"]');
+  await page.evaluate((m) => window.__puckTrainer.game.setMode(m), modeBeforeBg);
   // 휴대폰: 투명도 슬라이더를 끄는 동안만 설정 창 대신 실제 게임 화면 (끄는 슬라이더 한 줄만 남고, 배경 투명도가 바로 보인다)
   const modeWas = await page.evaluate(() => window.__puckTrainer.game.mode.id);
   await page.evaluate(() => window.__puckTrainer.game.setMode('reaction'));

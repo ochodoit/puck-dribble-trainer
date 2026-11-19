@@ -180,6 +180,8 @@ export const EN = {
   '로그인 실패 ({0})': 'Login failed ({0})',
   '로그인이 필요합니다': 'Please log in first',
   '이미 사용 중인 별명입니다': 'That nickname is already taken',
+  '서버 준비가 아직 끝나지 않아 아이디를 확인하지 못했습니다. 잠시 뒤 다시 해 보세요': 'The server is not ready yet, so the ID could not be checked. Please try again in a moment',
+  '아이디를 확인하지 못했습니다 ({0})': 'Could not check the ID ({0})',
   '국가를 선택하세요': 'Select a country',
   '나이는 3~99 사이 숫자': 'Age must be a number from 3 to 99',
   '별명은 2~12자 (한글·영문·숫자·_-.)': 'Nickname: 2–12 characters (letters, numbers, _ - .)',

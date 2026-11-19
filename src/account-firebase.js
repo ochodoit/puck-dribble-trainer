@@ -134,7 +134,7 @@ export class FirebaseAccountStore {
     if (!CODE_RE.test(ckey)) throw new Error(codeError('format'));
     const key = normNick(nick), lid = normLoginId(loginId);
     const nickRef = this._doc('nicks', key), idRef = this._doc('ids', lid), codeRef = this._doc('codes', ckey), metaRef = this._doc('meta', 'members');
-    if ((await this.F.getDoc(idRef)).exists()) throw new Error(ID_TAKEN);
+    if (await this._idTaken(idRef)) throw new Error(ID_TAKEN);
     if ((await this.F.getDoc(nickRef)).exists()) throw new Error('이미 사용 중인 별명입니다');
     const info = await this.checkCode(ckey);
     if (info.status !== 'ok') throw new Error(codeError(info.status, info));
@@ -172,6 +172,15 @@ export class FirebaseAccountStore {
       try { await this.A.deleteUser(cred.user); } catch { this.A.signOut(this.auth); }
       throw new Error(e.code === 'permission-denied' ? codeError('format') : e.message || String(e));
     }
+  }
+
+  /**
+   * 아이디가 이미 쓰이는지 (ids/{아이디}). 서버 규칙이 이 읽기를 막으면(규칙을 아직 게시하지 않았거나 반영 전)
+   * Firestore 의 영어 오류 대신 알아볼 수 있는 말로 알린다
+   */
+  async _idTaken(idRef) {
+    try { return (await this.F.getDoc(idRef)).exists(); }
+    catch (e) { throw new Error(e.code === 'permission-denied' ? '서버 준비가 아직 끝나지 않아 아이디를 확인하지 못했습니다. 잠시 뒤 다시 해 보세요' : `아이디를 확인하지 못했습니다 (${e.code || e.message})`); }
   }
 
   /** 로그인 시도 하나: 되면 true, 아이디·비밀번호가 틀리면 false, 그 밖의 오류(요청이 너무 많음 등)는 던진다 */
@@ -219,7 +228,7 @@ export class FirebaseAccountStore {
     const err = validateLoginId(loginId, up.nick) || validateNewPassword(password, { id: loginId, nick: up.nick, admin: up.admin });
     if (err) throw new Error(err);
     const lid = normLoginId(loginId), idRef = this._doc('ids', lid);
-    if ((await this.F.getDoc(idRef)).exists()) throw new Error(ID_TAKEN);
+    if (await this._idTaken(idRef)) throw new Error(ID_TAKEN);
     if (up.temp && await this._samePassword(cu, password)) throw new Error(SAME_PW_MSG);
     try { await this.A.updatePassword(cu, String(password)); }
     catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }

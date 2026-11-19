@@ -11,7 +11,9 @@
 ### 1. 로그인 방식 켜기
 빌드 > **Authentication** > 시작하기 > **로그인 방법** 탭 > **이메일/비밀번호** > 사용 설정 > 저장
 
-게임은 "별명 + 숫자 6자리"로 로그인하지만, 내부적으로 별명을 가상 이메일(`u-xxxx@headsuppuck.firebaseapp.com`)로 바꿔 이메일/비밀번호 방식을 씁니다. 이 도메인은 아무도 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없습니다. 예전 주소(`u-xxxx@puck-trainer.app`) 계정은 2026-11-17에 모두 새 주소로 옮겼습니다(앱은 로그인할 때 예전 주소도 함께 시도).
+게임은 "아이디 + 비밀번호(8자 이상, 영문+숫자)"로 로그인하고, 랭킹에 보이는 이름은 따로 정하는 별명입니다(2026-11-19부터. 별명은 공개되므로 로그인에 쓰지 않음). 내부적으로 아이디를 가상 이메일(`id.<아이디>@headsuppuck.firebaseapp.com`)로 바꿔 이메일/비밀번호 방식을 씁니다. 이 도메인은 아무도 메일을 받을 수 없어 비밀번호 재설정 메일로 계정을 뺏을 수 없습니다.
+
+예전 계정(별명 + 숫자 6자리, 로그인 주소 `u-<별명 hex>@headsuppuck.firebaseapp.com`)은 예전처럼 별명과 숫자 6자리로 로그인하면 아이디와 새 비밀번호를 만드는 화면이 나옵니다. 만들기 전에는 로그인 전 상태입니다. 만든 뒤에는 아이디로만 로그인합니다. 앱은 로그인 주소도 아이디 주소로 바꿔 보는데, 프로젝트의 "이메일 열거 보호"가 켜져 있으면 바뀌지 않으므로 `ids/{아이디}` 문서에 적힌 예전 주소로 로그인합니다. 예전 주소(`u-xxxx@puck-trainer.app`) 계정은 2026-11-17에 모두 새 주소로 옮겼습니다.
 
 ### 2. 사이트 주소 등록
 Authentication > **설정** 탭 > **승인된 도메인** > 도메인 추가 > `puck-trainer.com`, `ochodoit.github.io`
@@ -24,7 +26,7 @@ Authentication > **설정** 탭 > **승인된 도메인** > 도메인 추가 > `
 ### 4. 보안 규칙 붙여넣기
 Firestore > **규칙** 탭 > 기존 내용을 모두 지우고 아래 내용을 붙여넣기 > **게시**
 
-(이 내용은 저장소의 `firestore.rules` 와 같습니다. 규칙을 바꾸면 이 파일과 함께 고칩니다. 2026-11-18: 친구 초대 코드·3개월 이용권·의견 추첨, 순위 색인 칸 반영)
+(이 내용은 저장소의 `firestore.rules` 와 같습니다. 규칙을 바꾸면 이 파일과 함께 고칩니다. 2026-11-18: 친구 초대 코드·3개월 이용권·의견 추첨, 순위 색인 칸 반영. 2026-11-19: 로그인 아이디(`ids`), 최고 기록일 때만 쓰고 판수는 모아서 쓰는 랭킹 기록)
 
 ```
 rules_version = '2';
@@ -35,9 +37,12 @@ rules_version = '2';
 //     운영자·관리자·admin 같은 이름은 쓸 수 없다
 //  3) 개인정보: 프로필(나이·가입 코드)은 본인과 운영자만 읽는다. 랭킹에는 화면에 보이는 칸만 남는다
 //  4) 정리: 운영자는 글·도전 기록·랭킹 기록·의견을 지울 수 있다
-//  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간). 순위 색인 칸은 점수·묶음과 맞아야 한다
+//  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간). 순위 색인 칸은 점수·묶음과 맞아야 한다.
+//     앱은 최고 기록이 오를 때만 쓰고 판수는 모아서 쓴다: 판수는 한 번에 1~50 늘고, 점수가 그대로면 기록 시각도 그대로
 //  6) 정회원 기간: 무료 정회원은 베타 종료일까지. 그 뒤는 운영자가 유지(kept)했거나 이용권 기한(until)이 남은 계정만
 //  7) 초대 코드: 정회원 한 사람당 하나, 3명까지, 추가 없음 (프로필의 invite 칸과 한 묶음으로 한 번만 만든다)
+//  8) 로그인 아이디: 로그인은 아이디 + 비밀번호, 랭킹에 보이는 이름은 별명 (따로). 아이디는 ids/{아이디} 로 하나뿐이고,
+//     새 가입은 로그인 주소가 그 아이디 주소(id.<아이디>@…)여야 한다. 예전 계정(별명 + 숫자 6자리)은 아이디를 한 번만 만든다
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -125,6 +130,12 @@ service cloud.firestore {
       return !('expiresAt' in d) || d.expiresAt == null || d.expiresAt is timestamp;
     }
 
+    // 프로필의 아이디: 별명과 다르고, 같은 묶음에서 ids/{아이디} 가 이 계정 것으로 생긴다
+    function loginIdOk(d, uid) {
+      return d.loginId is string && d.loginId != d.nickLower
+        && getAfter(/databases/$(database)/documents/ids/$(d.loginId)).data.uid == uid;
+    }
+
     match /admins/{uid} {
       allow get: if request.auth != null && request.auth.uid == uid;
     }
@@ -179,8 +190,8 @@ service cloud.firestore {
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
       allow create: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt', 'stick'])
-        && validProfile(request.resource.data) && validNick(request.resource.data)
+        && request.resource.data.keys().hasOnly(['loginId', 'nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt', 'stick'])
+        && validProfile(request.resource.data) && validNick(request.resource.data) && loginIdOk(request.resource.data, uid)
         && request.resource.data.ageGroup == ageGroupFor(request.resource.data.age)
         && request.resource.data.code is string && joinOk(request.resource.data, uid);
       // 본인: 등번호·국가·팀·나이만 고칠 수 있다 (별명·가입 정보·회원 번호·정회원 유지는 못 바꿈)
@@ -188,6 +199,10 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup', 'stick'])
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age', 'ageGroup'])
           || request.resource.data.ageGroup == ageGroupFor(request.resource.data.age));
+      // 본인(예전 계정): 아이디를 처음 한 번 만든다 (새로 만드는 ids/{아이디} 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loginId'])
+        && !('loginId' in resource.data) && loginIdOk(request.resource.data, uid);
       // 본인: 내 초대 코드를 처음 한 번 연결 (새로 만드는 코드 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
       allow update: if request.auth != null && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invite'])
@@ -237,6 +252,23 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.nickLower == nick;
       allow delete: if isAdmin(); // 운영자가 베타 멤버를 지우면 별명도 다시 쓸 수 있게
+    }
+    // 로그인 아이디 고유성: 문서 이름 = 아이디(4~20자, 영문 소문자로 시작, 영문 소문자·숫자·_), 칸 = uid·로그인 주소.
+    // 아이디를 아는 사람만 읽을 수 있다 (목록은 운영자만). 만들 수 있는 때는 두 가지이고, 고치거나 지울 수 없다
+    //  - 가입하는 묶음: 로그인 주소가 이 아이디의 주소(id.<아이디>@…)일 때
+    //  - 예전 계정(별명 + 숫자 6자리)이 아이디를 처음 만들 때: 로그인 주소는 예전 그대로일 수 있어 여기 적어 둔다
+    match /ids/{id} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if request.auth != null && id.matches('[a-z][a-z0-9_]{3,19}')
+        && request.resource.data.keys().hasOnly(['uid', 'email'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('loginId', null) == id
+        && (joiningNow()
+          ? request.auth.token.email.split('@')[0] == 'id.' + id
+          : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('loginId', null) == null);
+      allow delete: if isAdmin(); // 운영자가 베타 멤버를 지우면 아이디도 다시 쓸 수 있게
     }
 
     // ---- 커뮤니티 ----
@@ -361,8 +393,9 @@ service cloud.firestore {
         && d.score is int && d.score >= 0 && d.score <= 1000000 && d.at is int && d.plays is int
         && d.t == request.time
         && (old == null
-          ? d.plays == 1
-          : (d.score >= old.data.score && d.plays == old.data.get('plays', 1) + 1
+          ? d.plays >= 1 && d.plays <= 50
+          : (d.plays > old.data.get('plays', 1) && d.plays <= old.data.get('plays', 1) + 50
+            && (d.score > old.data.score || (d.score == old.data.score && d.at == old.data.at))
             && request.time > old.data.get('t', timestamp.date(2000, 1, 1)) + duration.value(2, 's')));
     }
     match /{col}/{uid} {
@@ -428,4 +461,7 @@ const firebaseConfig = {
 - 기존에 각 기기에 저장된 기록·글은 온라인으로 옮겨지지 않음 (온라인에서 새로 가입).
 - 예전의 접속 코드(1234) 화면은 없앴습니다. 누구나 게스트로 플레이할 수 있고, 랭킹·글쓰기는 가입 코드로 가입한 정회원만 합니다. 보안은 위 규칙이 담당 (남의 기록·글은 고치거나 지울 수 없음, 코드 사용 횟수·회원 번호는 가입할 때 함께만 바뀜).
 - 규칙을 새로 게시하기 전에 바뀐 게임을 배포하면 가입·랭킹 등록이 실패합니다. 규칙 게시 → 운영자 지정 → 가입 준비 순서로 하세요.
+- 2026-11-19 (아이디 로그인·판수 모아 쓰기): **규칙을 먼저 게시한 뒤** 게임을 배포(main 에 푸시)하세요. 게시 전에 배포하면 가입(아이디 문서)과, 모아 둔 판수를 쓰는 랭킹 기록이 실패합니다. 예전 게임 화면이 열려 있던 사람은 새로고침하면 됩니다.
+- 랭킹 기록 쓰기: 최고 기록이 오를 때만 기록 문서를 쓰고, 못 넘은 판은 판수만 기기에 모아 두었다가 10판마다·다음 최고 기록 때·화면을 떠날 때·로그아웃할 때 한 번에 씁니다(쓰기 횟수가 판 수만큼 들지 않음).
+- (선택) Authentication > 설정 > **비밀번호 정책**에서 최소 8자·영문·숫자를 서버에서도 강제할 수 있습니다. 다만 "강제"로 켜면 아직 아이디를 만들지 않은 예전 계정(숫자 6자리)이 로그인하지 못하므로, 예전 회원이 모두 아이디를 만든 뒤에 켜세요.
 - 랭킹 기록은 서버 시간 칸(`t`)이 있어야 써집니다(같은 모드는 2초에 한 번). 규칙을 게시하기 전의 게임 화면이 열려 있으면 새로고침하세요.

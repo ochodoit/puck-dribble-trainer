@@ -18,6 +18,9 @@
   import { memberStats, lastDays } from '../src/stats.js';
   import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
   import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit, addMonths, couponUntil, lotteryPool, drawLottery, INVITE_MAX, codeInfo } from '../src/account.js';
+  // 계정 테스트 도우미 (아이디 + 비밀번호 로그인): 별명 -> 아이디(u + 별명의 hex), 예전 숫자 6자리 -> 비밀번호(pw + 숫자)
+  const ID = (nick) => ('u' + [...new TextEncoder().encode(String(nick).trim().toLowerCase())].map((b) => b.toString(16).padStart(2, '0')).join('')).slice(0, 20);
+  const PW = (pin) => `pw${pin}`;
   import { addActivity, cleanActivity, streak, attendanceSummary, monthGrid, keyInfo, dayKey, sparkPoints, RECENT_MAX } from '../src/activity.js';
   import { siteAllowed, isDevHost, OFFICIAL_URL } from '../src/guard.js';
   import { decideIdle, stepChoice, stepDwell, choiceSide, inCardCore, CARD_INSET, CHOICE_HOLD_S } from '../src/idle-logic.js';
@@ -628,20 +631,26 @@
     const st = mem();
     let acc = new LocalAccountStore(st);
     check('C1 age groups', ageGroupOf(7) === 'U8' && ageGroupOf(9) === 'U10' && ageGroupOf(11) === 'U12' && ageGroupOf(13) === 'U14' && ageGroupOf(15) === 'U16' && ageGroupOf(17) === 'U18' && ageGroupOf(25) === '성인' && ageGroupOf(45) === '시니어');
-    check('C1 validation: pin must be 6 digits', !!validateProfile({ nick: '번개손', pin: '12345', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: '번개손', pin: 'abcdef', country: 'KR', team: 'A', age: 11 }) && !validateProfile({ nick: '번개손', pin: '123456', country: 'KR', team: 'A', age: 11, stick: 'L' }));
-    check('C1 validation: nick length/age range', !!validateProfile({ nick: 'a', pin: '123456', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ nick: 'ok', pin: '123456', country: 'KR', team: 'A', age: 150 }));
-    const base = { nick: '번개손', pin: '123456', country: 'KR', team: 'A', age: 11, stick: 'L' };
+    const V = { country: 'KR', team: 'A', age: 11, stick: 'L' };
+    check('C1 validation: ID 4-20 lowercase letters/digits/_ and not the nickname', !!validateProfile({ ...V, loginId: 'ab1', password: 'puck2026', nick: '번개손' })
+      && !!validateProfile({ ...V, loginId: '1puck', password: 'puck2026', nick: '번개손' }) && !!validateProfile({ ...V, loginId: '번개손아이디', password: 'puck2026', nick: '번개손' })
+      && !!validateProfile({ ...V, loginId: 'Lightning', password: 'puck2026', nick: 'lightning' }) && !validateProfile({ ...V, loginId: 'Bungae_11', password: 'puck2026', nick: '번개손' }));
+    check('C1 validation: password 8+ with letters and digits, no ID inside', !!validateProfile({ ...V, loginId: 'bungae11', password: '123456', nick: '번개손' })
+      && !!validateProfile({ ...V, loginId: 'bungae11', password: '12345678', nick: '번개손' }) && !!validateProfile({ ...V, loginId: 'bungae11', password: 'abcdefgh', nick: '번개손' })
+      && !!validateProfile({ ...V, loginId: 'bungae11', password: 'bungae11!9', nick: '번개손' }) && !validateProfile({ ...V, loginId: 'bungae11', password: 'puck2026', nick: '번개손' }));
+    check('C1 validation: nick length/age range', !!validateProfile({ loginId: 'okid1', nick: 'a', password: 'puck2026', country: 'KR', team: 'A', age: 11 }) && !!validateProfile({ loginId: 'okid1', nick: 'ok', password: 'puck2026', country: 'KR', team: 'A', age: 150 }));
+    const base = { loginId: 'bungae11', nick: '번개손', password: 'puck2026', country: 'KR', team: 'A', age: 11, stick: 'L' };
     check('C1 stick (left/right) is required at sign-up', !!validateProfile({ ...base, stick: undefined }) && !!validateProfile({ ...base, stick: 'X' }) && !validateProfile({ ...base, stick: 'R' }));
     check('C1 jersey number optional, 0..99 integer', !validateProfile(base) && !validateProfile({ ...base, number: '' }) && !validateProfile({ ...base, number: '0' }) && !validateProfile({ ...base, number: 99 }) && !!validateProfile({ ...base, number: '100' }) && !!validateProfile({ ...base, number: '-1' }) && !!validateProfile({ ...base, number: '8.5' }) && jerseyOf('') === null && jerseyOf(' 07 ') === 7);
     acc._putCode('TESTBETA', { type: 'beta', maxUses: 0 }); // 테스트용 베타 코드 (여러 명)
-    const u1 = await acc.register({ nick: '번개손', pin: '123456', country: 'KR', team: '서울 유스', age: 11, number: '87', code: 'test-beta', stick: 'L' });
+    const u1 = await acc.register({ loginId: ID('번개손'), nick: '번개손', password: PW('123456'), country: 'KR', team: '서울 유스', age: 11, number: '87', code: 'test-beta', stick: 'L' });
     check('C2 register logs in with age group and jersey number', u1.nick === '번개손' && u1.ageGroup === 'U12' && u1.number === 87 && acc.current()?.id === '번개손');
-    let dup = null; try { await acc.register({ nick: ' 번개손 ', pin: '000000', country: 'US', team: 'X', age: 30, code: 'TESTBETA', stick: 'R' }); } catch (e) { dup = e.message; }
+    let dup = null; try { await acc.register({ loginId: 'otherid1', nick: ' 번개손 ', password: 'other2026', country: 'US', team: 'X', age: 30, code: 'TESTBETA', stick: 'R' }); } catch (e) { dup = e.message; }
     check('C2 duplicate nick rejected (case/space-insensitive)', /사용 중/.test(dup || ''), dup);
     acc.logout();
-    let wrong = null; try { await acc.login('번개손', '654321'); } catch (e) { wrong = e.message; }
+    let wrong = null; try { await acc.login(ID('번개손'), PW('654321')); } catch (e) { wrong = e.message; }
     check('C2 wrong pin rejected', /맞지 않/.test(wrong || '') && !acc.current(), wrong);
-    await acc.login('번개손', '123456');
+    await acc.login(ID('번개손'), PW('123456'));
     check('C2 login works and session persists', acc.current()?.nick === '번개손' && new LocalAccountStore(st).current()?.nick === '번개손');
     // 점수: 최고 기록만 유지
     let r1 = await acc.submitScore('arcade', 500);
@@ -650,8 +659,8 @@
     check('C3 best score kept, plays counted', r1.improved && !r2.improved && r2.best === 500 && r3.improved && r3.best === 900 && r3.entry.plays === 3 && r3.entry.number === 87, { r1, r2, r3 });
     // 다른 선수들 등록 (연령대/국가/팀 다양)
     const others = [['민준', 'KR', '서울 유스', 10, 1200], ['Ava', 'US', 'Boston Jr', 11, 700], ['Hana', 'KR', '부산 키즈', 14, 1500], ['Coach', 'KR', '서울 유스', 35, 2000], ['Liam', 'CA', 'Toronto', 9, 400]];
-    for (const [nick, country, team, age, score] of others) { acc.logout(); await acc.register({ nick, pin: '111111', country, team, age, code: 'TESTBETA', stick: 'L' }); await acc.submitScore('arcade', score); await acc.submitScore('wide', score / 100); }
-    acc.logout(); await acc.login('번개손', '123456');
+    for (const [nick, country, team, age, score] of others) { acc.logout(); await acc.register({ loginId: ID(nick), nick, password: PW('111111'), country, team, age, code: 'TESTBETA', stick: 'L' }); await acc.submitScore('arcade', score); await acc.submitScore('wide', score / 100); }
+    acc.logout(); await acc.login(ID('번개손'), PW('123456'));
     const all = await acc.leaderboard('arcade');
     check('C4 leaderboard sorted desc with ranks', all.length === 6 && all[0].nick === 'Coach' && all[0].rank === 1 && all[5].rank === 6 && all.every((r, i) => i === 0 || all[i - 1].score >= r.score), all.map((r) => [r.nick, r.score]));
     const u12 = await acc.leaderboard('arcade', { ageGroup: 'U12' });
@@ -676,7 +685,7 @@
         && codeStatus({ expiresAt: now - 1, maxUses: 0 }) === 'expired' && codeStatus({ maxUses: 1, uses: 1 }) === 'full'
         && codeStatus({ maxUses: 0, uses: 99, expiresAt: now + 1e6 }) === 'ok' && codeStatus({ expiresAt: { toMillis: () => now - 1 }, maxUses: 0 }) === 'expired');
       const ms = new LocalAccountStore(mem());
-      const reg = async (nick, code) => { try { return await ms.register({ nick, pin: '123456', country: 'KR', team: 'T', age: 12, code, stick: 'L' }); } catch (e) { return e.message; } };
+      const reg = async (nick, code) => { try { return await ms.register({ loginId: ID(nick), nick, password: PW('123456'), country: 'KR', team: 'T', age: 12, code, stick: 'L' }); } catch (e) { return e.message; } };
       ms._putCode('BETA0001', { type: 'beta', maxUses: 2 });
       ms._putCode('ONE00001', { type: 'one' });
       ms._putCode('OLD00001', { type: 'one', expiresAt: now - 1000 });
@@ -718,7 +727,11 @@
       for (const [id, [nick, at]] of Object.entries(legacy)) users[nick.toLowerCase()] = { id: nick.toLowerCase(), nick, pinHash: await hashPin(nick, '123456'), country: 'KR', team: 'T', age: 20, ageGroup: '성인', createdAt: at };
       ls.setItem('puck-trainer.users.v1', JSON.stringify(users));
       const la = new LocalAccountStore(ls);
-      await la.login('test123', '123456');
+      const pending = await la.login('test123', '123456');
+      const upNeeded = pending === null && la.needsUpgrade()?.nick === 'test123' && la.needsUpgrade()?.admin === true;
+      let upWeak = null; try { await la.upgradeLogin('opsadmin', 'ops12345'); } catch (e) { upWeak = e.message; }
+      await la.upgradeLogin('opsadmin', 'ops-admin-2026');
+      check('L0 old nickname account (no ID): login waits for an ID; operator needs a 12+ password', upNeeded && upWeak === '새 비밀번호는 12~64자' && la.current()?.loginId === 'opsadmin', { upNeeded, upWeak });
       const before = { info: await la.membersInfo(), badge: memberBadge(la.current()) };
       const r = await la.initMembers();
       const after = Object.values(JSON.parse(ls.getItem('puck-trainer.users.v1'))).sort((x, y) => x.memberNo - y.memberNo).map((u) => `${u.nick}:${u.memberNo}:${u.beta}`).join(',');
@@ -756,21 +769,21 @@
       st5._putCode('BETA5000', { type: 'beta', maxUses: 0 });
       st5._putCode('ADMIN500', { type: 'one' });
       st5._putCode('ONE50000', { type: 'one' });
-      const P = { pin: '123456', country: 'KR', team: 'T', age: 12, stick: 'L' };
-      await st5.register({ nick: 'test123', ...P, code: 'ADMIN500' });
+      const P = { password: PW('123456'), country: 'KR', team: 'T', age: 12, stick: 'L' };
+      await st5.register({ loginId: ID('test123'), nick: 'test123', ...P, code: 'ADMIN500' });
       const soon = Date.now() + 60000; // 지금은 종료 1분 전
       await st5.setSiteConfig({ betaEndsAt: soon });
       st5.logout();
-      await st5.register({ nick: 'early', ...P, code: 'BETA5000' });
+      await st5.register({ loginId: ID('early'), nick: 'early', ...P, code: 'BETA5000' });
       const s0 = st5.memberState();
       let fbErr = null; try { await st5.sendFeedback({ good: '' }); } catch (e) { fbErr = e.message; }
       const f1 = await st5.sendFeedback({ good: '8자 방향 좋아요', fix: '' });
       const s1 = st5.memberState();
       const f2 = await st5.sendFeedback({ good: '8자 방향 좋아요', fix: '어두우면 놓쳐요' });
       st5.logout();
-      await st5.register({ nick: 'late', ...P, code: 'BETA5000' });
+      await st5.register({ loginId: ID('late'), nick: 'late', ...P, code: 'BETA5000' });
       st5.logout();
-      await st5.register({ nick: 'solo', ...P, code: 'ONE50000' });
+      await st5.register({ loginId: ID('solo'), nick: 'solo', ...P, code: 'ONE50000' });
       const soloBefore = st5.memberState(), soloAfter = st5.memberState(soon + 1);
       // 종료일을 지난 시각으로 바꿔 실제 동작 확인 (early 의 의견은 종료 전)
       await new Promise((r) => setTimeout(r, 15));
@@ -778,14 +791,14 @@
       ls.setItem('puck-trainer.site.v1', JSON.stringify({ ...JSON.parse(ls.getItem('puck-trainer.site.v1')), betaEndsAt: endAt }));
       let blocked = null; try { await st5.submitScore('arcade@60', 10); } catch (e) { blocked = e.message; }
       st5.logout();
-      await st5.login('early', '123456');
+      await st5.login(ID('early'), PW('123456'));
       const sEarly = st5.memberState();
       let earlyBlocked = null; try { await st5.submitScore('arcade@60', 20); } catch (e) { earlyBlocked = e.message; }
       const mine = await st5.getMyFeedback();
       let listDenied = null; try { await st5.listFeedback(); } catch (e) { listDenied = e.message; }
       let couponDenied = null; try { await st5.grantCoupon(st5.current().id, Date.now() + 1e9); } catch (e) { couponDenied = e.message; }
       st5.logout();
-      await st5.login('test123', '123456');
+      await st5.login(ID('test123'), PW('123456'));
       const fbs = await st5.listFeedback();
       const members = await st5.memberList();
       const drawPool = lotteryPool(members, endAt).map((u) => u.nick).join();
@@ -803,10 +816,10 @@
       await st5.saveLottery({ at: Date.now(), until, winners: [{ id: uid('early'), nick: 'early', memberNo: 2 }] });
       const lot = await st5.getLottery();
       st5.logout();
-      await st5.login('early', '123456');
+      await st5.login(ID('early'), PW('123456'));
       const sWin = st5.memberState(), winScore = await st5.submitScore('arcade@60', 30), winUntil = st5.current().until;
       st5.logout();
-      await st5.login('test123', '123456');
+      await st5.login(ID('test123'), PW('123456'));
       await st5.grantCoupon(uid('early'), null);
       const revoked = (await st5.memberList()).find((u) => u.nick === 'early');
       check('M7 pass: confirmed winner is a member until the pass ends, result saved, only the operator gives it, removing it lapses again',
@@ -818,24 +831,24 @@
     {
       const ls = mem();
       const s6 = new LocalAccountStore(ls);
-      const P = { pin: '123456', country: 'KR', team: 'T', age: 12, stick: 'R' };
+      const P = { password: PW('123456'), country: 'KR', team: 'T', age: 12, stick: 'R' };
       s6._putCode('BETA6000', { type: 'beta', maxUses: 0 });
       s6._putCode('ADMIN600', { type: 'one' });
       const guestInv = await s6.myInvite();
-      await s6.register({ nick: 'host', ...P, code: 'BETA6000' });
+      await s6.register({ loginId: ID('host'), nick: 'host', ...P, code: 'BETA6000' });
       const inv1 = await s6.myInvite(), inv1again = await s6.myInvite();
       s6.logout();
       const card = await s6.checkCode(codeLabel(inv1.code));
-      const reg = async (nick, code) => { try { const u = await s6.register({ nick, ...P, code }); s6.logout(); return u; } catch (e) { return e.message; } };
+      const reg = async (nick, code) => { try { const u = await s6.register({ loginId: ID(nick), nick, ...P, code }); s6.logout(); return u; } catch (e) { return e.message; } };
       const f1 = await reg('f1', codeLabel(inv1.code)), f2 = await reg('f2', inv1.code), f3 = await reg('f3', inv1.code), f4 = await reg('f4', inv1.code);
-      await s6.login('host', '123456');
+      await s6.login(ID('host'), PW('123456'));
       const full = await s6.myInvite();
       s6.logout();
-      await s6.login('f1', '123456');
+      await s6.login(ID('f1'), PW('123456'));
       const chain = await s6.myInvite();
       s6.logout();
       await reg('test123', 'ADMIN600');
-      await s6.login('test123', '123456');
+      await s6.login(ID('test123'), PW('123456'));
       const adminList = (await s6.listCodes()).map((c) => c.type).sort().join();
       s6.logout();
       check('M6 my invite code: members only, made once, 3 people, shows who invited', guestInv === null && inv1.type === 'invite' && inv1.maxUses === INVITE_MAX && INVITE_MAX === 3
@@ -847,8 +860,8 @@
       // 베타가 끝나면 초대 코드는 마감되고, 정회원이 아닌 사람은 새 코드를 만들 수 없다
       ls.setItem('puck-trainer.site.v1', JSON.stringify({ betaEndsAt: Date.now() - 1 }));
       const closed = await s6.checkCode(chain.code);
-      let lateJoin = null; try { await s6.register({ nick: 'late6', ...P, code: chain.code }); } catch (e) { lateJoin = e.message; }
-      await s6.login('f2', '123456');
+      let lateJoin = null; try { await s6.register({ loginId: ID('late6'), nick: 'late6', ...P, code: chain.code }); } catch (e) { lateJoin = e.message; }
+      await s6.login(ID('f2'), PW('123456'));
       const noCode = await s6.myInvite();
       const statusEnd = [codeStatus({ type: 'invite', maxUses: 3, uses: 0 }, 5000, 1000), codeStatus({ type: 'invite', maxUses: 3, uses: 0 }, 500, 1000), codeStatus({ type: 'beta', maxUses: 0 }, 5000, 1000)].join();
       check('M6 after the beta end: invite codes close and a lapsed member cannot make one', closed.status === 'expired' && lateJoin === '마감된 코드입니다' && noCode === null
@@ -857,20 +870,20 @@
 
     // ===== 보안: 운영자처럼 보이는 별명 금지, 운영자 비밀번호(12자 이상) 바꾸기, 공식 주소에서만 실행 =====
     {
-      const P = { pin: '123456', country: 'KR', team: 'T', age: 12, stick: 'L' };
-      const bad = ['운영자', 'Admin7', 'puck trainer', '퍽트레이너', 'official_1'].map((nick) => validateProfile({ nick, ...P }));
-      check('S1 nicknames that look like the operator are refused', bad.every((e) => e && e.includes('운영자')) && validateProfile({ nick: '번개손', ...P }) === null && RESERVED_NICK_RE.test('ADMIN'), bad);
+      const P = { password: PW('123456'), country: 'KR', team: 'T', age: 12, stick: 'L' };
+      const bad = ['운영자', 'Admin7', 'puck trainer', '퍽트레이너', 'official_1'].map((nick) => validateProfile({ loginId: ID(nick), nick, ...P }));
+      check('S1 nicknames that look like the operator are refused', bad.every((e) => e && e.includes('운영자')) && validateProfile({ loginId: 'bungae11', nick: '번개손', ...P }) === null && RESERVED_NICK_RE.test('ADMIN'), bad);
       const pw = ['123456', 'aaaaaaaaaaaa', '1234567890123', 'x'.repeat(65), '483920175562', 'Puck-Trainer-2026!'].map((p) => (validateStrongPassword(p) === null ? 1 : 0)).join('');
       check('S2 operator password: 12-64 characters, not one repeated character or a plain sequence', pw === '000011', pw);
       const st = new LocalAccountStore(mem());
       st._putCode('SECURE00', { type: 'one' });
-      await st.register({ nick: 'boss', ...P, code: 'SECURE00' });
-      let wrong = null; try { await st.changePassword('000000', '483920175562'); } catch (e) { wrong = e.message; }
-      let weak = null; try { await st.changePassword('123456', '1234'); } catch (e) { weak = e.message; }
-      await st.changePassword('123456', '483920175562');
+      await st.register({ loginId: ID('boss'), nick: 'boss', ...P, code: 'SECURE00' });
+      let wrong = null; try { await st.changePassword(PW('000000'), '483920175562'); } catch (e) { wrong = e.message; }
+      let weak = null; try { await st.changePassword(PW('123456'), '1234'); } catch (e) { weak = e.message; }
+      await st.changePassword(PW('123456'), '483920175562');
       st.logout();
-      let oldPin = null; try { await st.login('boss', '123456'); } catch (e) { oldPin = e.message; }
-      const back = await st.login('boss', '483920175562');
+      let oldPin = null; try { await st.login(ID('boss'), PW('123456')); } catch (e) { oldPin = e.message; }
+      const back = await st.login(ID('boss'), '483920175562');
       check('S3 change password: needs the current one, then only the new one logs in', wrong === '지금 비밀번호가 맞지 않습니다' && weak === '새 비밀번호는 12~64자'
         && !!oldPin && back?.nick === 'boss', { wrong, weak, oldPin });
       const sites = ['https://ochodoit.github.io/puck-dribble-trainer/', 'https://ochodoit.github.io/puck-dribble-trainer/index.html?c=AB', 'https://ochodoit.github.io/semple/',
@@ -1065,7 +1078,7 @@
       const ms = (() => { const mem = {}; return { getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = String(v); }, removeItem: (k) => { delete mem[k]; } }; })();
       const st = new LocalAccountStore(ms);
       st._putCode('MEMB1234', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 864e5 });
-      await st.register({ nick: 'mine', pin: '123456', country: 'KR', team: 'T', age: 12, code: 'MEMB1234', stick: 'L' });
+      await st.register({ loginId: ID('mine'), nick: 'mine', password: PW('123456'), country: 'KR', team: 'T', age: 12, code: 'MEMB1234', stick: 'L' });
       await st.recordActivity(null); await st.recordActivity({ key: 'quick', score: 33, sec: 20, dist: 1, touches: 33 });
       await st.submitScore('quick', 33);
       await st.updateProfile({ team: 'New', age: 13, number: 9, stick: 'R', country: 'US' });

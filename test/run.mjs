@@ -74,8 +74,8 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${noGate ? 'PASS' : 'FAIL'} no access-code gate: camera button is on the first screen`);
   if (!noGate) failed = true;
   // 가입 코드 없이는 정회원 가입이 안 됨
-  const fillReg = async (pin = '123456') => {
-    await page.fill('#auth-nick', '번개손'); await page.fill('#auth-pin', pin);
+  const fillReg = async (pw = 'puck2026', pw2 = pw) => {
+    await page.fill('#auth-id', 'Bungae11'); await page.fill('#auth-pin', pw); await page.fill('#auth-pin2', pw2); await page.fill('#auth-nick', '번개손');
     await page.selectOption('#auth-country', 'KR'); await page.fill('#auth-team', '서울 유스'); await page.fill('#auth-age', '11'); await page.fill('#auth-number', '87');
     await page.click('#auth-stick [data-stick="L"]');
   };
@@ -101,18 +101,26 @@ const skipSetup = async (page, touch = false) => {
   const invOk = !inv.bad && inv.title === '오픈베타 초대 링크예요' && /까지 가입하면 바로 정회원$/.test(inv.sub) && inv.code === 'BETA-2026' && inv.codeShown && inv.reg && inv.search === '';
   console.log(`${invOk ? 'PASS' : 'FAIL'} open beta invite link opens sign-up with the code filled in (${JSON.stringify(inv)})`);
   if (!invOk) failed = true;
-  // 회원가입 (별명 + 6자리 비밀번호 + 국가/팀/나이 + 가입 코드)
-  await fillReg('12345');
-  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
-  await page.waitForTimeout(200);
-  const pinErr = await page.isHidden('#auth-logged'); // 5자리는 브라우저 검증(pattern)에서 막혀 가입되지 않아야 함
-  await page.fill('#auth-pin', '123456');
+  // 회원가입 (아이디 + 비밀번호 + 확인 + 별명 + 국가/팀/나이 + 가입 코드). 숫자만 쓴 비밀번호, 확인이 다른 비밀번호는 막힘
+  const regErr = async () => { await page.evaluate(() => document.querySelector('#auth-form').requestSubmit()); await page.waitForTimeout(150); return { err: (await page.textContent('#auth-error')).trim(), out: await page.isHidden('#auth-logged') }; };
+  await fillReg('12345678');
+  const weak = await regErr();
+  await fillReg('puck2026', 'puck2027');
+  const differ = await regErr();
+  await fillReg('bungae11x9');
+  const hasId = await regErr();
+  const shownLogin = await page.evaluate(() => ({ nick: !!document.querySelector('#auth-nick').offsetParent, pin2: !!document.querySelector('#auth-pin2').offsetParent }));
+  const pinErr = weak.out && weak.err === '비밀번호에 영문과 숫자를 함께 넣으세요' && differ.out && differ.err === '비밀번호가 서로 다릅니다'
+    && hasId.out && hasId.err === '비밀번호에 아이디나 별명을 넣지 마세요' && shownLogin.nick && shownLogin.pin2;
+  console.log(`${pinErr ? 'PASS' : 'FAIL'} sign-up refuses a digits-only password, a mismatched confirmation and a password containing the ID (${JSON.stringify({ weak, differ, hasId, shownLogin })})`);
+  if (!pinErr) failed = true;
+  await fillReg();
   await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
   await page.waitForSelector('#auth-logged:not(.hidden)');
   const who = await page.textContent('#auth-who');
   const afterJoin = await page.evaluate(() => ({ card: document.querySelector('#invite-card').classList.contains('hidden'), kept: localStorage.getItem('puck-trainer.invite.v1') }));
   const joinOk = pinErr && who.includes('번개손') && who.includes('U12') && who.includes('#87') && who.includes('베타 멤버 No.0001') && afterJoin.card && afterJoin.kept === null;
-  console.log(`${joinOk ? 'PASS' : 'FAIL'} register with nickname + 6-digit pin + jersey number + beta code -> beta member No.0001 (${who.trim()})`);
+  console.log(`${joinOk ? 'PASS' : 'FAIL'} register with ID + password + nickname + jersey number + beta code -> beta member No.0001 (${who.trim()})`);
   if (!joinOk) failed = true;
   await page.click('#btn-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
@@ -394,7 +402,7 @@ const skipSetup = async (page, touch = false) => {
   if (!guestOk) failed = true;
   await page.click('[data-close="panel-result"]');
   // 운영자 화면 (관리자 별명): 1회용 코드 만들기 -> 목록, 끄기
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ nick: 'test123', pin: '123456', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' , stick: 'L' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ loginId: 'opsadmin', password: 'ops12345', nick: 'test123', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' , stick: 'L' }); });
   await page.click('#btn-settings');
   const adminBtn = await page.isVisible('#btn-settings-admin');
   await page.click('#btn-settings-admin');
@@ -459,7 +467,7 @@ const skipSetup = async (page, touch = false) => {
   await p2.goto(myInv.link);
   await p2.waitForSelector('#invite-card:not(.hidden)');
   const card2 = await p2.evaluate(() => ({ title: document.querySelector('#invite-title').textContent, sub: document.querySelector('#invite-sub').textContent, code: document.querySelector('#auth-code').value }));
-  await p2.fill('#auth-nick', '친구1'); await p2.fill('#auth-pin', '123456');
+  await p2.fill('#auth-id', 'friend01'); await p2.fill('#auth-pin', 'friend123'); await p2.fill('#auth-pin2', 'friend123'); await p2.fill('#auth-nick', '친구1');
   await p2.selectOption('#auth-country', 'KR'); await p2.fill('#auth-team', '서울 유스'); await p2.fill('#auth-age', '12');
   await p2.click('#auth-stick [data-stick="R"]');
   await p2.evaluate(() => document.querySelector('#auth-form').requestSubmit());
@@ -471,9 +479,49 @@ const skipSetup = async (page, touch = false) => {
     && card2.sub.includes('가입하면 바로 정회원') && card2.sub.includes('남은 자리 3명') && myInv.link.endsWith(card2.code) && who2.includes('친구1') && who2.includes('정회원 No.') && used === 1;
   console.log(`${invLinkOk ? 'PASS' : 'FAIL'} My info -> my invite link (3 people) -> a friend opens it, sees who invited them and joins as a member (${JSON.stringify({ myInv, card2, who2: who2.trim().slice(0, 40), used })})`);
   if (!invLinkOk) failed = true;
-  const relogin = await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); try { await a.login('번개손', '123456'); return !!a.current(); } catch { return false; } });
-  console.log(`${loggedOut && relogin ? 'PASS' : 'FAIL'} logout and login again`);
-  if (!(loggedOut && relogin)) failed = true;
+  const relogin = await page.evaluate(async () => {
+    const a = window.__puckTrainer.account; a.logout();
+    let byNick = '';
+    try { await a.login('번개손', 'puck2026'); } catch (e) { byNick = e.message; }
+    try { await a.login('BUNGAE11', 'puck2026'); return { ok: !!a.current(), byNick }; } catch (e) { return { ok: false, byNick, err: e.message }; }
+  });
+  const reloginOk = loggedOut && relogin.ok && relogin.byNick === '아이디 또는 비밀번호가 맞지 않습니다';
+  console.log(`${reloginOk ? 'PASS' : 'FAIL'} logout and login again with the ID (case-insensitive); the public nickname does not log in (${JSON.stringify(relogin)})`);
+  if (!reloginOk) failed = true;
+  // 예전 계정(별명 + 숫자 6자리): 로그인하면 아이디 만들기 화면 (그 전에는 로그인 전) -> 만들면 아이디로만 로그인
+  await page.evaluate(async () => {
+    const { hashPin } = await import('/src/account.js');
+    const k = 'puck-trainer.users.v1', users = JSON.parse(localStorage.getItem(k));
+    users['옛친구'] = { id: '옛친구', nick: '옛친구', number: null, pinHash: await hashPin('옛친구', '135790'), country: 'KR', team: '옛팀', age: 20, ageGroup: '성인', stick: 'L', createdAt: 1, code: 'BETA2026', via: 'beta', beta: true, memberNo: 9, joinedAt: 1 };
+    localStorage.setItem(k, JSON.stringify(users));
+  });
+  await page.evaluate(() => window.__puckTrainer.account.logout());
+  await page.click('#btn-settings'); await page.click('#btn-settings-login'); // 게임 중 로그인 창
+  await page.waitForSelector('#panel-login:not(.hidden)');
+  await page.fill('#auth-id', '옛친구'); await page.fill('#auth-pin', '135790');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#auth-cancel:not(.hidden)');
+  const upForm = await page.evaluate(() => ({ tabs: document.querySelector('#auth-tabs').classList.contains('hidden'), guest: document.querySelector('#auth-guest').classList.contains('hidden'),
+    nick: document.querySelector('#auth-upgrade-nick').textContent, pin2: !!document.querySelector('#auth-pin2').offsetParent, btn: document.querySelector('#auth-submit').textContent,
+    cur: window.__puckTrainer.account.current(), logged: !document.querySelector('#auth-logged').classList.contains('hidden') }));
+  await page.fill('#auth-id', 'oldfriend'); await page.fill('#auth-pin', 'newpass12'); await page.fill('#auth-pin2', 'newpass12');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#panel-login.hidden', { state: 'attached' });
+  const upWho = await page.textContent('#auth-who');
+  const upAfter = await page.evaluate(async () => {
+    const a = window.__puckTrainer.account; a.logout();
+    let byNick = '', oldPin = '';
+    try { await a.login('옛친구', 'newpass12'); } catch (e) { byNick = e.message; }
+    try { await a.login('oldfriend', '135790'); } catch (e) { oldPin = e.message; }
+    await a.login('oldfriend', 'newpass12');
+    const who = a.current()?.nick; a.logout();
+    await a.login('bungae11', 'puck2026');
+    return { byNick, oldPin, who };
+  });
+  const upOk = upForm.tabs && upForm.guest && upForm.nick === '옛친구' && upForm.pin2 && upForm.btn === '아이디 만들기' && upForm.cur === null && !upForm.logged
+    && upWho.includes('옛친구') && upAfter.byNick === '이제 아이디로 로그인하세요 (아이디를 잊었으면 운영자에게 문의하세요)' && upAfter.oldPin === '아이디 또는 비밀번호가 맞지 않습니다' && upAfter.who === '옛친구';
+  console.log(`${upOk ? 'PASS' : 'FAIL'} old nickname + 6-digit account: login opens "create ID", then only the ID + new password works (${JSON.stringify({ upForm, upWho: upWho.trim().slice(0, 30), upAfter })})`);
+  if (!upOk) failed = true;
   // 베타 종료일이 지난 무료 정회원(번개손): 결과가 랭킹에 안 올라가고 안내 + 프로필 줄에 '베타 종료'
   await page.evaluate(() => { const k = 'puck-trainer.site.v1'; localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k)), betaEndsAt: Date.now() - 1000 })); });
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 99, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 99]] }); });
@@ -708,7 +756,7 @@ const skipSetup = async (page, touch = false) => {
   await page.waitForFunction(() => window.__puckTrainer?.account);
   await page.evaluate(() => { const a = window.__puckTrainer.account; a._putCode('ACE12345', { type: 'one' }); a._putCode('TEAMBETA', { type: 'beta', maxUses: 0 }); });
   await page.click('.auth-tabs .tab[data-tab="register"]');
-  await page.fill('#auth-nick', 'Ace'); await page.fill('#auth-pin', '123456'); await page.fill('#auth-code', 'ace1-2345');
+  await page.fill('#auth-id', 'aceplayer'); await page.fill('#auth-pin', 'ace12345'); await page.fill('#auth-pin2', 'ace12345'); await page.fill('#auth-nick', 'Ace'); await page.fill('#auth-code', 'ace1-2345');
   await page.selectOption('#auth-country', 'US'); await page.fill('#auth-team', 'Blades'); await page.fill('#auth-age', '25');
   await page.click('#auth-stick [data-stick="R"]');
   await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
@@ -776,7 +824,7 @@ const skipSetup = async (page, touch = false) => {
   const resel = await page.evaluate(() => document.querySelectorAll('#comm-detail .detail-board li').length);
   ok(unsel.sel === 0 && /Tap a post to see/.test(unsel.empty || '') && resel === 1, 'tapping a post toggles its top 5 panel', JSON.stringify({ unsel, resel }));
   // 다른 선수가 같은 코스로 기록을 갈아치움
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Bee', pin: '654321', country: 'CA', team: 'Hive', age: 12, code: 'TEAMBETA' , stick: 'L' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ loginId: 'beeplayer', password: 'bee12345', nick: 'Bee', country: 'CA', team: 'Hive', age: 12, code: 'TEAMBETA' , stick: 'L' }); });
   await page.click('#comm-list .post[data-id="starter-wide"] [data-act="practice"]'); await tick(200);
   const holder = await page.evaluate(() => window.__puckTrainer.app.challenge.holder);
   const run2 = await finish(Array(9).fill(1));
@@ -870,11 +918,11 @@ const skipSetup = async (page, touch = false) => {
     && /Brag updated with the new record/.test(replaced.toast) && replaced.posts.length === 1 && replaced.posts[0].id === bragId && replaced.posts[0].score === 1500 && replaced.posts[0].cheers === 0 && replaced.first === 'Even better',
   'only one brag per mode: posting again replaces it', JSON.stringify({ own, replPv, replaced }));
   // 나이 규칙: 글쓴이(12세)보다 많은 선수는 플레이만, 같거나 어린 선수만 도전 기록에 오른다
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Old', pin: '111111', country: 'US', team: 'Elders', age: 30, code: 'TEAMBETA' , stick: 'L' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ loginId: 'oldplayer', password: 'old12345', nick: 'Old', country: 'US', team: 'Elders', age: 30, code: 'TEAMBETA' , stick: 'L' }); });
   await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
   const oldToast = await page.textContent('#toast');
   const oldRun = await playArcade(2000);
-  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ nick: 'Kid', pin: '222222', country: 'KR', team: 'Cubs', age: 10, code: 'TEAMBETA' , stick: 'L' }); });
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; a.logout(); await a.register({ loginId: 'kidplayer', password: 'kid12345', nick: 'Kid', country: 'KR', team: 'Cubs', age: 10, code: 'TEAMBETA' , stick: 'L' }); });
   await page.click('#btn-share-2'); await page.waitForSelector('#panel-community:not(.hidden)'); await tick(200);
   await page.click(`#comm-list .post[data-id="${bragId}"] .post-foot [data-act="mode"]`); await tick(150);
   const kidRun = await playArcade(900);

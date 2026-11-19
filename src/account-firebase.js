@@ -1,7 +1,10 @@
 // 온라인 계정·랭킹 (Firebase Auth + Firestore). firebase-config.js 가 채워졌을 때만 로드됨.
-// 별명 -> 가상 이메일(u-<hex>@<이 프로젝트의 Firebase 도메인>), 6자리 비밀번호 -> Firebase Auth 비밀번호.
-// 예전 계정은 u-<hex>@puck-trainer.app (로그인할 때 두 번째로 시도하고, 되면 새 주소로 옮겨 본다).
-// 컬렉션: users/{uid} 프로필(= 정회원), nicks/{nickLower} 별명 고유성, scores_{mode}/{uid} 모드별 최고 기록,
+// 로그인 = 아이디 + 비밀번호(8자 이상, 영문+숫자), 랭킹에 보이는 이름 = 별명 (따로 정함. 별명은 공개되므로 로그인에 쓰지 않는다).
+// 아이디 -> 가상 이메일 id.<아이디>@<이 프로젝트의 Firebase 도메인>, 비밀번호 -> Firebase Auth 비밀번호.
+// 예전 계정(별명 + 숫자 6자리): 로그인 주소가 u-<별명 hex>@<도메인> (더 예전은 @puck-trainer.app).
+//   별명 + 예전 비밀번호로 로그인하면 아이디·새 비밀번호를 만들 때까지 로그인 전으로 둔다 (needsUpgrade, upgradeLogin).
+//   로그인 주소를 아이디 주소로 바꾸지 못하면(프로젝트 설정) ids/{아이디} 에 적힌 예전 주소로 로그인한다.
+// 컬렉션: users/{uid} 프로필(= 정회원), nicks/{nickLower} 별명 고유성, ids/{아이디} 아이디 고유성·로그인 주소, scores_{mode}/{uid} 모드별 최고 기록,
 //         codes/{CODE} 가입 코드(오픈베타·1회용·회원의 초대 코드), meta/members 회원 수(정회원 번호), config/site 게스트 안내·베타 종료일,
 //         config/lottery 의견 추첨 결과, admins/{uid} 운영자(콘솔에서 만듦),
 //         feedback/{uid} 개발자에게 (베타 종료일 전에 보내면 3개월 이용권 추첨 대상)
@@ -9,6 +12,8 @@ import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, NOT_READY,
   betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, validateEdit, INVITE_MAX, COUPON_MONTHS,
   SCORE_MAX, RANK_FIELDS, rankGroup, rankIdx, rankIdxFields, activeFilters, competitionRanks,
+  LOGIN_ID_RE, NICK_RE, normLoginId, validateLoginId, validatePassword, BAD_LOGIN_MSG, USE_ID_MSG, ID_TAKEN,
+  PendingPlays, PLAYS_FLUSH, PLAYS_STEP_MAX,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
 
@@ -23,7 +28,11 @@ const BOARD_TTL = 60 * 1000;
 const BAD_LOGIN = ['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong-password', 'auth/invalid-login-credentials', 'auth/invalid-email'];
 
 export class FirebaseAccountStore {
-  constructor(config) { this.kind = 'firebase'; this.config = config; this.user = null; this.site = {}; this._boards = new Map(); this._mine = null; }
+  constructor(config) {
+    this.kind = 'firebase'; this.config = config; this.user = null; this.site = {}; this._boards = new Map(); this._mine = null;
+    this.upgrade = null; // 예전 계정으로 로그인해 아이디를 아직 만들지 않음: { nick, admin }
+    this.pending = new PendingPlays(); // 아직 쓰지 않은 판수
+  }
 
   async ready() {
     const [{ initializeApp }, auth, fs] = await Promise.all([
@@ -34,14 +43,27 @@ export class FirebaseAccountStore {
     this.auth = auth.getAuth(this.app);
     this.db = fs.getFirestore(this.app);
     await this.getSiteConfig(); // 베타 종료일 (정회원 유지 판단)
-    await new Promise((resolve) => { const un = auth.onAuthStateChanged(this.auth, async (u) => { un(); if (u) await this._loadProfile(u.uid); resolve(); }); });
+    await new Promise((resolve) => { const un = auth.onAuthStateChanged(this.auth, async (u) => { un(); if (u) await this._settle(); resolve(); }); });
     return this;
   }
 
+  /** 로그인한 계정의 프로필을 읽고, 아이디가 없는 예전 계정이면 아이디를 만들 때까지 로그인 전으로 둔다 */
+  async _settle() {
+    const u = await this._loadProfile(this.auth.currentUser.uid);
+    if (u && !u.loginId) { this.upgrade = { nick: u.nick, admin: !!u.admin }; this.user = null; return null; }
+    this.upgrade = null;
+    return u;
+  }
+  /** 예전 계정이 아이디를 만들어야 하면 { nick, admin }, 아니면 null */
+  needsUpgrade() { return this.upgrade; }
+
   current() { return this.user; }
   _doc(...path) { return this.F.doc(this.db, ...path); }
-  /** 별명 -> 로그인용 가상 이메일 (legacy = 예전 도메인) */
-  _email(nick, legacy = false) { return `${nickLocal(nick)}@${legacy || !this.config.authDomain ? LEGACY_DOMAIN : this.config.authDomain}`; }
+  _domain(legacy = false) { return legacy || !this.config.authDomain ? LEGACY_DOMAIN : this.config.authDomain; }
+  /** 예전 계정: 별명 -> 로그인용 가상 이메일 (legacy = 더 예전 도메인) */
+  _email(nick, legacy = false) { return `${nickLocal(nick)}@${this._domain(legacy)}`; }
+  /** 아이디 -> 로그인용 가상 이메일 */
+  _idEmail(id) { return `id.${normLoginId(id)}@${this._domain()}`; }
 
   async _loadProfile(uid) {
     const snap = await this.F.getDoc(this._doc('users', uid));
@@ -93,25 +115,31 @@ export class FirebaseAccountStore {
   }
 
   /** 가입 = 정회원. 쓸 수 있는 코드가 있어야 하며, 코드 사용·회원 번호·프로필·별명을 한 트랜잭션으로 쓴다 (규칙이 함께 검사) */
-  async register({ nick, pin, country, team, age, number, code, stick }) {
-    const err = validateProfile({ nick, pin, country, team, age, number, stick });
+  /**
+   * 가입 = 정회원. 쓸 수 있는 코드가 있어야 하며, 코드 사용·회원 번호·프로필·별명·아이디를 한 트랜잭션으로 쓴다 (규칙이 함께 검사).
+   * 로그인 계정은 아이디 주소(id.<아이디>@…)로 만든다 — 같은 아이디는 Firebase Auth 와 ids/{아이디} 가 둘 다 막는다
+   */
+  async register({ loginId, password, nick, country, team, age, number, code, stick }) {
+    const err = validateProfile({ loginId, password, nick, country, team, age, number, stick });
     if (err) throw new Error(err);
     const ckey = normCode(code);
     if (!ckey) throw new Error(codeError('none'));
     if (!CODE_RE.test(ckey)) throw new Error(codeError('format'));
-    const key = normNick(nick);
-    const nickRef = this._doc('nicks', key), codeRef = this._doc('codes', ckey), metaRef = this._doc('meta', 'members');
+    const key = normNick(nick), lid = normLoginId(loginId);
+    const nickRef = this._doc('nicks', key), idRef = this._doc('ids', lid), codeRef = this._doc('codes', ckey), metaRef = this._doc('meta', 'members');
+    if ((await this.F.getDoc(idRef)).exists()) throw new Error(ID_TAKEN);
     if ((await this.F.getDoc(nickRef)).exists()) throw new Error('이미 사용 중인 별명입니다');
     const info = await this.checkCode(ckey);
     if (info.status !== 'ok') throw new Error(codeError(info.status, info));
     if (!(await this.F.getDoc(metaRef)).exists()) throw new Error(NOT_READY);
     let cred;
-    try { cred = await this.A.createUserWithEmailAndPassword(this.auth, this._email(nick), pin); }
-    catch (e) { throw new Error(e.code === 'auth/email-already-in-use' ? '이미 사용 중인 별명입니다' : `가입 실패 (${e.code || e.message})`); }
+    try { cred = await this.A.createUserWithEmailAndPassword(this.auth, this._idEmail(lid), String(password)); }
+    catch (e) { throw new Error(e.code === 'auth/email-already-in-use' ? ID_TAKEN : `가입 실패 (${e.code || e.message})`); }
     const uid = cred.user.uid;
     try {
       const profile = await this.F.runTransaction(this.db, async (tx) => {
-        const [m, c, n] = await Promise.all([tx.get(metaRef), tx.get(codeRef), tx.get(nickRef)]);
+        const [m, c, n, i] = await Promise.all([tx.get(metaRef), tx.get(codeRef), tx.get(nickRef), tx.get(idRef)]);
+        if (i.exists()) throw new Error(ID_TAKEN);
         if (n.exists()) throw new Error('이미 사용 중인 별명입니다');
         if (!m.exists()) throw new Error(NOT_READY);
         const cd = c.exists() ? c.data() : null;
@@ -119,41 +147,90 @@ export class FirebaseAccountStore {
         if (st !== 'ok') throw new Error(codeError(st, cd));
         const no = (m.data().count || 0) + 1, now = Date.now();
         const p = {
-          nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), stick, createdAt: now,
+          loginId: lid, nick: String(nick).trim(), nickLower: key, number: jerseyOf(number), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), stick, createdAt: now,
           code: ckey, via: cd.type, beta: cd.type === 'beta', memberNo: no, joinedAt: now,
         };
         tx.set(this._doc('users', uid), p);
         tx.set(nickRef, { uid });
+        tx.set(idRef, { uid, email: cred.user.email });
         tx.update(codeRef, { uses: (cd.uses || 0) + 1, lastAt: this.F.serverTimestamp() });
         tx.update(metaRef, { count: no });
         return p;
       });
+      this.upgrade = null;
       this.user = { id: uid, ...profile, feedbackAt: null, admin: false };
       return this.user;
     } catch (e) {
-      // 프로필을 못 만들었으면 방금 만든 로그인 계정도 지운다 (같은 별명으로 다시 가입할 수 있게)
+      // 프로필을 못 만들었으면 방금 만든 로그인 계정도 지운다 (같은 아이디·별명으로 다시 가입할 수 있게)
       try { await this.A.deleteUser(cred.user); } catch { this.A.signOut(this.auth); }
       throw new Error(e.code === 'permission-denied' ? codeError('format') : e.message || String(e));
     }
   }
 
-  async login(nick, pin) {
-    let legacy = false;
-    try { await this.A.signInWithEmailAndPassword(this.auth, this._email(nick), pin); }
-    catch (e) {
-      if (!BAD_LOGIN.includes(e.code) || this._email(nick) === this._email(nick, true)) {
-        throw new Error(BAD_LOGIN.includes(e.code) ? '별명 또는 비밀번호가 맞지 않습니다' : `로그인 실패 (${e.code || e.message})`);
-      }
-      // 예전 주소(@puck-trainer.app)로 만든 계정
-      try { await this.A.signInWithEmailAndPassword(this.auth, this._email(nick, true), pin); legacy = true; }
-      catch (e2) { throw new Error(BAD_LOGIN.includes(e2.code) ? '별명 또는 비밀번호가 맞지 않습니다' : `로그인 실패 (${e2.code || e2.message})`); }
-    }
-    // 예전 주소로 들어왔으면 새 주소로 옮겨 본다 (프로젝트 설정상 안 되면 그대로 두고, 다음에도 예전 주소로 로그인됨)
-    if (legacy) { try { await this.A.updateEmail(this.auth.currentUser, this._email(nick)); } catch { /* 그대로 */ } }
-    return this._loadProfile(this.auth.currentUser.uid);
+  /** 로그인 시도 하나: 되면 true, 아이디·비밀번호가 틀리면 false, 그 밖의 오류(요청이 너무 많음 등)는 던진다 */
+  async _try(email, password) {
+    try { await this.A.signInWithEmailAndPassword(this.auth, email, String(password)); return true; }
+    catch (e) { if (BAD_LOGIN.includes(e.code)) return false; throw new Error(`로그인 실패 (${e.code || e.message})`); }
   }
 
-  logout() { this.user = null; this.A.signOut(this.auth); }
+  /**
+   * 로그인: 아이디 + 비밀번호.
+   * 예전 계정(아이디 없음)은 별명 + 숫자 6자리로 들어오고, 아이디·새 비밀번호를 만들 때까지 current() 가 null (needsUpgrade() 가 { nick }).
+   * 아이디를 만든 계정이 별명으로 들어오면 내보내고 아이디로 로그인하라고 알린다
+   */
+  async login(id, password) {
+    const lid = normLoginId(id);
+    if (LOGIN_ID_RE.test(lid)) {
+      if (await this._try(this._idEmail(lid), password)) return this._settle();
+      // 아이디를 만든 예전 계정: 로그인 주소를 아이디 주소로 못 바꿨으면 ids/{아이디} 에 적힌 주소로
+      let email = null;
+      try { const s = await this.F.getDoc(this._doc('ids', lid)); email = s.exists() ? s.data().email : null; } catch { email = null; }
+      if (email && email !== this._idEmail(lid) && await this._try(email, password)) return this._settle();
+    }
+    const nick = String(id ?? '').trim();
+    if (NICK_RE.test(nick)) {
+      const tries = [this._email(nick), this._email(nick, true)].filter((e, i, a) => a.indexOf(e) === i);
+      for (const email of tries) {
+        if (!(await this._try(email, password))) continue;
+        const u = await this._settle();
+        if (u) { this.logout(); throw new Error(USE_ID_MSG); }
+        return null; // 아이디 만들기 (needsUpgrade)
+      }
+    }
+    throw new Error(BAD_LOGIN_MSG);
+  }
+
+  /**
+   * 예전 계정: 아이디와 새 비밀번호 만들기 (별명 + 예전 비밀번호로 로그인한 뒤 한 번).
+   * 비밀번호를 먼저 바꾸고(실패하면 아무것도 안 바뀜), ids/{아이디} 와 프로필의 loginId 를 한 묶음으로 쓴 뒤,
+   * 로그인 주소를 아이디 주소로 바꿔 본다 (프로젝트 설정상 안 되면 ids 에 적힌 예전 주소로 로그인됨)
+   */
+  async upgradeLogin(loginId, password) {
+    const cu = this.auth.currentUser, up = this.upgrade;
+    if (!up || !cu) throw new Error('먼저 별명과 예전 비밀번호로 로그인하세요');
+    const err = validateLoginId(loginId, up.nick) || validatePassword(password, { id: loginId, nick: up.nick }) || (up.admin ? validateStrongPassword(password) : null);
+    if (err) throw new Error(err);
+    const lid = normLoginId(loginId), idRef = this._doc('ids', lid);
+    if ((await this.F.getDoc(idRef)).exists()) throw new Error(ID_TAKEN);
+    try { await this.A.updatePassword(cu, String(password)); }
+    catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }
+    const b = this.F.writeBatch(this.db);
+    b.set(idRef, { uid: cu.uid, email: cu.email });
+    b.update(this._doc('users', cu.uid), { loginId: lid });
+    try { await b.commit(); }
+    catch (e) { throw new Error(e.code === 'permission-denied' ? ID_TAKEN : `아이디를 만들지 못했습니다 (${e.code || e.message})`); }
+    try { await this.A.updateEmail(cu, this._idEmail(lid)); } catch { /* 그대로: ids 의 주소로 로그인 */ }
+    return this._settle();
+  }
+
+  logout() {
+    // 모아 둔 판수를 먼저 보내고 로그인 계정에서 나간다 (화면은 바로 로그아웃 상태로)
+    const u = this.user;
+    const flush = u && Object.keys(this.pending.of(u.id)).length ? this.flushPlays(null, u).catch(() => {}) : null;
+    this.user = null; this.upgrade = null;
+    const out = () => { if (!this.user && !this.upgrade) { this._mine = null; this.A.signOut(this.auth); } };
+    if (flush) flush.finally(out); else out();
+  }
 
   /** 비밀번호 바꾸기 (운영자 화면): 지금 비밀번호로 다시 확인한 뒤 새 비밀번호(12자 이상)로 */
   async changePassword(current, next) {
@@ -229,31 +306,81 @@ export class FirebaseAccountStore {
   }
   _dropBoards(mode) { for (const k of this._boards.keys()) if (k.startsWith(`${mode}|`)) this._boards.delete(k); }
 
+  /** 기록 문서 하나 (작성자 칸은 지금 프로필로: 규칙이 프로필과 같은지 본다). t = 서버 시간 (규칙이 2초에 한 번만 받음) */
+  _entry(u, mode, score, at, plays) {
+    const e = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score, at, plays, t: this.F.serverTimestamp() };
+    return Object.assign(e, rankIdxFields(e));
+  }
+  /** 내 기록 문서 (uid 를 직접 받음: 로그아웃하는 중에도 쓸 수 있게) */
+  async _scoreDoc(uid, mode) {
+    if (this._mine?.uid === uid && this._mine.docs.has(mode)) return this._mine.docs.get(mode);
+    const snap = await this.F.getDoc(this._doc(`scores_${mode}`, uid));
+    const data = snap.exists() ? snap.data() : null;
+    if (this.user?.id === uid) this._remember(mode, data);
+    return data;
+  }
+
+  /**
+   * 한 판 등록. 최고 기록이 오를 때만 기록 문서를 쓰고 (모아 둔 판수도 함께 더함),
+   * 못 넘은 판은 판수만 기기에 모아 둔다 (PLAYS_FLUSH 판이 모이면 한 번에 씀). 반환: { best, improved, entry }
+   */
   async submitScore(mode, score) {
     if (!this.user) throw new Error('로그인이 필요합니다');
     if (!isActiveMember(this.memberState())) throw new Error(LAPSED);
-    const ref = this._doc(`scores_${mode}`, this.user.id);
-    const prev = await this.F.getDoc(ref);
-    const u = this.user;
-    const entry = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score: Math.round(score), at: Date.now(), plays: 1, t: this.F.serverTimestamp() }; // t: 서버 시간 (규칙이 2초에 한 번만 받음)
-    let improved = true;
-    if (prev.exists()) {
-      const p = prev.data();
-      entry.plays = (p.plays || 1) + 1;
-      if (p.score >= entry.score) { improved = false; entry.score = p.score; entry.at = p.at; }
+    await this._flushing; // 판수를 쓰는 중이면 끝난 뒤에 (같은 판수를 두 번 더하지 않게)
+    const u = this.user, s = Math.round(score), ref = this._doc(`scores_${mode}`, u.id);
+    for (let attempt = 0; ; attempt++) {
+      const prev = await this._myScore(mode);
+      if (prev && prev.score >= s) {
+        const n = this.pending.add(u.id, mode);
+        if (n >= PLAYS_FLUSH) this.flushPlays(mode).catch(() => {});
+        return { best: prev.score, improved: false, entry: { ...prev, plays: (prev.plays || 1) + n } };
+      }
+      const add = Math.min(this.pending.get(u.id, mode), PLAYS_STEP_MAX - 1);
+      const entry = this._entry(u, mode, s, Date.now(), (prev ? prev.plays || 1 : 0) + add + 1);
+      try { await this.F.setDoc(ref, entry); }
+      catch (err) {
+        // 다른 기기에서 기록·판수가 바뀌었으면 기억해 둔 문서가 낡았다: 다시 읽고 한 번 더
+        if (err?.code !== 'permission-denied' || attempt) throw err;
+        this._mine?.docs.delete(mode);
+        continue;
+      }
+      if (add) this.pending.take(u.id, mode, add);
+      this._remember(mode, entry);
+      this._dropBoards(mode);
+      return { best: s, improved: true, entry };
     }
-    Object.assign(entry, rankIdxFields(entry));
-    try {
-      await this.F.setDoc(ref, entry);
-    } catch (err) {
-      // 새 규칙(순위 색인 칸)을 아직 게시하지 않았으면 색인 칸 없이 다시 쓴다 (옛 규칙과 호환)
-      if (err?.code !== 'permission-denied') throw err;
-      for (const f of Object.values(RANK_FIELDS)) delete entry[f];
-      await this.F.setDoc(ref, entry);
+  }
+
+  /**
+   * 모아 둔 판수를 기록 문서에 쓴다 (mode 를 주면 그 게임만, 한 번에 PLAYS_STEP_MAX 판까지). 점수·기록 시각은 그대로.
+   * 기록 문서가 없으면(운영자가 지움) 모아 둔 판수는 버린다. 한 번에 하나씩 돈다. 반환: 쓴 판수
+   */
+  flushPlays(mode = null, u = this.user) {
+    const run = Promise.resolve(this._flushing).then(() => this._flush(mode, u));
+    this._flushing = run.catch(() => {});
+    return run;
+  }
+  async _flush(mode, u) {
+    if (!u) return 0;
+    let done = 0;
+    for (const [m, n] of Object.entries(this.pending.of(u.id))) {
+      if (mode && m !== mode) continue;
+      const prev = await this._scoreDoc(u.id, m);
+      if (!prev) { this.pending.take(u.id, m, n); continue; }
+      const add = Math.min(n, PLAYS_STEP_MAX);
+      const entry = this._entry(u, m, prev.score, prev.at, (prev.plays || 1) + add);
+      try { await this.F.setDoc(this._doc(`scores_${m}`, u.id), entry); }
+      catch (err) {
+        if (err?.code !== 'permission-denied') throw err;
+        if (this._mine?.uid === u.id) this._mine.docs.delete(m); // 낡은 문서였을 수 있다: 다음에 다시 읽고 시도
+        continue;
+      }
+      this.pending.take(u.id, m, add);
+      if (this.user?.id === u.id) this._remember(m, entry);
+      done += add;
     }
-    this._remember(mode, entry);
-    this._dropBoards(mode);
-    return { best: entry.score, improved, entry };
+    return done;
   }
 
   /**
@@ -309,7 +436,8 @@ export class FirebaseAccountStore {
     const uid = this.user.id;
     const snaps = await Promise.all(keys.map((k) => this.F.getDoc(this._doc(`scores_${k}`, uid)).catch(() => null)));
     snaps.forEach((s, i) => { if (!s) return; const d = s.exists() ? s.data() : null; this._remember(keys[i], d); if (d) this._fixIdx(keys[i], d); });
-    return snaps.map((s, i) => (s && s.exists() ? { mode: keys[i], score: s.data().score, at: s.data().at, plays: s.data().plays || 1 } : null)).filter(Boolean);
+    // 판수 = 기록 문서의 판수 + 아직 쓰지 않고 기기에 모아 둔 판수
+    return snaps.map((s, i) => (s && s.exists() ? { mode: keys[i], score: s.data().score, at: s.data().at, plays: (s.data().plays || 1) + this.pending.get(uid, keys[i]) } : null)).filter(Boolean);
   }
   /** 이 게임에서 내 순위: { world: { rank, total }, country: { rank }, team: { rank } } (내 국가·팀 기록이 없으면 null) */
   async rankSummary(mode) {
@@ -482,18 +610,19 @@ export class FirebaseAccountStore {
   }
 
   /**
-   * 운영자: 베타 멤버(가입 정보) 지우기 — 프로필·의견·별명 문서를 지운다.
+   * 운영자: 베타 멤버(가입 정보) 지우기 — 프로필·의견·별명·아이디 문서를 지운다.
    * 로그인 계정(Firebase Auth)은 브라우저에서 지울 수 없어 콘솔에 남는다.
    */
   async deleteMember(uid) {
     this._needAdmin();
     if (uid === this.user?.id) throw new Error('지금 로그인한 운영자 계정은 지울 수 없습니다');
     const snap = await this.F.getDoc(this._doc('users', uid));
-    const nickLower = snap.exists() ? snap.data().nickLower : null;
+    const nickLower = snap.exists() ? snap.data().nickLower : null, loginId = snap.exists() ? snap.data().loginId : null;
     const b = this.F.writeBatch(this.db);
     b.delete(this._doc('users', uid));
     b.delete(this._doc('feedback', uid));
     if (nickLower) b.delete(this._doc('nicks', nickLower));
+    if (loginId) b.delete(this._doc('ids', loginId));
     b.delete(this._doc('activity', uid));
     await b.commit();
   }

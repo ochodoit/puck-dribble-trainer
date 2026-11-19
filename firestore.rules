@@ -6,9 +6,12 @@ rules_version = '2';
 //     운영자·관리자·admin 같은 이름은 쓸 수 없다
 //  3) 개인정보: 프로필(나이·가입 코드)은 본인과 운영자만 읽는다. 랭킹에는 화면에 보이는 칸만 남는다
 //  4) 정리: 운영자는 글·도전 기록·랭킹 기록·의견을 지울 수 있다
-//  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간). 순위 색인 칸은 점수·묶음과 맞아야 한다
+//  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간). 순위 색인 칸은 점수·묶음과 맞아야 한다.
+//     앱은 최고 기록이 오를 때만 쓰고 판수는 모아서 쓴다: 판수는 한 번에 1~50 늘고, 점수가 그대로면 기록 시각도 그대로
 //  6) 정회원 기간: 무료 정회원은 베타 종료일까지. 그 뒤는 운영자가 유지(kept)했거나 이용권 기한(until)이 남은 계정만
 //  7) 초대 코드: 정회원 한 사람당 하나, 3명까지, 추가 없음 (프로필의 invite 칸과 한 묶음으로 한 번만 만든다)
+//  8) 로그인 아이디: 로그인은 아이디 + 비밀번호, 랭킹에 보이는 이름은 별명 (따로). 아이디는 ids/{아이디} 로 하나뿐이고,
+//     새 가입은 로그인 주소가 그 아이디 주소(id.<아이디>@…)여야 한다. 예전 계정(별명 + 숫자 6자리)은 아이디를 한 번만 만든다
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -96,6 +99,12 @@ service cloud.firestore {
       return !('expiresAt' in d) || d.expiresAt == null || d.expiresAt is timestamp;
     }
 
+    // 프로필의 아이디: 별명과 다르고, 같은 묶음에서 ids/{아이디} 가 이 계정 것으로 생긴다
+    function loginIdOk(d, uid) {
+      return d.loginId is string && d.loginId != d.nickLower
+        && getAfter(/databases/$(database)/documents/ids/$(d.loginId)).data.uid == uid;
+    }
+
     match /admins/{uid} {
       allow get: if request.auth != null && request.auth.uid == uid;
     }
@@ -150,8 +159,8 @@ service cloud.firestore {
       allow get: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
       allow create: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt', 'stick'])
-        && validProfile(request.resource.data) && validNick(request.resource.data)
+        && request.resource.data.keys().hasOnly(['loginId', 'nick', 'nickLower', 'number', 'country', 'team', 'age', 'ageGroup', 'createdAt', 'code', 'via', 'beta', 'memberNo', 'joinedAt', 'stick'])
+        && validProfile(request.resource.data) && validNick(request.resource.data) && loginIdOk(request.resource.data, uid)
         && request.resource.data.ageGroup == ageGroupFor(request.resource.data.age)
         && request.resource.data.code is string && joinOk(request.resource.data, uid);
       // 본인: 등번호·국가·팀·나이만 고칠 수 있다 (별명·가입 정보·회원 번호·정회원 유지는 못 바꿈)
@@ -159,6 +168,10 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['number', 'country', 'team', 'age', 'ageGroup', 'stick'])
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age', 'ageGroup'])
           || request.resource.data.ageGroup == ageGroupFor(request.resource.data.age));
+      // 본인(예전 계정): 아이디를 처음 한 번 만든다 (새로 만드는 ids/{아이디} 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loginId'])
+        && !('loginId' in resource.data) && loginIdOk(request.resource.data, uid);
       // 본인: 내 초대 코드를 처음 한 번 연결 (새로 만드는 코드 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
       allow update: if request.auth != null && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invite'])
@@ -208,6 +221,23 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.nickLower == nick;
       allow delete: if isAdmin(); // 운영자가 베타 멤버를 지우면 별명도 다시 쓸 수 있게
+    }
+    // 로그인 아이디 고유성: 문서 이름 = 아이디(4~20자, 영문 소문자로 시작, 영문 소문자·숫자·_), 칸 = uid·로그인 주소.
+    // 아이디를 아는 사람만 읽을 수 있다 (목록은 운영자만). 만들 수 있는 때는 두 가지이고, 고치거나 지울 수 없다
+    //  - 가입하는 묶음: 로그인 주소가 이 아이디의 주소(id.<아이디>@…)일 때
+    //  - 예전 계정(별명 + 숫자 6자리)이 아이디를 처음 만들 때: 로그인 주소는 예전 그대로일 수 있어 여기 적어 둔다
+    match /ids/{id} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if request.auth != null && id.matches('[a-z][a-z0-9_]{3,19}')
+        && request.resource.data.keys().hasOnly(['uid', 'email'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('loginId', null) == id
+        && (joiningNow()
+          ? request.auth.token.email.split('@')[0] == 'id.' + id
+          : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('loginId', null) == null);
+      allow delete: if isAdmin(); // 운영자가 베타 멤버를 지우면 아이디도 다시 쓸 수 있게
     }
 
     // ---- 커뮤니티 ----
@@ -332,8 +362,9 @@ service cloud.firestore {
         && d.score is int && d.score >= 0 && d.score <= 1000000 && d.at is int && d.plays is int
         && d.t == request.time
         && (old == null
-          ? d.plays == 1
-          : (d.score >= old.data.score && d.plays == old.data.get('plays', 1) + 1
+          ? d.plays >= 1 && d.plays <= 50
+          : (d.plays > old.data.get('plays', 1) && d.plays <= old.data.get('plays', 1) + 50
+            && (d.score > old.data.score || (d.score == old.data.score && d.at == old.data.at))
             && request.time > old.data.get('t', timestamp.date(2000, 1, 1)) + duration.value(2, 's')));
     }
     match /{col}/{uid} {

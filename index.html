@@ -201,13 +201,16 @@
             <button type="button" id="btn-logout" class="btn btn-ghost">로그아웃</button>
           </div>
           <form id="auth-form" autocomplete="off">
-            <div class="auth-tabs">
+            <div class="auth-tabs" id="auth-tabs">
               <button type="button" class="tab active" data-tab="login">로그인</button>
               <button type="button" class="tab" data-tab="register">회원가입</button>
             </div>
             <div class="auth-grid">
-              <label>플레이어 별명<input id="auth-nick" type="text" maxlength="12" placeholder="예: 번개손" required /></label>
-              <label>비밀번호 (숫자 6자리)<input id="auth-pin" type="password" inputmode="numeric" maxlength="64" placeholder="••••••" required /></label>
+              <p class="upgrade-only hidden auth-hint">이제 로그인은 아이디로 합니다. 아이디와 새 비밀번호를 만들어 주세요. 별명과 기록은 그대로예요. <span class="muted">예전 계정:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
+              <label>아이디<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="예: puckking07" required /></label>
+              <label>비밀번호<input id="auth-pin" type="password" maxlength="64" autocomplete="current-password" placeholder="8자 이상, 영문+숫자" required /></label>
+              <label class="new-pw hidden">비밀번호 확인<input id="auth-pin2" type="password" maxlength="64" autocomplete="new-password" placeholder="비밀번호를 한 번 더" /></label>
+              <label class="reg-only hidden">플레이어 별명<input id="auth-nick" type="text" maxlength="12" placeholder="예: 번개손" /></label>
               <label class="reg-only hidden">가입 코드<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="예: K7MP-Q2XD" /></label>
               <label class="reg-only hidden">국가<select id="auth-country"></select></label>
               <label class="reg-only hidden">팀 이름<input id="auth-team" type="text" maxlength="20" placeholder="예: 서울 유스" /></label>
@@ -220,11 +223,14 @@
                 </div>
               </div>
             </div>
-            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요. 별명은 실명 대신 쓰세요 (랭킹에 공개됩니다).</p>
+            <p class="reg-only hidden auth-hint">아이디는 로그인에만 쓰고 공개되지 않아요 (4~20자, 영문 소문자로 시작, 영문·숫자·_). 별명은 랭킹에 공개되니 실명 대신 쓰고, 아이디와 다르게 정하세요. 비밀번호는 8자 이상, 영문과 숫자를 함께 넣으세요.</p>
+            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요.</p>
+            <p class="login-only auth-hint muted">예전에 별명과 숫자 6자리로 가입했다면 별명과 그 비밀번호로 로그인하세요. 아이디를 한 번 새로 만들게 됩니다.</p>
             <p id="auth-error" class="error hidden"></p>
             <div class="row" style="justify-content:center">
               <button type="submit" id="auth-submit" class="btn btn-primary">로그인</button>
               <button type="button" id="auth-guest" class="btn btn-ghost">게스트로 시작 (랭킹 미등록)</button>
+              <button type="button" id="auth-cancel" class="btn btn-ghost upgrade-only hidden">로그아웃</button>
             </div>
           </form>
           <p id="auth-store-note" class="muted"></p>
@@ -518,7 +524,7 @@
         </section>
         <section class="adm-sec">
           <h3>운영자 비밀번호</h3>
-          <p class="muted">운영자 계정은 숫자 6자리 대신 12자 이상 비밀번호를 쓰세요. 휴대폰 로그인 화면은 숫자 키패드라 숫자 12자리 이상이 편합니다.</p>
+          <p class="muted">운영자 계정은 12자 이상 비밀번호를 쓰세요 (일반 회원은 8자 이상).</p>
           <div class="adm-row">
             <label>지금 비밀번호<input id="adm-pw-now" type="password" maxlength="64" autocomplete="current-password" /></label>
             <label>새 비밀번호 (12자 이상)<input id="adm-pw-new" type="password" maxlength="64" autocomplete="new-password" /></label>

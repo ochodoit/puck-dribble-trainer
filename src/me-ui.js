@@ -86,7 +86,8 @@ export function initMe(deps) {
     const joined = u.joinedAt ? `가입 ${ymd(u.joinedAt)}` : '';
     $('#me-card').innerHTML = `<div class="me-id"><b data-ugc>${esc(u.nick)}</b>${jersey} <span class="member-badge">${esc(deps.memberBadge(u))}</span></div>
       <p class="me-facts"><span data-ugc>${esc(u.team)}</span> · ${facts}</p>
-      <p class="me-facts muted">${[joined, esc(state)].filter(Boolean).join(' · ')}</p>`;
+      <p class="me-facts muted">${[joined, esc(state)].filter(Boolean).join(' · ')}</p>
+      ${u.loginId ? `<p class="me-facts muted">로그인 아이디 <b data-ugc>${esc(u.loginId)}</b> (나만 보여요)</p>` : ''}`;
   }
 
   function renderAttendance() {

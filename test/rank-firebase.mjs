@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 function fakeFirestore() {
   const docs = new Map(); // 'col/id' -> data
   const F = {
-    docs, reads: 0, queries: [], denyIdx: false,
+    docs, reads: 0, writes: 0, queries: [],
     collection: (_db, name) => ({ name, cons: [] }),
     doc: (_db, ...path) => ({ path: path.join('/') }),
     where: (field, op, value) => ({ t: 'where', field, op, value }),
@@ -19,10 +19,7 @@ function fakeFirestore() {
     query: (col, ...cons) => ({ name: col.name, cons: [...col.cons, ...cons] }),
     serverTimestamp: () => 'SERVER_TIME',
     async getDoc(ref) { F.reads += 1; const d = docs.get(ref.path); return { exists: () => !!d, data: () => (d ? { ...d } : undefined) }; },
-    async setDoc(ref, d) {
-      if (F.denyIdx && ('ags' in d || 'cts' in d || 'tms' in d)) throw Object.assign(new Error('Missing or insufficient permissions.'), { code: 'permission-denied' });
-      docs.set(ref.path, { ...d });
-    },
+    async setDoc(ref, d) { F.writes += 1; docs.set(ref.path, { ...d }); },
     async updateDoc(ref, d) { docs.set(ref.path, { ...docs.get(ref.path), ...d }); },
     async getDocs(q) { const rows = run(q); F.reads += Math.max(1, rows.length); return { docs: rows.map((r) => ({ data: () => ({ ...r }) })) }; },
     async getCountFromServer(q) { const n = run(q).length; F.reads += Math.max(1, Math.ceil(n / 1000)); return { data: () => ({ count: n }) }; },
@@ -47,7 +44,7 @@ function fakeFirestore() {
 
 export async function checkRanks() {
   const { FirebaseAccountStore } = await import('../src/account-firebase.js');
-  const { rankIdxFields, rankIdx } = await import('../src/account.js');
+  const { rankIdxFields, rankIdx, PendingPlays } = await import('../src/account.js');
   const logs = [];
   let ok = true;
   const check = (name, cond, detail) => { logs.push(`${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ' ' + JSON.stringify(detail) : ''}`); if (!cond) ok = false; };
@@ -115,13 +112,73 @@ export async function checkRanks() {
   check('R8 an old score doc gets its rank index when its owner opens My info, then counts in group ranks',
     dDoc.ags === 'U12|1000000300' && dDoc.tms === 'hawks|1000000300' && dDoc.plays === 1 && dAge.rank === 4 && dAge.total === 4, { dAge });
 
-  // 새 규칙을 게시하기 전(색인 칸을 거절): 색인 칸 없이 다시 써서 기록 등록은 된다
-  F.denyIdx = true;
-  const sn = storeFor({ id: 'new', nick: 'new', country: 'KR', team: 'X', age: 11, ageGroup: 'U12' });
-  const subN = await sn.submitScore(MODE, 100);
-  F.denyIdx = false;
-  const nDoc = F.docs.get(`scores_${MODE}/new`);
-  check('R9 before the new rules are published the score is still saved (without the index fields)', subN.best === 100 && nDoc.score === 100 && !('ags' in nDoc));
+  // 최고 기록이 오를 때만 기록 문서를 쓰고, 못 넘은 판의 판수는 기기에 모았다가 10판마다·다음 최고 기록 때·로그아웃할 때 한 번에 쓴다
+  const mem = new Map();
+  const ls = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  let signedOut = false;
+  const sp = Object.assign(storeFor({ id: 'p', nick: 'p', country: 'KR', team: 'X', age: 11, ageGroup: 'U12' }), { pending: new PendingPlays(ls), A: { signOut: () => { signedOut = true; } }, auth: {} });
+  const pDoc = () => F.docs.get(`scores_${MODE}/p`);
+  F.writes = 0;
+  await sp.submitScore(MODE, 200);                                  // 첫 기록: 씀 (1판)
+  for (let i = 0; i < 3; i++) await sp.submitScore(MODE, 100);      // 못 넘음: 쓰지 않고 3판 모아 둠
+  const s1 = { writes: F.writes, plays: pDoc().plays, shown: (await sp.myScores([MODE]))[0].plays };
+  await sp.submitScore(MODE, 250);                                  // 최고 기록: 모아 둔 3판 + 이번 판
+  const d2 = pDoc(), s2 = { writes: F.writes, plays: d2.plays, score: d2.score };
+  for (let i = 0; i < 10; i++) await sp.submitScore(MODE, 10);      // 10판째에 판수만 한 번 씀 (점수·기록 시각 그대로)
+  await sp._flushing;
+  const d3 = pDoc(), s3 = { writes: F.writes, plays: d3.plays, score: d3.score, sameAt: d3.at === d2.at, ags: d3.ags };
+  for (let i = 0; i < 2; i++) await sp.submitScore(MODE, 10);
+  sp.logout();                                                      // 로그아웃: 남은 2판을 쓰고 나서 로그인 계정에서 나감
+  await sp._flushing; await new Promise((r) => setTimeout(r, 0));
+  const s4 = { writes: F.writes, plays: pDoc().plays, left: mem.get('puck-trainer.pending-plays.v1'), signedOut, user: sp.user };
+  check('R9 score doc is written only for a new best; other games pile up and are written every 10 games, with the next best, and at logout',
+    s1.writes === 1 && s1.plays === 1 && s1.shown === 4 && s2.writes === 2 && s2.plays === 5 && s2.score === 250
+    && s3.writes === 3 && s3.plays === 15 && s3.score === 250 && s3.sameAt && s3.ags === 'U12|1000000250'
+    && s4.writes === 4 && s4.plays === 17 && s4.left === '{}' && s4.signedOut && s4.user === null, { s1, s2, s3, s4 });
+
+  // 로그인 (가짜 Firebase Auth): 아이디 + 비밀번호, 예전 별명 계정 -> 아이디 만들기 (로그인 주소를 못 바꾸면 ids 의 주소로)
+  {
+    const L = await import('../src/account.js');
+    const FA = fakeFirestore();
+    FA.writeBatch = () => { const ops = []; return { set: (r, d) => ops.push(() => FA.docs.set(r.path, { ...d })), update: (r, d) => ops.push(() => FA.docs.set(r.path, { ...FA.docs.get(r.path), ...d })), commit: async () => ops.forEach((f) => f()) }; };
+    const accounts = new Map(); // 로그인 주소 -> { uid, password }
+    const auth = { currentUser: null };
+    const bad = () => Object.assign(new Error('bad'), { code: 'auth/invalid-credential' });
+    const A = {
+      async signInWithEmailAndPassword(_a, email, pw) { const x = accounts.get(email); if (!x || x.password !== pw) throw bad(); auth.currentUser = { uid: x.uid, email }; },
+      async updatePassword(cu, pw) { accounts.get(cu.email).password = pw; },
+      async updateEmail() { throw Object.assign(new Error('no'), { code: 'auth/operation-not-allowed' }); }, // 이메일 열거 보호가 켜진 프로젝트
+      signOut() { auth.currentUser = null; },
+    };
+    const sa = Object.assign(new FirebaseAccountStore({ authDomain: 'demo.firebaseapp.com' }), { F: FA, A, auth, db: {}, site: {} });
+    accounts.set(sa._email('옛친구'), { uid: 'old1', password: '135790' });
+    FA.docs.set('users/old1', { nick: '옛친구', nickLower: '옛친구', country: 'KR', team: 'T', age: 20, ageGroup: '성인' });
+    accounts.set('id.newbie@demo.firebaseapp.com', { uid: 'new1', password: 'newb1234' });
+    FA.docs.set('users/new1', { loginId: 'newbie', nick: '뉴비', nickLower: '뉴비', country: 'KR', team: 'T', age: 12, ageGroup: 'U14' });
+    FA.docs.set('ids/newbie', { uid: 'new1', email: 'id.newbie@demo.firebaseapp.com' });
+    const msg = async (f) => { try { await f(); return 'ok'; } catch (e) { return e.message; } };
+    const r = {};
+    r.newbie = await msg(() => sa.login('NewBie', 'newb1234')) === 'ok' && sa.current()?.nick === '뉴비';
+    sa.logout();
+    r.nickOfNew = await msg(() => sa.login('뉴비', 'newb1234'));
+    r.legacy = await msg(() => sa.login('옛친구', '135790'));
+    r.waiting = { cur: sa.current(), up: sa.needsUpgrade() };
+    r.weak = await msg(() => sa.upgradeLogin('oldfriend', '12345678'));
+    r.taken = await msg(() => sa.upgradeLogin('newbie', 'newpass12')); // 가입할 때 생긴 ids/newbie 가 있다
+    r.upgrade = await msg(() => sa.upgradeLogin('oldfriend', 'newpass12'));
+    r.ids = FA.docs.get('ids/oldfriend'); r.profile = FA.docs.get('users/old1').loginId; r.cur = sa.current()?.loginId;
+    sa.logout();
+    r.byId = await msg(() => sa.login('oldfriend', 'newpass12')) === 'ok' && sa.current()?.nick === '옛친구';
+    sa.logout();
+    r.byNick = await msg(() => sa.login('옛친구', 'newpass12'));
+    r.afterNick = { cur: sa.current(), signedIn: !!auth.currentUser };
+    r.oldPin = await msg(() => sa.login('oldfriend', '135790'));
+    check('R11 login: ID + password; old nickname account must create an ID (kept logged out until then), then only the ID works',
+      r.newbie && r.nickOfNew === L.BAD_LOGIN_MSG && r.legacy === 'ok' && r.waiting.cur === null && r.waiting.up?.nick === '옛친구'
+      && r.weak === '비밀번호에 영문과 숫자를 함께 넣으세요' && r.taken === L.ID_TAKEN && r.upgrade === 'ok'
+      && r.ids?.uid === 'old1' && r.ids?.email === sa._email('옛친구') && r.profile === 'oldfriend' && r.cur === 'oldfriend'
+      && r.byId && r.byNick === L.USE_ID_MSG && r.afterNick.cur === null && !r.afterNick.signedIn && r.oldPin === L.BAD_LOGIN_MSG, r);
+  }
 
   check('R10 no query needs a composite index (single-field range/order or equality only)', F.queries.length > 0, { queries: F.queries.length });
   return { ok, logs };

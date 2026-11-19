@@ -130,7 +130,10 @@ async function setupAuth() {
     if (!app.started && !els.btnCamera.disabled) startCamera(); // 게스트로 시작 = 바로 카메라 시작
   });
   $('#btn-logout').addEventListener('click', doLogout);
+  $('#auth-cancel').addEventListener('click', doLogout); // 예전 계정: 아이디를 만들지 않고 나가기
   $('#btn-settings-logout').addEventListener('click', doLogout);
+  // 랭킹 기록: 최고 기록을 못 넘은 판의 판수는 모아 두었다가, 화면을 떠날 때(탭 전환·앱 닫기) 한 번에 쓴다
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') app.account?.flushPlays?.().catch(() => {}); });
   $('#btn-settings-login').addEventListener('click', openLogin);
   $('#btn-me').addEventListener('click', openMe);
   $('#btn-me-splash').addEventListener('click', openMe);
@@ -200,7 +203,7 @@ const shortDate = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}�
 async function showInvite() {
   const card = $('#invite-card');
   card.classList.add('hidden');
-  if (!app.invite || !app.account || app.account.current()) return;
+  if (!app.invite || !app.account || app.account.current() || app.account.needsUpgrade?.()) return;
   const info = await app.account.checkCode(app.invite);
   const ok = info.status === 'ok', end = app.site?.betaEndsAt;
   const left = info.maxUses > 0 ? `남은 자리 ${Math.max(0, info.maxUses - info.uses)}명` : '';
@@ -221,39 +224,59 @@ async function showInvite() {
   if (ok) { setAuthTab('register'); $('#auth-code').value = codeLabel(info.code); }
 }
 
+/**
+ * 로그인 칸 모드: login(아이디 + 비밀번호), register(아이디·비밀번호·확인·별명·프로필),
+ * upgrade(예전 별명 계정이 로그인한 뒤 아이디·새 비밀번호 만들기: 탭·게스트 버튼을 숨기고 로그아웃 버튼만)
+ */
 function setAuthTab(tab) {
   app.authTab = tab;
+  const reg = tab === 'register', up = tab === 'upgrade';
   $$('.auth-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
-  $$('.reg-only').forEach((e) => e.classList.toggle('hidden', tab !== 'register'));
-  els.authSubmit.textContent = tab === 'register' ? '가입하고 시작' : '로그인';
-  // 가입은 숫자 6자리, 로그인은 운영자의 긴 비밀번호(12자 이상)도 받는다
-  const pin = $('#auth-pin');
-  if (tab === 'register') { pin.setAttribute('pattern', '\\d{6}'); pin.maxLength = 6; } else { pin.removeAttribute('pattern'); pin.maxLength = 64; }
+  $$('.reg-only').forEach((e) => e.classList.toggle('hidden', !reg));
+  $$('.login-only').forEach((e) => e.classList.toggle('hidden', tab !== 'login'));
+  $$('.upgrade-only').forEach((e) => e.classList.toggle('hidden', !up));
+  $$('.new-pw').forEach((e) => e.classList.toggle('hidden', !reg && !up));
+  $('#auth-tabs').classList.toggle('hidden', up);
+  $('#auth-guest').classList.toggle('hidden', up);
+  if (up) $('#auth-upgrade-nick').textContent = app.account?.needsUpgrade?.()?.nick || '';
+  els.authSubmit.textContent = reg ? '가입하고 시작' : up ? '아이디 만들기' : '로그인';
+  $('#auth-id').placeholder = up || reg ? '4~20자, 영문 소문자로 시작' : '예: puckking07';
+  $('#auth-pin').setAttribute('autocomplete', reg || up ? 'new-password' : 'current-password');
+  $('#auth-pin').placeholder = up ? '새 비밀번호 (8자 이상, 영문+숫자)' : reg ? '8자 이상, 영문+숫자' : '';
   els.authError.classList.add('hidden');
 }
 
 async function onAuthSubmit(e) {
   e.preventDefault();
   if (!app.account) return;
-  const nick = $('#auth-nick').value, pin = $('#auth-pin').value;
+  const loginId = $('#auth-id').value, password = $('#auth-pin').value, tab = app.authTab;
+  const fail = (msg) => { els.authError.textContent = msg; els.authError.classList.remove('hidden'); };
+  if ((tab === 'register' || tab === 'upgrade') && password !== $('#auth-pin2').value) { fail('비밀번호가 서로 다릅니다'); return; }
   els.authSubmit.disabled = true;
   try {
-    if (app.authTab === 'register') {
-      await app.account.register({ nick, pin, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value, code: $('#auth-code').value, stick: app.authStick });
+    if (tab === 'register') {
+      await app.account.register({ loginId, password, nick: $('#auth-nick').value, country: $('#auth-country').value, team: $('#auth-team').value, age: $('#auth-age').value, number: $('#auth-number').value, code: $('#auth-code').value, stick: app.authStick });
       forgetInvite();
       $('#auth-code').value = '';
       toast(`환영합니다, ${app.account.current().nick}! ${memberBadge(app.account.current())}`, 4000);
       track('sign_up', { method: ['beta', 'invite'].includes(app.account.current()?.via) ? app.account.current().via : 'one' });
+    } else if (tab === 'upgrade') {
+      await app.account.upgradeLogin(loginId, password);
+      toast('아이디를 만들었습니다. 다음부터 아이디로 로그인하세요', 4000);
+      track('login', { method: 'upgrade' });
     } else {
-      await app.account.login(nick, pin);
-      track('login', { method: 'nickname' });
+      await app.account.login(loginId, password);
+      if (app.account.needsUpgrade?.()) { // 예전 별명 계정: 아이디·새 비밀번호를 만들어야 로그인 완료
+        $('#auth-id').value = '';
+        setAuthTab('upgrade');
+      } else track('login', { method: 'id' });
     }
-    $('#auth-pin').value = '';
+    $('#auth-pin').value = ''; $('#auth-pin2').value = '';
     els.authError.classList.add('hidden');
     refreshAuthUI();
+    if (app.authTab === 'upgrade') $('#auth-id').focus();
   } catch (err) {
-    els.authError.textContent = err.message || String(err);
-    els.authError.classList.remove('hidden');
+    fail(err.message || String(err));
   } finally { els.authSubmit.disabled = false; }
 }
 
@@ -272,7 +295,7 @@ function openLogin() {
   setAuthTab('login');
   close(els.panelSettings);
   open($('#panel-login'));
-  $('#auth-nick').focus();
+  $('#auth-id').focus();
 }
 function restoreAuthCard() {
   const h = app.authHome;
@@ -294,7 +317,11 @@ function refreshAuthUI() {
   $('#btn-admin').classList.toggle('hidden', !isAdmin(u));
   $('#btn-settings-admin').classList.toggle('hidden', !isAdmin(u));
   refreshMouseButton();
-  if (!u) { setAuthTab(app.authTab); els.authForm.classList.remove('hidden'); }
+  if (!u) {
+    const up = !!app.account?.needsUpgrade?.();
+    setAuthTab(up ? 'upgrade' : app.authTab === 'upgrade' ? 'login' : app.authTab);
+    els.authForm.classList.remove('hidden');
+  }
   else $('#invite-card').classList.add('hidden');
 }
 

@@ -1,5 +1,5 @@
 // 계정·랭킹 저장소. 기본은 기기 내(localStorage) 저장, firebase-config.js 가 채워지면 온라인(Firestore) 저장소로 전환.
-// 로그인: 별명 + 6자리 숫자 비밀번호. 프로필: 국가, 팀 이름, 나이(연령대 자동 계산).
+// 로그인: 아이디 + 비밀번호(8자 이상, 영문+숫자). 랭킹에 보이는 이름은 따로 정하는 별명. 프로필: 국가, 팀 이름, 나이(연령대 자동 계산).
 
 import { cleanActivity, addActivity } from './activity.js';
 
@@ -28,7 +28,33 @@ export function ageGroupOf(age) {
 }
 
 export const NICK_RE = /^[\p{L}\p{N}_\-. ]{2,12}$/u;
+/** 예전 계정의 비밀번호 (별명 + 숫자 6자리로 가입하던 때). 새 가입에는 쓰지 않는다 */
 export const PIN_RE = /^\d{6}$/;
+
+// ---------- 로그인 아이디 · 비밀번호 ----------
+// 로그인은 아이디 + 비밀번호, 랭킹에 보이는 이름은 별명 (셋 다 따로). 별명은 공개되므로 로그인에 쓰지 않는다.
+/** 아이디: 4~20자, 영문 소문자로 시작, 영문 소문자·숫자·_ (대문자로 넣어도 소문자로 바꿔 씀). firestore.rules 의 ids 와 같음 */
+export const LOGIN_ID_RE = /^[a-z][a-z0-9_]{3,19}$/;
+export const normLoginId = (s) => String(s ?? '').trim().toLowerCase();
+export const PW_MIN = 8;
+export function validateLoginId(id, nick = null) {
+  const s = normLoginId(id);
+  if (!LOGIN_ID_RE.test(s)) return '아이디는 4~20자 (영문 소문자로 시작, 영문·숫자·_)';
+  if (nick != null && s === String(nick).trim().toLowerCase()) return '아이디는 별명과 다르게 정하세요 (별명은 랭킹에 공개됩니다)';
+  return null;
+}
+/** 비밀번호: 8~64자, 영문과 숫자를 함께. 아이디·별명이 들어가면 안 됨 */
+export function validatePassword(pw, { id = null, nick = null } = {}) {
+  const s = String(pw ?? '');
+  if (s.length < PW_MIN || s.length > 64) return '비밀번호는 8~64자';
+  if (!/[A-Za-z]/.test(s) || !/\d/.test(s)) return '비밀번호에 영문과 숫자를 함께 넣으세요';
+  const low = s.toLowerCase(), lid = normLoginId(id), ln = String(nick ?? '').trim().toLowerCase();
+  if ((lid && low.includes(lid)) || (ln.length >= 4 && low.includes(ln))) return '비밀번호에 아이디나 별명을 넣지 마세요';
+  return null;
+}
+export const BAD_LOGIN_MSG = '아이디 또는 비밀번호가 맞지 않습니다';
+export const USE_ID_MSG = '이제 아이디로 로그인하세요 (아이디를 잊었으면 운영자에게 문의하세요)';
+export const ID_TAKEN = '이미 사용 중인 아이디입니다';
 /** 운영자처럼 보이는 별명은 쓸 수 없음 (firestore.rules 의 validNick 과 같은 목록) */
 export const RESERVED_NICK_RE = /(운영자|관리자|admin|official|퍽 ?트레이너|puck ?trainer)/i;
 /** 운영자 비밀번호: 12~64자 (숫자만 써도 됨). 같은 글자 반복·1234567890 으로 시작하는 것은 안 됨 */
@@ -198,6 +224,38 @@ export function validateFeedback({ good, fix } = {}) {
 export const STICKS = ['L', 'R'];
 export const stickLabel = (s) => (s === 'L' ? '레프트' : s === 'R' ? '라이트' : '');
 
+// ---- 랭킹 기록 쓰기 줄이기: 최고 기록이 오를 때만 쓰고, 판수는 모아서 ----
+// 최고 기록을 못 넘은 판은 기록 문서를 쓰지 않고 판수만 기기에 모아 둔다.
+// 모인 판수는 다음 최고 기록 때 함께, 또는 PLAYS_FLUSH 판이 모이면, 또는 화면을 떠날 때·로그아웃할 때 한 번에 쓴다.
+export const PLAYS_FLUSH = 10;
+/** 한 번에 더할 수 있는 판수 (firestore.rules scoreOk 와 같음) */
+export const PLAYS_STEP_MAX = 50;
+/** 기기에 모아 둔 판수: { uid: { 랭킹 키: 판수 } } (storage = localStorage) */
+export class PendingPlays {
+  constructor(storage = globalThis.localStorage, key = 'puck-trainer.pending-plays.v1') { this.storage = storage; this.key = key; }
+  _all() { try { const v = this.storage?.getItem(this.key); return v ? JSON.parse(v) || {} : {}; } catch { return {}; } }
+  _save(all) { try { this.storage?.setItem(this.key, JSON.stringify(all)); } catch { /* 저장 불가: 판수 몇 판이 빠질 뿐 */ } }
+  get(uid, mode) { const n = this._all()[uid]?.[mode]; return Number.isInteger(n) && n > 0 ? n : 0; }
+  /** 이 계정에 모인 { 랭킹 키: 판수 } */
+  of(uid) { const m = this._all()[uid] || {}; return Object.fromEntries(Object.entries(m).filter(([, n]) => Number.isInteger(n) && n > 0)); }
+  add(uid, mode, n = 1) {
+    const all = this._all();
+    const m = (all[uid] ||= {});
+    m[mode] = this.get(uid, mode) + n;
+    this._save(all);
+    return m[mode];
+  }
+  /** n 판을 덜어 낸다 (쓰기에 성공한 뒤) */
+  take(uid, mode, n) {
+    const all = this._all(), left = this.get(uid, mode) - n;
+    if (!all[uid]) return 0;
+    if (left > 0) all[uid][mode] = left; else delete all[uid][mode];
+    if (!Object.keys(all[uid]).length) delete all[uid];
+    this._save(all);
+    return Math.max(0, left);
+  }
+}
+
 // ---- 순위 색인 (온라인 랭킹의 읽기를 아끼려고 순위를 Firestore count 쿼리로 센다) ----
 // 연령대·국가·팀 안의 순위는 기록 문서의 색인 칸(ags·cts·tms = '묶음|10자리 점수')의 범위로 센다.
 // 칸 하나의 범위만 쓰므로 복합 색인 없이 Firestore 기본 색인으로 된다. 규칙(firestore.rules rankIdxOk)과 같은 모양.
@@ -236,10 +294,16 @@ export function rankSummaryOf(rows, u) {
   return world ? { world, country: u.country ? pos({ country: u.country }) : null, team: u.team ? pos({ team: u.team }) : null } : null;
 }
 
-export function validateProfile({ nick, pin, country, team, age, number, stick }) {
+/** 가입 값 확인: 아이디·비밀번호(로그인용)와 별명(랭킹에 공개)은 따로 */
+export function validateProfile({ loginId, password, nick, country, team, age, number, stick }) {
+  const idErr = validateLoginId(loginId);
+  if (idErr) return idErr;
   if (!NICK_RE.test(String(nick || '').trim())) return '별명은 2~12자 (한글·영문·숫자·_-.)';
   if (RESERVED_NICK_RE.test(String(nick).trim())) return '쓸 수 없는 별명입니다 (운영자로 보이는 이름)';
-  if (!PIN_RE.test(String(pin || ''))) return '비밀번호는 숫자 6자리';
+  const sameErr = validateLoginId(loginId, nick);
+  if (sameErr) return sameErr;
+  const pwErr = validatePassword(password, { id: loginId, nick });
+  if (pwErr) return pwErr;
   if (!country) return '국가를 선택하세요';
   if (!String(team || '').trim() || String(team).trim().length > 20) return '팀 이름은 1~20자';
   const a = Number(age);
@@ -278,9 +342,20 @@ export class LocalAccountStore {
     this.ACTIVITY = 'puck-trainer.activity.v1'; // { uid: 활동 기록 } 출석·최근 기록·누적 (activity.js)
     this.LOTTERY = 'puck-trainer.lottery.v1';   // { at, until, winners: [{ id, nick, memberNo }] } 의견 추첨
     this.user = null;
+    this.upgrade = null; // 예전 계정(별명 + 숫자 6자리)으로 로그인해 아이디를 아직 만들지 않음: { id, nick, admin }
     const nick = this._get(this.SESSION, null);
-    if (nick) { const u = this._users()[normNick(nick)]; if (u) this.user = this._public(u); }
+    if (nick) { const u = this._users()[normNick(nick)]; if (u) this._signIn(u); }
   }
+  /** 로그인 상태로: 아이디가 없는 예전 계정은 아이디·새 비밀번호를 만들 때까지 로그인 전으로 둔다 */
+  _signIn(u) {
+    if (u.loginId) { this.upgrade = null; this.user = this._public(u); this._set(this.SESSION, u.nick); return this.user; }
+    this.user = null;
+    this.upgrade = { id: u.id, nick: u.nick, admin: ADMIN_NICKS.includes(normNick(u.nick)) };
+    try { this.storage.removeItem(this.SESSION); } catch { /* ignore */ }
+    return null;
+  }
+  /** 예전 계정이 아이디를 만들어야 하면 { nick, admin }, 아니면 null */
+  needsUpgrade() { return this.upgrade; }
 
   _get(k, def) { try { const v = this.storage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } }
   _set(k, v) { try { this.storage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } }
@@ -289,7 +364,7 @@ export class LocalAccountStore {
   _codes() { return this._get(this.CODES, {}); }
   _public(u) {
     return {
-      id: u.id, nick: u.nick, number: Number.isInteger(u.number) ? u.number : null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup,
+      id: u.id, loginId: u.loginId || null, nick: u.nick, number: Number.isInteger(u.number) ? u.number : null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup,
       stick: STICKS.includes(u.stick) ? u.stick : null, joinedAt: u.joinedAt || u.createdAt || null,
       memberNo: Number.isInteger(u.memberNo) ? u.memberNo : null, beta: !!u.beta, code: u.code || null, via: u.via || null,
       kept: !!u.kept, feedbackAt: this._get(this.FEEDBACK, {})[u.id]?.at ?? null,
@@ -338,14 +413,17 @@ export class LocalAccountStore {
     return codeInfo(code, c, Date.now(), end);
   }
 
-  async register({ nick, pin, country, team, age, number, code, stick }) {
-    const err = validateProfile({ nick, pin, country, team, age, number, stick });
+  _byLoginId(users, lid) { return Object.values(users).find((u) => u.loginId === lid) || null; }
+
+  async register({ loginId, password, nick, country, team, age, number, code, stick }) {
+    const err = validateProfile({ loginId, password, nick, country, team, age, number, stick });
     if (err) throw new Error(err);
     const ckey = normCode(code);
     if (!ckey) throw new Error(codeError('none'));
     if (!CODE_RE.test(ckey)) throw new Error(codeError('format'));
     const users = this._users();
-    const key = normNick(nick);
+    const key = normNick(nick), lid = normLoginId(loginId);
+    if (this._byLoginId(users, lid)) throw new Error(ID_TAKEN);
     if (users[key]) throw new Error('이미 사용 중인 별명입니다');
     const codes = this._codes();
     const c = codes[ckey] || null;
@@ -357,16 +435,14 @@ export class LocalAccountStore {
     c.uses = (c.uses || 0) + 1; c.lastAt = Date.now();
     const now = Date.now();
     const u = {
-      id: key, nick: String(nick).trim(), number: jerseyOf(number), pinHash: await hashPin(nick, pin), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), stick, createdAt: now,
+      id: key, loginId: lid, nick: String(nick).trim(), number: jerseyOf(number), pinHash: await hashPin(nick, password), country, team: String(team).trim(), age: Number(age), ageGroup: ageGroupOf(age), stick, createdAt: now,
       code: ckey, via: c.type, beta: c.type === 'beta', memberNo: meta.count, joinedAt: now,
     };
     users[key] = u;
     this._set(this.CODES, codes);
     this._set(this.META, meta);
     this._set(this.USERS, users);
-    this._set(this.SESSION, u.nick);
-    this.user = this._public(u);
-    return this.user;
+    return this._signIn(u);
   }
 
   // ---- 운영자 ----
@@ -514,17 +590,41 @@ export class LocalAccountStore {
   async getLottery() { return this._get(this.LOTTERY, null); }
   async saveLottery(data) { this._needAdmin(); this._set(this.LOTTERY, data); return data; }
 
-  async login(nick, pin) {
+  /**
+   * 로그인: 아이디 + 비밀번호. 아이디가 없는 예전 계정은 별명 + 숫자 6자리로 들어온 뒤 아이디·새 비밀번호를 만든다
+   * (그때까지 current() 는 null, needsUpgrade() 가 { nick }). 아이디를 만든 계정은 별명으로 들어올 수 없다
+   */
+  async login(id, password) {
     const users = this._users();
-    const u = users[normNick(nick)];
-    if (!u) throw new Error('등록되지 않은 별명입니다');
-    if (u.pinHash !== await hashPin(nick, pin)) throw new Error('비밀번호가 맞지 않습니다');
-    this._set(this.SESSION, u.nick);
-    this.user = this._public(u);
-    return this.user;
+    const byId = this._byLoginId(users, normLoginId(id));
+    if (byId) {
+      if (byId.pinHash !== await hashPin(byId.nick, password)) throw new Error(BAD_LOGIN_MSG);
+      return this._signIn(byId);
+    }
+    const old = users[normNick(id)];
+    if (!old || old.pinHash !== await hashPin(old.nick, password)) throw new Error(BAD_LOGIN_MSG);
+    // 아이디가 있는 계정: 예전 계정에서 옮긴 것이면 아이디로 로그인하라고 알리고, 처음부터 아이디로 가입한 계정은 별명으로 찾지 않는다 (온라인 저장소와 같음)
+    if (old.loginId) throw new Error(old.fromNick ? USE_ID_MSG : BAD_LOGIN_MSG);
+    return this._signIn(old);
   }
 
-  logout() { this.user = null; try { this.storage.removeItem(this.SESSION); } catch { /* ignore */ } }
+  /** 예전 계정: 아이디와 새 비밀번호 만들기 (별명 + 예전 비밀번호로 로그인한 뒤 한 번) */
+  async upgradeLogin(loginId, password) {
+    const up = this.upgrade;
+    if (!up) throw new Error('먼저 별명과 예전 비밀번호로 로그인하세요');
+    const err = validateLoginId(loginId, up.nick) || validatePassword(password, { id: loginId, nick: up.nick }) || (up.admin ? validateStrongPassword(password) : null);
+    if (err) throw new Error(err);
+    const users = this._users(), lid = normLoginId(loginId);
+    if (this._byLoginId(users, lid)) throw new Error(ID_TAKEN);
+    const u = users[up.id];
+    u.loginId = lid;
+    u.fromNick = true; // 예전 별명 계정에서 옮김
+    u.pinHash = await hashPin(u.nick, password);
+    this._set(this.USERS, users);
+    return this._signIn(u);
+  }
+
+  logout() { this.user = null; this.upgrade = null; try { this.storage.removeItem(this.SESSION); } catch { /* ignore */ } }
 
   /** 비밀번호 바꾸기 (운영자 화면): 지금 비밀번호를 확인하고 새 비밀번호(12자 이상)로 */
   async changePassword(current, next) {
@@ -553,7 +653,10 @@ export class LocalAccountStore {
     return this.user;
   }
 
-  /** 모드별 최고 기록만 유지. 반환: { best, improved, entry } */
+  /** 모아 둔 판수 쓰기 (기기 내 저장소는 판마다 바로 쓰므로 할 일 없음) */
+  async flushPlays() { return 0; }
+
+  /** 모드별 최고 기록만 유지 (기기 안이라 쓰기 비용이 없어 판수도 판마다 바로 더함). 반환: { best, improved, entry } */
   async submitScore(mode, score) {
     if (!this.user) throw new Error('로그인이 필요합니다');
     if (!isActiveMember(this.memberState())) throw new Error(LAPSED);

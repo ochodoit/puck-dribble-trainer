@@ -507,18 +507,54 @@ const skipSetup = async (page, touch = false) => {
     calOn: document.querySelectorAll('#mm-cal td.on').length, bars: document.querySelectorAll('#mm-chart rect').length, modes: document.querySelector('#mm-modes').textContent,
     scores: document.querySelectorAll('#mm-scores tr').length, spark: !!document.querySelector('#mm-scores svg.spark'),
   }));
+  await page.waitForSelector('#mm-ability .ab-card');
+  const mmAb = await page.evaluate(() => { const b = document.querySelector('#mm-ability'); return { hex: !!b.querySelector('svg.ab-hex'), cur: !!b.querySelector('polygon.ab-cur'), top: !!b.querySelector('polygon.ab-top'), rows: b.querySelectorAll('.ab-table tbody tr').length, text: b.textContent }; });
   await page.click('#mm-back');
   const backToList = await page.evaluate(() => document.querySelector('#panel-member').classList.contains('hidden') && !document.querySelector('#panel-members').classList.contains('hidden'));
   await page.click('[data-close="panel-members"]'); await page.click('[data-close="panel-admin"]');
   const memOk = allNicks.length === 2 && byTeam.join() === '번개손' && byState.join() === 'test123' && byAct.includes('번개손') && memSum.includes('오늘 출석')
     && mm.card.includes('번개손') && mm.att.includes('최근 30일 출석률') && /\d+%/.test(mm.att) && mm.totals.includes('3판') && mm.totals.includes('7분') && mm.totals.includes('훈련한 날')
-    && mm.calOn >= 1 && mm.bars === 28 && mm.modes.includes('게임별 판 수') && mm.scores >= 1 && mm.spark && backToList;
-  console.log(`${memOk ? 'PASS' : 'FAIL'} operator members: filter by team/status/activity, click a member -> record window (attendance rate, calendar, training time, 28-day chart, game records), back to list (${JSON.stringify({ allNicks, byTeam, byState, byAct, mm, backToList })})`);
+    && mm.calOn >= 1 && mm.bars === 28 && mm.modes.includes('게임별 판 수') && mm.scores >= 1 && mm.spark && backToList
+    && mmAb.hex && mmAb.cur && mmAb.top && mmAb.rows === 6 && mmAb.text.includes('센스') && mmAb.text.includes('종합');
+  console.log(`${memOk ? 'PASS' : 'FAIL'} operator members: filter by team/status/activity, click a member -> record window (stats hexagon, attendance rate, calendar, training time, 28-day chart, game records), back to list (${JSON.stringify({ allNicks, byTeam, byState, byAct, mm, mmAb: { ...mmAb, text: mmAb.text.slice(0, 80) }, backToList })})`);
   if (!memOk) failed = true;
+  // 능력치 (ability.js): 월별 최고 기록 저장(13달), 나이대 1등 = 100, 상위 10% 선, 지난달 대비, 이번 달 기록이 없으면 지난 기록을 이어서
+  const ab = await page.evaluate(async () => {
+    const A = await import('/src/ability.js'), V = await import('/src/activity.js');
+    const now = new Date(2026, 10, 19, 12).getTime(), oct = new Date(2026, 9, 5, 12).getTime(), sep = new Date(2026, 8, 5, 12).getTime();
+    let act = V.addActivity({ uid: 'x' }, { key: 'quick', score: 40, sec: 20, mode: 'quick' }, oct);
+    act = V.addActivity(act, { key: 'quick', score: 30, sec: 20, mode: 'quick' }, oct);
+    for (const [key, score] of [['quick', 50], ['arcade@60', 30], ['arcade@180', 80], ['arcade@60-hard', 99]]) act = V.addActivity(act, { key, score, sec: 60, mode: key.split('@')[0] }, now);
+    const stored = V.cleanActivity(act, 'x').totals.months;
+    const mk = (i) => { const d = new Date(2025, i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+    const trimmed = Object.keys(V.cleanActivity({ totals: { months: Object.fromEntries(Array.from({ length: 15 }, (_, i) => [mk(i), { quick: i }])) } }, 'y').totals.months).sort();
+    const months = A.monthBests(act, [{ mode: 'reaction', score: 12, at: sep }]);
+    const refs = { quick: { scope: 'group', total: 10, top: 100, top10: 80 }, 'arcade@60': { scope: 'group', total: 8, top: 60, top10: 45 }, 'arcade@180': { scope: 'group', total: 2, top: 100, top10: 100 },
+      reaction: { scope: 'all', total: 3, top: 24, top10: 24 }, 'wide@60': null, 'obstacle@60': { scope: 'group', total: 6, top: 500, top10: 400 }, figure8: null };
+    const res = A.computeAbilities(months, refs, now), by = Object.fromEntries(res.list.map((x) => [x.id, x]));
+    const pick = (x) => ({ key: x.key, value: x.value, prev: x.prev, delta: x.delta, top10: x.top10, carried: x.carried, scope: x.scope });
+    return { stored, trimmed: [trimmed.length, trimmed[0]], keys: A.abilityKeys(months, now).sort(), speed: pick(by.speed), sense: pick(by.sense), react: pick(by.react), vision: pick(by.vision), control: pick(by.control),
+      ovr: res.ovr, delta: res.delta, top10Ovr: res.top10Ovr, weakest: res.weakest?.id, ref: A.refOf([90, 80, 70, 60, 50], 25, 'group'), order: res.list.map((x) => x.mode).join() };
+  });
+  const abOk = JSON.stringify(Object.fromEntries(Object.entries(ab.stored).sort())) === JSON.stringify({ '2026-10': { quick: 40 }, '2026-11': { quick: 50, 'arcade@60': 30, 'arcade@180': 80, 'arcade@60-hard': 99 } })
+    && ab.trimmed[0] === 13 && ab.trimmed[1] === '2025-03' && ab.keys.join() === 'arcade@180,arcade@60,figure8,obstacle@60,quick,reaction,wide@60'
+    && ab.speed.value === 50 && ab.speed.prev === 40 && ab.speed.delta === 10 && ab.speed.top10 === 80
+    && ab.sense.key === 'arcade@60' && ab.sense.value === 50 && ab.sense.top10 === 75 && ab.sense.prev === null && ab.sense.delta === null
+    && ab.react.value === 50 && ab.react.carried && ab.react.delta === null && ab.react.scope === 'all'
+    && ab.vision.value === null && ab.vision.key === 'obstacle@60' && ab.vision.top10 === 80 && ab.control.value === null && ab.control.top10 === null
+    && ab.ovr === 50 && ab.delta === 10 && ab.top10Ovr === 84 && ab.weakest === 'control' && ab.ref.top === 90 && ab.ref.top10 === 70
+    && ab.order === 'quick,reaction,figure8,wide,obstacle,arcade';
+  console.log(`${abOk ? 'PASS' : 'FAIL'} stats hexagon math: monthly bests kept 13 months, age-group #1 = 100, top-10% line, change vs last month, earlier record carried when this month has none (${JSON.stringify(ab)})`);
+  if (!abOk) failed = true;
   // 내 정보 > 친구 초대: 내 초대 링크(3명) -> 다른 탭에서 그 링크로 들어오면 '○○님의 초대 링크예요' + 가입하면 바로 정회원
   await page.click('#btn-me');
   await page.waitForFunction(() => document.querySelector('#me-invite input')?.value.includes('?c='));
   const myInv = await page.evaluate(() => ({ text: document.querySelector('#me-invite').textContent, link: document.querySelector('#me-invite input').value }));
+  await page.waitForSelector('#me-ability .ab-card');
+  const meAb = await page.evaluate(() => ({ hex: !!document.querySelector('#me-ability svg.ab-hex'), labels: document.querySelectorAll('#me-ability svg text').length, text: document.querySelector('#me-ability').textContent.slice(0, 60) }));
+  const meAbOk = meAb.hex && meAb.labels === 6;
+  console.log(`${meAbOk ? 'PASS' : 'FAIL'} My info shows the stats hexagon card (${JSON.stringify(meAb)})`);
+  if (!meAbOk) failed = true;
   await page.click('[data-close="panel-me"]');
   const p2 = await context.newPage();
   await p2.goto(`${base}/index.html`);

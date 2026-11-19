@@ -4,6 +4,7 @@
 import { memberRows, memberDetail, filterMembers, sortMembers, membersSummary, teamsOf } from './stats.js';
 import { monthGrid, dayKey, sparkPoints, hoursMinutes, keyInfo } from './activity.js';
 import { gameKeyTools } from './me-ui.js';
+import { renderAbility } from './ability-ui.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { beta: '베타 기간', kept: '유지', coupon: '이용권', lapsed: '종료' };
@@ -217,6 +218,7 @@ export function initMembers(deps) {
     let best = [];
     try { best = await app.account.memberScores(uid, [...KEYS, ...extra]); } catch { best = []; }
     if (view.uid !== uid) return; // 그새 다른 회원을 열었음
+    renderAbility($('#mm-ability'), { store: app.account, act: view.data.byUid.get(uid), best, ageGroup: view.detail.u.ageGroup, esc, tr, gameName: modeName });
     const keys = [...new Set([...best.map((b) => b.mode), ...Object.keys(recent)])].filter((k) => keyInfo(k).modeId !== 'free').sort((a, b) => keyOrder(a) - keyOrder(b));
     body.innerHTML = keys.length ? keys.map((k) => {
       const b = best.find((x) => x.mode === k), vals = (recent[k] || []).map((x) => x.s);

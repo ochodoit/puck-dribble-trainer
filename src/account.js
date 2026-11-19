@@ -2,6 +2,7 @@
 // 로그인: 아이디 + 비밀번호(8자 이상, 영문+숫자). 랭킹에 보이는 이름은 따로 정하는 별명. 프로필: 국가, 팀 이름, 나이(연령대 자동 계산).
 
 import { cleanActivity, addActivity } from './activity.js';
+import { refOf, ABILITY_MIN_GROUP } from './ability.js';
 
 export const COUNTRIES = [
   ['KR', '🇰🇷 대한민국'], ['US', '🇺🇸 미국'], ['CA', '🇨🇦 캐나다'], ['JP', '🇯🇵 일본'], ['CN', '🇨🇳 중국'],
@@ -745,6 +746,17 @@ export class LocalAccountStore {
   }
   /** 이 게임에서 내 순위: { world, country, team } 각 { rank, total } */
   async rankSummary(mode) { return rankSummaryOf(await this.leaderboard(mode, {}, 100000), this.user); }
+  /** 능력치 기준 (ability.js): 이 게임 나이대 1등·상위 10% 점수. 나이대 기록이 적으면 전체 기준 */
+  async abilityRef(mode, ageGroup) {
+    let rows = ageGroup ? await this.leaderboard(mode, { ageGroup }, 100000) : [], scope = 'group';
+    if (rows.length < ABILITY_MIN_GROUP) { rows = await this.leaderboard(mode, {}, 100000); scope = 'all'; }
+    return refOf(rows.map((r) => r.score), rows.length, scope);
+  }
+  /** 이 점수가 그 기준(나이대 또는 전체) 안에서 몇 위인지 (같은 점수는 같은 순위) */
+  async abilityRank(mode, score, ageGroup, scope = 'group') {
+    const rows = await this.leaderboard(mode, scope === 'group' && ageGroup ? { ageGroup } : {}, 100000);
+    return rows.filter((r) => r.score > score).length + 1;
+  }
   async getActivity() { return this.user ? cleanActivity(this._get(this.ACTIVITY, {})[this.user.id], this.user.id) : null; }
   /** 활동 더하기 (entry 가 없으면 오늘 출석만). activity.js 의 addActivity */
   async recordActivity(entry = null) {

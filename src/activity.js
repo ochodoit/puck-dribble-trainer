@@ -2,11 +2,15 @@
 // 활동 기록 한 사람당 하나:
 //   { uid, days: { 'YYYY-MM-DD': { n: 판 수, s: 훈련 초 } }, totals: { games, sec, dist(m), touches, modes: { 모드 id: 판 수 } },
 //     recent: { 랭킹 키: [{ s: 점수, at: ms }, … 최근 RECENT_MAX 판] }, updatedAt }
+//   totals.months: { 'YYYY-MM': { 랭킹 키: 그 달 최고 점수 } } — 능력치(ability.js)의 이번 달·지난달 비교용. 최근 MONTHS_MAX 달만.
+//     (activity 규칙이 최상위 칸을 정해 두어서 totals 안에 둔다: 규칙을 바꾸지 않아도 된다)
 // 출석 = 그날 로그인한 채로 플레이 화면을 연 날 (days 에 그날 키가 있음)
 
 export const RECENT_MAX = 10;     // 게임별 최근 기록 개수
 export const DAYS_MAX = 3650;     // 출석 기록은 최근 10년까지만 남김
 export const RECENT_KEYS_MAX = 40; // 최근 기록을 남기는 게임(랭킹 키) 수 상한
+export const MONTHS_MAX = 13;      // 월별 최고 기록은 최근 13달까지
+const KEY_RE = /^[a-z0-9@-]{2,32}$/; // 랭킹 키
 const MODE_RE = /^[a-z0-9]{2,16}$/;  // totals.modes 의 모드 id
 
 /** 이 기기 시간대 기준 날짜 키: 'YYYY-MM-DD' */
@@ -31,8 +35,13 @@ export function cleanActivity(raw, uid) {
   const t = raw.totals || {};
   a.totals = { games: Math.floor(num(t.games)), sec: Math.round(num(t.sec)), dist: num(t.dist), touches: Math.floor(num(t.touches)), modes: {} };
   for (const [k, v] of Object.entries(t.modes && typeof t.modes === 'object' ? t.modes : {}).slice(0, 20)) if (MODE_RE.test(k) && num(v) > 0) a.totals.modes[k] = Math.floor(num(v));
+  const months = Object.entries(t.months && typeof t.months === 'object' ? t.months : {}).filter(([mk, v]) => /^\d{4}-\d{2}$/.test(mk) && v && typeof v === 'object');
+  for (const [mk, v] of months.sort(([x], [y]) => (x < y ? 1 : -1)).slice(0, MONTHS_MAX)) {
+    const keep = Object.entries(v).filter(([k, s]) => KEY_RE.test(k) && Number.isFinite(s)).slice(0, RECENT_KEYS_MAX);
+    if (keep.length) (a.totals.months ||= {})[mk] = Object.fromEntries(keep);
+  }
   for (const [k, list] of Object.entries(raw.recent || {})) {
-    if (!/^[a-z0-9@-]{2,32}$/.test(k) || !Array.isArray(list)) continue;
+    if (!KEY_RE.test(k) || !Array.isArray(list)) continue;
     const rows = list.filter((r) => r && Number.isFinite(r.s) && Number.isFinite(r.at)).map((r) => ({ s: r.s, at: r.at })).slice(-RECENT_MAX);
     if (rows.length) a.recent[k] = rows;
   }
@@ -58,6 +67,11 @@ export function addActivity(act, entry = null, now = Date.now()) {
     if (entry.key && Number.isFinite(entry.score)) {
       const list = a.recent[entry.key] || (a.recent[entry.key] = []);
       list.push({ s: entry.score, at: now });
+      // 이 달 최고 기록 (능력치의 이번 달·지난달 비교)
+      const mk = day.slice(0, 7), month = ((a.totals.months ||= {})[mk] ||= {});
+      if (!(entry.key in month) || entry.score > month[entry.key]) month[entry.key] = entry.score;
+      const mks = Object.keys(a.totals.months).sort();
+      mks.slice(0, Math.max(0, mks.length - MONTHS_MAX)).forEach((m) => delete a.totals.months[m]);
       if (list.length > RECENT_MAX) list.splice(0, list.length - RECENT_MAX);
       const keys = Object.keys(a.recent);
       if (keys.length > RECENT_KEYS_MAX) { // 가장 오래 안 한 게임부터 정리

@@ -18,6 +18,7 @@ import {
   PendingPlays, PLAYS_FLUSH, PLAYS_STEP_MAX,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
+import { refOf, ABILITY_MIN_GROUP, TOP_SHARE } from './ability.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
 const normNick = (n) => String(n).trim().toLowerCase();
@@ -27,6 +28,7 @@ const nickLocal = (nick) => `u-${[...new TextEncoder().encode(normNick(nick))].m
 const LEGACY_DOMAIN = 'puck-trainer.app';
 /** 리더보드를 다시 읽지 않는 시간 (랭킹 화면에서 조건을 바꿔 보는 동안) */
 const BOARD_TTL = 60 * 1000;
+const REF_TTL = 10 * 60 * 1000; // 능력치 기준(나이대 1등·상위 10%)은 10분 동안 다시 읽지 않음
 const BAD_LOGIN = ['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong-password', 'auth/invalid-login-credentials', 'auth/invalid-email'];
 
 export class FirebaseAccountStore {
@@ -507,6 +509,27 @@ export class FirebaseAccountStore {
     const part = async (k) => (u[k] && matches(mine, { [k]: u[k] }) ? { rank: (await this._above(mode, mine.score, k, u[k])) + 1 } : null);
     const [above, total, country, team] = await Promise.all([this._above(mode, mine.score), this._total(mode), part('country'), part('team')]);
     return { world: { rank: above + 1, total: Math.max(total, above + 1) }, country, team };
+  }
+  /**
+   * 능력치 기준 (ability.js): 이 게임 나이대 1등·상위 10% 점수. 나이대 기록이 적으면 전체 기준.
+   * 읽기: 기록 수 1~2 + 상위 10% 만큼 (10분 동안은 다시 읽지 않음)
+   */
+  async abilityRef(mode, ageGroup) {
+    const ck = `${mode}|${ageGroup || ''}`, hit = (this._refs ||= new Map()).get(ck);
+    if (hit && Date.now() - hit.at < REF_TTL) return hit.ref;
+    let scope = 'group', total = ageGroup ? await this._total(mode, 'ageGroup', ageGroup) : 0;
+    if (total < ABILITY_MIN_GROUP) { scope = 'all'; total = await this._total(mode); }
+    let ref = null;
+    if (total) {
+      const rows = await this.leaderboard(mode, scope === 'group' ? { ageGroup } : {}, Math.max(1, Math.ceil(total * TOP_SHARE)));
+      ref = refOf(rows.map((r) => r.score), total, scope);
+    }
+    this._refs.set(ck, { at: Date.now(), ref });
+    return ref;
+  }
+  /** 이 점수가 그 기준(나이대 또는 전체) 안에서 몇 위인지 (같은 점수는 같은 순위) */
+  async abilityRank(mode, score, ageGroup, scope = 'group') {
+    return (await (scope === 'group' && ageGroup ? this._above(mode, score, 'ageGroup', ageGroup) : this._above(mode, score))) + 1;
   }
   async getActivity() {
     if (!this.user) return null;

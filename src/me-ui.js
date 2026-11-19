@@ -1,6 +1,7 @@
 // 내 정보 화면: 프로필(수정)·회원 등급, 친구 초대(내 초대 코드 3명), 출석 달력, 누적 훈련, 게임별 기록(최고·플레이 수·순위·최근 10판), 커뮤니티 활동.
 // 데이터는 계정 저장소(account.js / account-firebase.js)의 getActivity·myScores·rankSummary 와 커뮤니티 저장소에서.
 import { attendanceSummary, monthGrid, dayKey, keyInfo, sparkPoints, hoursMinutes } from './activity.js';
+import { renderAbility } from './ability-ui.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
@@ -36,6 +37,7 @@ export function initMe(deps) {
   const ymd = (ms) => dayKey(ms).replace(/-/g, '.');
 
   const { KEYS, keyLabel, keyOrder } = gameKeyTools(deps);
+  const gameName = (id) => deps.MODES.find((m) => m.id === id)?.name || id;
 
   // 프로필 수정 칸 (국가 목록·스틱 버튼)
   const sel = $('#me-country');
@@ -186,6 +188,8 @@ export function initMe(deps) {
     // 쉬움·어려움 기록은 해 본 게임만 읽는다 (최근 기록에 있는 키). 모든 난이도를 늘 읽으면 읽기 수가 두 배가 된다
     const extra = Object.keys(recent).filter((k) => !KEYS.includes(k) && keyInfo(k).level !== 'normal' && deps.MODES.some((m) => m.id === keyInfo(k).modeId && m.levels));
     try { best = await app.account.myScores([...KEYS, ...extra]); } catch { best = []; }
+    // 능력치 육각형 (이번 달·지난달·나이대 상위 10%)
+    renderAbility($('#me-ability'), { store: app.account, act: view.act, best, ageGroup: app.account.current()?.ageGroup, esc, tr, gameName });
     const keys = [...new Set([...best.map((b) => b.mode), ...Object.keys(recent)])].filter((k) => keyInfo(k).modeId !== 'free').sort((a, b) => keyOrder(a) - keyOrder(b));
     if (!keys.length) { body.innerHTML = '<tr><td colspan="5" class="muted">아직 기록이 없습니다. 게임을 끝까지 하면 여기에 쌓입니다</td></tr>'; return; }
     body.innerHTML = keys.map((k) => {

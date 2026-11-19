@@ -112,6 +112,26 @@ export async function checkRanks() {
   check('R8 an old score doc gets its rank index when its owner opens My info, then counts in group ranks',
     dDoc.ags === 'U12|1000000300' && dDoc.tms === 'hawks|1000000300' && dDoc.plays === 1 && dAge.rank === 4 && dAge.total === 4, { dAge });
 
+  // 능력치 기준: 나이대 기록이 5개보다 적으면 전체 1등 기준, 5개 이상이면 그 나이대 1등·상위 10%(기록 수 × 0.1 번째). 10분 동안 다시 읽지 않음
+  {
+    const putQ = (uid, score, ageGroup) => { const d = { uid, nick: uid, number: null, country: 'KR', team: 'T', age: 11, ageGroup, mode: 'quick', score, at: 1, plays: 1, t: 'x' }; F.docs.set(`scores_quick/${uid}`, { ...d, ...rankIdxFields(d) }); };
+    putQ('q0', 90, '성인');
+    [60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10].forEach((s, i) => putQ(`q${i + 1}`, s, 'U12'));
+    const sa = storeFor(me);
+    F.reads = 0;
+    const all = await sa.abilityRef('quick', 'U8');
+    const readsAll = F.reads; F.reads = 0;
+    const grp = await sa.abilityRef('quick', 'U12');
+    const readsGrp = F.reads; F.reads = 0;
+    await sa.abilityRef('quick', 'U12');
+    const readsAgain = F.reads;
+    const rankG = await sa.abilityRank('quick', 52, 'U12', 'group'), rankA = await sa.abilityRank('quick', 52, 'U12', 'all');
+    check('R14 stats base: age group #1 = 100 and the top-10% line (fewer than 5 records -> overall), a few reads, cached; my place in the group by counting',
+      all.scope === 'all' && all.total === 12 && all.top === 90 && all.top10 === 60 && readsAll === 4
+      && grp.scope === 'group' && grp.total === 11 && grp.top === 60 && grp.top10 === 55 && readsGrp === 3 && readsAgain === 0 && rankG === 3 && rankA === 4,
+      { all, grp, readsAll, readsGrp, readsAgain, rankG, rankA });
+  }
+
   // 최고 기록이 오를 때만 기록 문서를 쓰고, 못 넘은 판의 판수는 기기에 모았다가 10판마다·다음 최고 기록 때·로그아웃할 때 한 번에 쓴다
   const mem = new Map();
   const ls = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };

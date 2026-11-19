@@ -1,13 +1,13 @@
 // 언어 전환 (한국어 ↔ English).
 // 코드와 저장 데이터는 한국어 원문을 그대로 쓰고, 화면에 나가는 경계에서만 번역한다:
-//  - DOM: 텍스트 노드와 placeholder/title/aria-label/data-label 속성을 MutationObserver로 따라가며 바꾼다
+//  - DOM: 텍스트 노드와 placeholder/title/aria-label/data-label/alt 속성을 MutationObserver로 따라가며 바꾼다
 //  - 캔버스: theme.js 의 text()/pill() 이 tr() 을 거친다
 // 사용자가 쓴 글(별명·팀·커뮤니티 글)은 data-ugc 속성 아래에 두면 번역하지 않는다.
 import { EN } from './i18n-en.js';
 
 const KEY = 'puck-trainer.lang.v1';
 const HANGUL = /[ㄱ-ㆎ가-힣]/;
-const ATTRS = ['placeholder', 'title', 'aria-label', 'data-label'];
+const ATTRS = ['placeholder', 'title', 'aria-label', 'data-label', 'alt'];
 export const LANGS = ['ko', 'en'];
 
 /** 저장된 선택이 없으면 브라우저 언어를 따른다 (한국어 브라우저 = 한국어, 그 밖 = 영어) */

@@ -43,7 +43,7 @@ export async function collectStrings() {
   let html = await readFile(join(ROOT, 'index.html'), 'utf8');
   html = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '');
   for (const m of html.matchAll(/>([^<>]+)</g)) add(m[1].replace(/\s+/g, ' '), 'index.html');
-  for (const m of html.matchAll(/(?:placeholder|aria-label|title|data-label)="([^"]+)"/g)) add(m[1], 'index.html@attr');
+  for (const m of html.matchAll(/(?:placeholder|aria-label|title|data-label|alt)="([^"]+)"/g)) add(m[1], 'index.html@attr');
   for (const f of (await readdir(join(ROOT, 'src'))).filter((x) => x.endsWith('.js') && !x.startsWith('i18n'))) {
     let code = await readFile(join(ROOT, 'src', f), 'utf8');
     code = code.replace(/\/\*[\s\S]*?\*\//g, '');

@@ -120,12 +120,12 @@ export function keyInfo(key) {
   return m ? { modeId: m[1], seconds: m[2] ? Number(m[2]) : 0, invisible: !!m[3], level: m[4] || 'normal' } : { modeId: String(key), seconds: 0, invisible: false, level: 'normal' };
 }
 
-/** 최근 점수 -> 작은 그래프(SVG polyline 점들). 값이 하나면 가운데 점 하나 */
+/** 최근 점수 -> 작은 그래프(SVG polyline 점들). 값이 하나면 오른쪽 끝(최근 자리)에 점 하나: 여러 판의 마지막 점과 같은 줄 */
 export function sparkPoints(values, w = 120, h = 28, pad = 3) {
   if (!values.length) return [];
   const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
   const step = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
-  return values.map((v, i) => [values.length > 1 ? pad + i * step : w / 2, hi === lo ? h / 2 : h - pad - ((v - lo) / span) * (h - pad * 2)]);
+  return values.map((v, i) => [values.length > 1 ? pad + i * step : w - pad, hi === lo ? h / 2 : h - pad - ((v - lo) / span) * (h - pad * 2)]);
 }
 
 /** 초 -> { h, m } (훈련 시간 표시용) */

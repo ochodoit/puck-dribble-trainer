@@ -13,7 +13,9 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" href="favicon.ico" sizes="48x48" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />
   <!-- 검색 정보: tools/build-site.mjs 가 tools/site-content.mjs 로 채운다 (직접 고치지 말 것) -->
   <!-- seo:start -->
   <title>퍽 드리블 트레이너 — 카메라로 하는 하키 스틱핸들링 훈련 게임</title>
@@ -426,7 +428,7 @@
           </select>
         </div>
         <p id="rank-me" class="muted"></p>
-        <div class="rank-table-wrap"><table class="rank-table"><thead><tr><th>#</th><th>별명</th><th>팀</th><th>국가</th><th>연령</th><th>점수</th></tr></thead><tbody id="rank-body"></tbody></table></div>
+        <div class="rank-table-wrap"><table class="rank-table rank-board"><thead><tr><th>#</th><th>별명</th><th>팀</th><th>국가</th><th>연령</th><th>점수</th></tr></thead><tbody id="rank-body"></tbody></table></div>
       </div>
     </div>
 
@@ -512,7 +514,7 @@
           </section>
           <section class="me-sec">
             <h3>게임별 기록</h3>
-            <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>게임</th><th>최고</th><th>플레이</th><th>내 순위</th><th>최근 10판</th></tr></thead><tbody id="me-scores"></tbody></table></div>
+            <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>게임</th><th class="num">최고</th><th class="num">플레이</th><th>내 순위</th><th>최근 10판</th></tr></thead><tbody id="me-scores"></tbody></table></div>
           </section>
           <section class="me-sec">
             <h3>커뮤니티 활동</h3>
@@ -686,7 +688,7 @@
         </section>
         <section class="me-sec">
           <h3>게임별 기록</h3>
-          <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>게임</th><th>최고</th><th>플레이</th><th>최근 10판</th></tr></thead><tbody id="mm-scores"></tbody></table></div>
+          <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>게임</th><th class="num">최고</th><th class="num">플레이</th><th>최근 10판</th></tr></thead><tbody id="mm-scores"></tbody></table></div>
         </section>
       </div>
     </div>

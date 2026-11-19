@@ -14,7 +14,9 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" href="favicon.ico" sizes="48x48" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png" />
   <!-- 검색 정보: tools/build-site.mjs 가 tools/site-content.mjs 로 채운다 (직접 고치지 말 것) -->
   <!-- seo:start -->
   <title>Puck Dribble Trainer — Hockey Stickhandling Game With Your Camera</title>
@@ -424,7 +426,7 @@
           </select>
         </div>
         <p id="rank-me" class="muted"></p>
-        <div class="rank-table-wrap"><table class="rank-table"><thead><tr><th>#</th><th>Nickname</th><th>Team</th><th>Country</th><th>Age group</th><th>Score</th></tr></thead><tbody id="rank-body"></tbody></table></div>
+        <div class="rank-table-wrap"><table class="rank-table rank-board"><thead><tr><th>#</th><th>Nickname</th><th>Team</th><th>Country</th><th>Age group</th><th>Score</th></tr></thead><tbody id="rank-body"></tbody></table></div>
       </div>
     </div>
 
@@ -510,7 +512,7 @@
           </section>
           <section class="me-sec">
             <h3>Records by game</h3>
-            <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>Game</th><th>Best</th><th>Plays</th><th>My rank</th><th>Last 10</th></tr></thead><tbody id="me-scores"></tbody></table></div>
+            <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>Game</th><th class="num">Best</th><th class="num">Plays</th><th>My rank</th><th>Last 10</th></tr></thead><tbody id="me-scores"></tbody></table></div>
           </section>
           <section class="me-sec">
             <h3>Community activity</h3>
@@ -684,7 +686,7 @@
         </section>
         <section class="me-sec">
           <h3>Records by game</h3>
-          <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>Game</th><th>Best</th><th>Plays</th><th>Last 10</th></tr></thead><tbody id="mm-scores"></tbody></table></div>
+          <div class="rank-table-wrap"><table class="rank-table me-table"><thead><tr><th>Game</th><th class="num">Best</th><th class="num">Plays</th><th>Last 10</th></tr></thead><tbody id="mm-scores"></tbody></table></div>
         </section>
       </div>
     </div>

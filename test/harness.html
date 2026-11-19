@@ -1109,7 +1109,7 @@
       check('I3 stored activity is sanitized', Object.keys(dirty.days).join() === '2026-01-02' && dirty.days['2026-01-02'].n === 0 && dirty.totals.games === 0 && dirty.recent['arcade@60'].length === 1 && !dirty.recent['<x>'] && dirty.uid === 'u2');
       check('I3 rank keys and sparkline', JSON.stringify(keyInfo('wide@180-inv')) === '{"modeId":"wide","seconds":180,"invisible":true,"level":"normal"}' && keyInfo('figure8').seconds === 0
         && JSON.stringify(keyInfo('arcade@60-inv-hard')) === '{"modeId":"arcade","seconds":60,"invisible":true,"level":"hard"}' && keyInfo('obstacle@180-easy').level === 'easy'
-        && sparkPoints([1, 2, 3]).length === 3 && sparkPoints([5])[0][0] === 60 && sparkPoints([]).length === 0);
+        && sparkPoints([1, 2, 3]).length === 3 && sparkPoints([5])[0][0] === 117 && sparkPoints([]).length === 0);
       const rows = [{ uid: 'a', score: 9, country: 'KR', team: 'X' }, { uid: 'me', score: 7, country: 'KR', team: 'Y' }, { uid: 'c', score: 5, country: 'US', team: 'Y' }];
       const rs = rankSummaryOf(rows, { id: 'me', country: 'KR', team: 'Y' });
       check('I4 my rank summary: overall, my country, my team', rs.world.rank === 2 && rs.world.total === 3 && rs.country.rank === 2 && rs.country.total === 2 && rs.team.rank === 1 && rs.team.total === 2

@@ -254,7 +254,7 @@ function setAuthTab(tab) {
   els.authSubmit.textContent = reg ? '가입하고 시작' : temp ? '새 비밀번호 정하기' : up ? '아이디 만들기' : '로그인';
   $('#auth-id').placeholder = up || reg ? '4~20자, 영문 소문자로 시작' : '예: puckking07';
   $('#auth-pin').setAttribute('autocomplete', reg || up ? 'new-password' : 'current-password');
-  $('#auth-pin').placeholder = up ? (pend?.admin ? '새 비밀번호 (12자 이상, 영문+숫자)' : '새 비밀번호 (8자 이상, 영문+숫자)') : reg ? '8자 이상, 영문+숫자' : '';
+  $('#auth-pin').placeholder = up ? (pend?.admin ? '새 비밀번호 (12자 이상, 영문+숫자)' : '새 비밀번호 (8자 이상, 영문+숫자)') : reg ? '8자 이상, 영문+숫자' : '영문·숫자 비밀번호';
   els.authError.classList.add('hidden');
 }
 

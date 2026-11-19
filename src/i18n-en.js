@@ -91,6 +91,7 @@ export const EN = {
   '비밀번호를 한 번 더': 'Password again',
   '예: puckking07': 'e.g. puckking07',
   '8자 이상, 영문+숫자': '8+ characters, letters + numbers',
+  '영문·숫자 비밀번호': 'Letters and numbers',
   '4~20자, 영문 소문자로 시작': '4–20 characters, start with a lowercase letter',
   '새 비밀번호 (8자 이상, 영문+숫자)': 'New password (8+ characters, letters + numbers)',
   '아이디 만들기': 'Create ID',

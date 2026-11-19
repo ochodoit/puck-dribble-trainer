@@ -30,7 +30,7 @@ jobs:
       - name: Collect site files
         run: |
           mkdir -p _site
-          cp -r index.html style.css manifest.webmanifest src icons _site/
+          cp -r index.html favicon.ico style.css manifest.webmanifest src icons _site/
           # 검색엔진·AI 검색용 (tools/build-site.mjs 로 만든 파일): 영어 첫 화면, 안내 페이지, 사이트맵 등
           cp -r en guide games faq pages.css robots.txt sitemap.xml llms.txt 404.html google3d8a4c89a20c8fb9.html _site/
           touch _site/.nojekyll

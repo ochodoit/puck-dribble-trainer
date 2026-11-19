@@ -1,7 +1,7 @@
 // 운영자 통계: 회원·출석·플레이를 한눈에 (회원 목록 + 활동 기록으로 계산). 화면 없는 순수 계산만.
 // 계정이 없는 게스트의 플레이와 방문자 수는 여기서 셀 수 없다 -> Google 애널리틱스(analytics.js)에서 본다.
 import { dayKey, cleanActivity, attendanceSummary } from './activity.js';
-import { isBetaUser, AGE_GROUPS, betaState } from './account.js';
+import { isBetaUser, AGE_GROUPS, betaState, toMs } from './account.js';
 
 /** 오늘까지 최근 n일의 날짜 키 (오래된 날부터, 이 기기 시간대) */
 export function lastDays(n, now = Date.now()) {
@@ -51,6 +51,42 @@ const noonOf = (key) => { const [y, m, d] = key.split('-').map(Number); return n
 export const daysBetween = (a, b) => Math.round((noonOf(b) - noonOf(a)) / DAY) + 1;
 const pct = (n, d) => (d > 0 ? Math.round((100 * n) / d) : 0);
 
+/**
+ * 정회원 이용 기간 (남은 일수). 정회원인 동안 = 베타 종료일 전, 또는 이용권 기한(until) 전 (규칙과 같음).
+ * { kind, end(ms, 이 순간부터 끝), lastDay(마지막으로 쓸 수 있는 날 키), left(오늘 뒤로 남은 날: 0 = 오늘까지) }
+ *  kind: 'forever'(운영자 유지, 기한 없음) | 'open'(베타 종료일을 아직 안 정함) | 'until'(기한 있음) | 'ended'(끝남)
+ */
+export function accessInfo(u, betaEndsAt = null, now = Date.now()) {
+  if (u?.kept) return { kind: 'forever', end: null, lastDay: null, left: null };
+  const beta = toMs(betaEndsAt), until = toMs(u?.until);
+  if (beta == null) return { kind: 'open', end: null, lastDay: null, left: null };
+  const end = Math.max(beta, until ?? -Infinity);
+  if (now >= end) return { kind: 'ended', end, lastDay: dayKey(end - 1), left: -1 };
+  const lastDay = dayKey(end - 1);
+  return { kind: 'until', end, lastDay, left: daysBetween(dayKey(now), lastDay) - 1 };
+}
+
+/** 달력에서 고른 날(YYYY-MM-DD)까지 쓸 수 있게 하는 기한: 그날 23:59:59.999 (이 기기 시간대, 베타 종료일과 같은 방식) */
+export function untilOfDay(key) {
+  const [y, m, d] = String(key).split('-').map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+}
+
+/**
+ * 이용 기간 연장 계획: 고른 회원들을 key 날까지로 늘린다. 줄이지는 않는다.
+ * { until, apply(늘어나는 회원 줄), later(이미 그날 이후까지라 그대로), kept(유지 회원이라 기한 없음) }
+ */
+export function extendPlan(rows = [], key, betaEndsAt = null, now = Date.now()) {
+  const until = untilOfDay(key), out = { until, apply: [], later: [], kept: [] };
+  for (const r of rows) {
+    const a = accessInfo(r.u, betaEndsAt, now);
+    if (a.kind === 'forever') out.kept.push(r);
+    else if (a.end != null && a.end >= until) out.later.push(r);
+    else out.apply.push(r);
+  }
+  return out;
+}
+
 /** 회원 상태 (거르기용): 정회원 등급(beta·kept·coupon·lapsed)에 더해 임시 비밀번호·아이디 없음(예전 계정) */
 export const MEMBER_STATES = ['beta', 'kept', 'coupon', 'lapsed', 'temp', 'noid'];
 /** 활동 (거르기용): 오늘 출석 · 7일 안 · 30일 안 · 30일 넘게 안 옴 · 한 번도 안 옴 */
@@ -59,7 +95,7 @@ export const ACTIVITY_KINDS = ['today', 'd7', 'd30', 'idle', 'never'];
 /**
  * 회원 한 명의 한 줄 요약 (회원 목록 memberList 의 u + 활동 기록 act).
  * { u, id, state, since(가입 후 날 수), days(출석일), rate(가입 후 출석률 %), att30, span30, rate30, lastDay, idle(마지막 출석 뒤 지난 날, 없으면 null),
- *   activity(ACTIVITY_KINDS 중 하나), games, sec, games7, sec7, team(소문자, 거르기용) }
+ *   activity(ACTIVITY_KINDS 중 하나), games, sec, games7, sec7, team(소문자, 거르기용), access(accessInfo: 남은 일수) }
  */
 export function memberRow(u, act, now = Date.now(), betaEndsAt = null) {
   const a = cleanActivity(act, u.id), today = dayKey(now);
@@ -79,7 +115,7 @@ export function memberRow(u, act, now = Date.now(), betaEndsAt = null) {
     u, id: u.id, state: betaState(u, betaEndsAt, now), since, days: keys.length, rate: pct(keys.length, since),
     att30, span30, rate30: pct(att30, span30), lastDay, idle, activity,
     games: a.totals.games, sec: a.totals.sec, games7: sum(w7, 'n'), sec7: sum(w7, 's'),
-    team: String(u.team || '').trim().toLowerCase(),
+    team: String(u.team || '').trim().toLowerCase(), access: accessInfo(u, betaEndsAt, now),
   };
 }
 
@@ -136,11 +172,13 @@ export function filterMembers(rows = [], f = {}) {
   });
 }
 
-/** 정렬: 'no'(가입 번호) · 'recent'(최근 출석) · 'games'(판 수) · 'time'(훈련 시간) · 'rate'(30일 출석률) · 'nick' */
+/** 정렬: 'no'(가입 번호) · 'left'(남은 일수 적은 순: 끝남 → 곧 끝남 → 미정 → 무기한) · 'recent'(최근 출석) · 'games'(판 수) · 'time'(훈련 시간) · 'rate'(30일 출석률) · 'nick' */
 export function sortMembers(rows = [], by = 'no') {
   const no = (r) => r.u.memberNo ?? 1e9;
+  const left = (r) => (r.access?.left ?? (r.access?.kind === 'open' ? 1e8 : 1e9));
   const cmp = {
     no: (a, b) => no(a) - no(b),
+    left: (a, b) => left(a) - left(b) || no(a) - no(b),
     recent: (a, b) => (b.lastDay || '').localeCompare(a.lastDay || '') || no(a) - no(b),
     games: (a, b) => b.games - a.games || no(a) - no(b),
     time: (a, b) => b.sec - a.sec || no(a) - no(b),

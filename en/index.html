@@ -653,7 +653,7 @@
             <option value="">Any way</option><option value="beta">Open beta link</option><option value="invite">Friend invite</option><option value="one">One-time code</option><option value="old">Early sign-up</option>
           </select></label>
           <label>Sort<select id="mem-sort">
-            <option value="no">Joined No.</option><option value="recent">Last attended</option><option value="games">Games</option><option value="time">Training time</option><option value="rate">Attendance (30 d)</option><option value="nick">Nickname</option>
+            <option value="no">Joined No.</option><option value="left">Days left (fewest first)</option><option value="recent">Last attended</option><option value="games">Games</option><option value="time">Total training time</option><option value="rate">Attendance (30 d)</option><option value="nick">Nickname</option>
           </select></label>
         </div>
         <div class="row mem-bar">
@@ -661,8 +661,14 @@
           <button type="button" id="mem-reset" class="btn btn-ghost">Clear filters</button>
           <button type="button" id="mem-refresh" class="btn">Refresh</button>
         </div>
-        <p class="muted mem-hint">Click a member to open their records. Attendance rate = days attended / days since joining (last 30 days).</p>
-        <div class="rank-table-wrap"><table class="rank-table adm-table mem-table"><thead><tr><th>No.</th><th>Nickname</th><th>Team</th><th>Age group</th><th>Status</th><th>Last attended</th><th>Attendance (30 d)</th><th>Games</th><th>Training time</th></tr></thead><tbody id="mem-rows"></tbody></table></div>
+        <div class="mem-ext" id="mem-ext">
+          <p id="mem-sel" class="mem-sel">No members selected</p>
+          <label class="mem-ext-date">Access until<input id="mem-ext-date" type="date" required /></label>
+          <span class="mem-ext-until">until</span>
+          <button type="button" id="mem-ext-go" class="btn btn-primary" disabled>Extended access</button>
+        </div>
+        <p class="muted mem-hint">Tap a member to open their record. Tick the box on the left and pick a date to extend access until that day (members who already go longer, and kept members, stay as they are). Attendance = days attended / days since joining (last 30 days).</p>
+        <div class="rank-table-wrap"><table class="rank-table adm-table mem-table"><thead><tr><th class="mem-pick"><input type="checkbox" id="mem-all" aria-label="Select all shown members" /></th><th>No.</th><th>Nickname</th><th>Team</th><th>Age group</th><th>Status</th><th class="num">Days left</th><th>Last attended</th><th class="num">Attendance (30 d)</th><th class="num">Games</th><th class="num">Total training time</th></tr></thead><tbody id="mem-rows"></tbody></table></div>
       </div>
     </div>
 

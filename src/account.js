@@ -201,6 +201,10 @@ export function addMonths(ms, n) {
   d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
   return d.getTime();
 }
+/** 운영자가 회원 현황에서 달력으로 이용 기간을 늘린 계정의 이용권 종류 (coupon 칸). 추첨 이용권은 '3m' */
+export const EXT_PASS = 'ext';
+/** 이용권 이름: 달력으로 연장한 기간이면 '이용 기간 연장', 아니면 의견 추첨 '3개월 이용권' */
+export const passName = (u) => (u?.coupon === EXT_PASS ? '이용 기간 연장' : `${COUPON_MONTHS}개월 이용권`);
 /** 이용권 기한: 베타 종료일(이미 지났거나 정하지 않았으면 지금)부터 3개월 */
 export function couponUntil(betaEndsAt, now = Date.now()) {
   const end = toMs(betaEndsAt);
@@ -594,13 +598,13 @@ export class LocalAccountStore {
     return this._public(users[uid]);
   }
 
-  /** 운영자: 이용권 주기(until = 기한 ms) / 거두기(until = null) */
-  async grantCoupon(uid, until) {
+  /** 운영자: 이용권 주기(until = 기한 ms) / 거두기(until = null). kind = 이용권 종류 (추첨 '3m', 달력 연장 EXT_PASS) */
+  async grantCoupon(uid, until, kind = `${COUPON_MONTHS}m`) {
     this._needAdmin();
     const users = this._users();
     if (!users[uid]) throw new Error('없는 계정입니다');
     users[uid].until = until ?? null;
-    users[uid].coupon = until ? `${COUPON_MONTHS}m` : null;
+    users[uid].coupon = until ? kind : null;
     this._set(this.USERS, users);
     if (this.user?.id === uid) this.user = this._public(users[uid]);
     return this._public(users[uid]);

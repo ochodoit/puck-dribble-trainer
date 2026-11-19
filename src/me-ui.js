@@ -2,6 +2,7 @@
 // 데이터는 계정 저장소(account.js / account-firebase.js)의 getActivity·myScores·rankSummary 와 커뮤니티 저장소에서.
 import { attendanceSummary, monthGrid, dayKey, keyInfo, sparkPoints, hoursMinutes } from './activity.js';
 import { renderAbility } from './ability-ui.js';
+import { passName } from './account.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
@@ -122,7 +123,7 @@ export function initMe(deps) {
     const st = app.account.memberState ? app.account.memberState() : 'beta';
     const end = app.site?.betaEndsAt;
     const state = st === 'beta' ? (end ? `정회원 · ${deps.shortDate(end)}까지` : '정회원')
-      : st === 'coupon' ? `3개월 이용권 · ${deps.shortDate(u.until)}까지` : STATE_LABEL[st] || '';
+      : st === 'coupon' ? `${passName(u)} · ${deps.shortDate(u.until)}까지` : STATE_LABEL[st] || '';
     const jersey = u.number != null ? ' <span class="jersey">' + deps.jerseyLabel(u.number) + '</span>' : '';
     const age = `${u.ageGroup} (${u.age}세)`;
     const facts = [esc(deps.countryLabel(u.country)), esc(age), u.stick ? deps.stickLabel(u.stick) : ''].filter(Boolean).join(' · ');

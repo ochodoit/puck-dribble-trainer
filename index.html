@@ -655,7 +655,7 @@
             <option value="">모든 경로</option><option value="beta">오픈베타 링크</option><option value="invite">친구 초대</option><option value="one">1회용 코드</option><option value="old">예전 가입</option>
           </select></label>
           <label>정렬<select id="mem-sort">
-            <option value="no">가입 번호</option><option value="recent">최근 출석</option><option value="games">판 수</option><option value="time">훈련 시간</option><option value="rate">출석률 (30일)</option><option value="nick">별명</option>
+            <option value="no">가입 번호</option><option value="left">남은 일수 (적은 순)</option><option value="recent">최근 출석</option><option value="games">판 수</option><option value="time">총 훈련 시간</option><option value="rate">출석률 (30일)</option><option value="nick">별명</option>
           </select></label>
         </div>
         <div class="row mem-bar">
@@ -663,8 +663,14 @@
           <button type="button" id="mem-reset" class="btn btn-ghost">조건 지우기</button>
           <button type="button" id="mem-refresh" class="btn">새로 고침</button>
         </div>
-        <p class="muted mem-hint">회원을 누르면 그 회원의 기록 창이 열립니다. 출석률 = 출석한 날 / 가입한 날부터 지난 날 (최근 30일 기준).</p>
-        <div class="rank-table-wrap"><table class="rank-table adm-table mem-table"><thead><tr><th>번호</th><th>별명</th><th>팀</th><th>연령대</th><th>상태</th><th>마지막 출석</th><th>출석 (30일)</th><th>판 수</th><th>훈련 시간</th></tr></thead><tbody id="mem-rows"></tbody></table></div>
+        <div class="mem-ext" id="mem-ext">
+          <p id="mem-sel" class="mem-sel">선택한 회원 없음</p>
+          <label class="mem-ext-date">이용 기간<input id="mem-ext-date" type="date" required /></label>
+          <span class="mem-ext-until">까지</span>
+          <button type="button" id="mem-ext-go" class="btn btn-primary" disabled>이용 기간 연장</button>
+        </div>
+        <p class="muted mem-hint">회원을 누르면 그 회원의 기록 창이 열립니다. 왼쪽 칸을 체크하고 날짜를 고르면 이용 기간을 그날까지 늘립니다 (이미 더 긴 회원·유지 회원은 그대로). 출석률 = 출석한 날 / 가입한 날부터 지난 날 (최근 30일 기준).</p>
+        <div class="rank-table-wrap"><table class="rank-table adm-table mem-table"><thead><tr><th class="mem-pick"><input type="checkbox" id="mem-all" aria-label="보이는 회원 모두 선택" /></th><th>번호</th><th>별명</th><th>팀</th><th>연령대</th><th>상태</th><th class="num">남은 일수</th><th>마지막 출석</th><th class="num">출석 (30일)</th><th class="num">판 수</th><th class="num">총 훈련 시간</th></tr></thead><tbody id="mem-rows"></tbody></table></div>
       </div>
     </div>
 

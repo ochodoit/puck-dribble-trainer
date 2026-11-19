@@ -8,7 +8,7 @@ import { C, rgba } from './theme.js';
 import { Renderer, dodgeField } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
-import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel, LOTTERY_WINNERS, lotteryPool, drawLottery, couponUntil } from './account.js';
+import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel, LOTTERY_WINNERS, lotteryPool, drawLottery, couponUntil, passName, EXT_PASS } from './account.js';
 import { MouseInput, MOUSE_SRC, pointerToUV, mouseVisionResult } from './mouse-input.js';
 import { makeFloorMapping } from './geometry.js';
 import { clock, clockNow } from './clock.js';
@@ -364,7 +364,7 @@ function betaChipHtml() {
   const u = app.account?.current();
   const st = app.account?.memberState?.() || 'guest';
   const end = app.site?.betaEndsAt;
-  if (u?.until && (st === 'beta' || st === 'coupon')) return ` <span class="beta-chip ok">3개월 이용권 · ${shortDate(u.until)}까지</span>`;
+  if (u?.until && (st === 'beta' || st === 'coupon')) return ` <span class="beta-chip ok">${passName(u)} · ${shortDate(u.until)}까지</span>`;
   if (st === 'beta' && end && u?.feedbackAt) return ` <span class="beta-chip ok">정회원 ${shortDate(end)}까지 · 이용권 추첨 응모 완료</span>`;
   if (st === 'beta' && end) return ` <button type="button" class="beta-chip" data-feedback>정회원 ${shortDate(end)}까지 · 의견 보내고 3개월 이용권 추첨</button>`;
   if (st === 'kept' && end) return ' <span class="beta-chip ok">정회원 유지</span>';
@@ -484,7 +484,7 @@ let meUI = null;
 let membersUI = null;
 function setupMembers() {
   membersUI = initMembers({
-    $, $$, esc, tr, open, close, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
+    $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
     AGE_GROUPS, countryLabel, jerseyLabel, memberBadge, stickLabel, memberNoLabel, joinLabel, shortDate,
   });
   $('#adm-open-members').addEventListener('click', () => { if (isAdmin(app.account?.current())) membersUI.open(); });
@@ -1814,7 +1814,8 @@ async function openFeedback() {
     beta: end ? `베타 기간(${shortDate(end)}까지)에 개선할 점이나 오류를 보내 주신 분 중 30명을 추첨해 3개월 이용권을 드려요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.`
       : '개선할 점이나 오류를 보내 주신 분 중 30명을 추첨해 3개월 이용권을 드려요. 좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.',
     kept: '좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요. 언제든 고쳐서 다시 보낼 수 있어요.',
-    coupon: '3개월 이용권으로 정회원이에요. 의견은 언제든 고쳐서 다시 보낼 수 있어요.',
+    coupon: app.account.current()?.coupon === EXT_PASS ? '이용 기간이 연장된 정회원이에요. 의견은 언제든 고쳐서 다시 보낼 수 있어요.'
+      : '3개월 이용권으로 정회원이에요. 의견은 언제든 고쳐서 다시 보낼 수 있어요.',
     lapsed: '베타 기간이 끝나 정회원 기간이 끝났어요. 의견은 계속 보낼 수 있고, 등급은 공식 인스타 DM으로 문의해 주세요.',
   }[st] || '좋았던 점, 고쳤으면 하는 점을 자유롭게 적어 주세요.';
   $('#fb-error').classList.add('hidden');

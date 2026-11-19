@@ -518,6 +518,70 @@ const skipSetup = async (page, touch = false) => {
     && mmAb.hex && mmAb.cur && mmAb.top && mmAb.rows === 6 && mmAb.text.includes('센스') && mmAb.text.includes('종합');
   console.log(`${memOk ? 'PASS' : 'FAIL'} operator members: filter by team/status/activity, click a member -> record window (stats hexagon, attendance rate, calendar, training time, 28-day chart, game records), back to list (${JSON.stringify({ allNicks, byTeam, byState, byAct, mm, mmAb: { ...mmAb, text: mmAb.text.slice(0, 80) }, backToList })})`);
   if (!memOk) failed = true;
+  // 남은 일수 계산 (stats.js): 유지 = 무기한, 베타 종료일 미정 = 미정, 베타 종료일·이용권 기한 중 늦은 날까지, 연장은 줄이지 않음, '남은 일수' 정렬
+  const acc = await page.evaluate(async () => {
+    const S = await import('/src/stats.js');
+    const now = new Date(2026, 10, 19, 12).getTime(), d = (y, m, dd) => new Date(y, m - 1, dd).getTime();
+    const beta = d(2026, 11, 26); // 11/26 0시에 끝남 = 11/25까지
+    const A = (u, b = beta) => S.accessInfo(u, b, now);
+    const rows = [{ u: { id: 'a', kept: true } }, { u: { id: 'b' } }, { u: { id: 'c', until: d(2027, 2, 1) } }];
+    const plan = S.extendPlan(rows, '2026-12-31', beta, now);
+    const sorted = S.sortMembers([{ u: { memberNo: 1 }, access: A({ kept: true }) }, { u: { memberNo: 2 }, access: A({}) }, { u: { memberNo: 3 }, access: A({}, d(2026, 11, 1)) }, { u: { memberNo: 4 }, access: A({}, null) }], 'left').map((r) => r.u.memberNo).join();
+    return { kept: A({ kept: true }).kind, open: A({}, null).kind, beta: A({}), coupon: A({ until: d(2027, 1, 10) }), ended: A({}, d(2026, 11, 19)).kind, today: A({}, d(2026, 11, 20)).left,
+      until: S.untilOfDay('2026-12-31') === new Date(2026, 11, 31, 23, 59, 59, 999).getTime(), plan: { apply: plan.apply.map((r) => r.u.id).join(), later: plan.later.map((r) => r.u.id).join(), kept: plan.kept.map((r) => r.u.id).join(), until: plan.until === new Date(2026, 11, 31, 23, 59, 59, 999).getTime() }, sorted };
+  });
+  const accOk = acc.kept === 'forever' && acc.open === 'open' && acc.beta.kind === 'until' && acc.beta.lastDay === '2026-11-25' && acc.beta.left === 6
+    && acc.coupon.lastDay === '2027-01-09' && acc.coupon.left === 51 && acc.ended === 'ended' && acc.today === 0 && acc.until
+    && acc.plan.apply === 'b' && acc.plan.later === 'c' && acc.plan.kept === 'a' && acc.plan.until && acc.sorted === '3,2,4,1';
+  console.log(`${accOk ? 'PASS' : 'FAIL'} days left: kept = no end, no beta end = not set, later of beta end and pass, extend never shortens, sort by days left (${JSON.stringify(acc)})`);
+  if (!accOk) failed = true;
+  // 회원 현황: '남은 일수' 칸, 마지막 칸 '총 훈련 시간'(숫자 칸 제목 오른쪽 정렬) -> 왼쪽 칸 체크(기록 창은 안 열림) -> 모두 선택 -> 달력 날짜 -> 연장
+  //  (이미 그 뒤까지인 이용권 회원은 그대로) -> 남은 일수·기록 창의 이용 기간이 바뀜
+  await page.click('#btn-settings'); await page.click('#btn-settings-admin');
+  await page.waitForSelector('#panel-admin:not(.hidden)');
+  await page.click('#adm-open-members');
+  await page.waitForFunction(() => document.querySelectorAll('#mem-rows tr[data-uid]').length === 2);
+  const extBefore = await page.evaluate(() => {
+    const ths = [...document.querySelectorAll('.mem-table thead th')];
+    const cell = (nick, i) => document.querySelector(`#mem-rows tr[data-nick="${nick}"] td:nth-child(${i})`)?.textContent.trim();
+    return { head: ths.map((t) => t.textContent.trim()), align: ths.map((t) => getComputedStyle(t).textAlign).join(), bolt: cell('번개손', 7), admin: cell('test123', 7),
+      btn: document.querySelector('#mem-ext-go').disabled, date: document.querySelector('#mem-ext-date').value, sel: document.querySelector('#mem-sel').textContent };
+  });
+  await page.click('#mem-rows tr[data-nick="번개손"] .mem-pick input');
+  const pick1 = await page.evaluate(() => ({ closed: document.querySelector('#panel-member').classList.contains('hidden'), sel: document.querySelector('#mem-sel').textContent,
+    picked: document.querySelector('#mem-rows tr[data-nick="번개손"]').classList.contains('picked'), all: document.querySelector('#mem-all').indeterminate, btn: document.querySelector('#mem-ext-go').disabled }));
+  await page.check('#mem-all');
+  const sel2 = await page.textContent('#mem-sel');
+  const extKey = await page.evaluate(() => { const d = new Date(Date.now() + 40 * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  await page.fill('#mem-ext-date', extKey);
+  let extAsk = '';
+  page.once('dialog', (d) => { extAsk = d.message(); d.accept(); });
+  await page.click('#mem-ext-go');
+  await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('늘렸습니다'));
+  await page.waitForFunction(() => document.querySelectorAll('#mem-rows tr[data-uid]').length === 2 && !document.querySelector('#mem-rows .mem-pick input:checked'));
+  const extAfter = await page.evaluate((key) => {
+    const u = JSON.parse(localStorage.getItem('puck-trainer.users.v1'))['번개손'], [y, m, d] = key.split('-').map(Number);
+    const row = (nick, i) => document.querySelector(`#mem-rows tr[data-nick="${nick}"] td:nth-child(${i})`).textContent.trim();
+    return { ok: u.until === new Date(y, m - 1, d, 23, 59, 59, 999).getTime(), coupon: u.coupon, bolt: row('번개손', 7), tag: row('번개손', 6), admin: row('test123', 7),
+      sel: document.querySelector('#mem-sel').textContent, toast: document.querySelector('#toast').textContent };
+  }, extKey);
+  await page.click('#mem-rows tr[data-nick="번개손"] td:nth-child(3)');
+  await page.waitForSelector('#panel-member:not(.hidden)');
+  const extCard = await page.textContent('#mm-card');
+  await page.click('#mm-back');
+  await page.click('[data-close="panel-members"]'); await page.click('[data-close="panel-admin"]');
+  // 다음 테스트(베타 종료 뒤 무료 정회원)를 위해 번개손의 연장을 되돌린다
+  await page.evaluate(() => { const k = 'puck-trainer.users.v1', us = JSON.parse(localStorage.getItem(k)); delete us['번개손'].until; delete us['번개손'].coupon; localStorage.setItem(k, JSON.stringify(us)); });
+  const md = extKey.slice(5).replace('-', '.');
+  const extOk = extBefore.head.length === 11 && extBefore.head[6] === '남은 일수' && extBefore.head[10] === '총 훈련 시간'
+    && extBefore.align === 'center,left,left,left,left,left,right,left,right,right,right' && /^\d+일 ~\d\d\.\d\d$/.test(extBefore.bolt) && /^\d+일 ~\d\d\.\d\d$/.test(extBefore.admin)
+    && extBefore.btn && extBefore.date > extKey.slice(0, 4) && extBefore.sel === '선택한 회원 없음'
+    && pick1.closed && pick1.sel === '1명 선택' && pick1.picked && pick1.all && !pick1.btn && sel2 === '2명 선택'
+    && extAsk.includes(`1명의 이용 기간을 ${extKey.replace(/-/g, '.')}까지로 늘립니다.`) && extAsk.includes('이미 그 뒤까지인 1명은 그대로입니다.')
+    && extAfter.ok && extAfter.coupon === 'ext' && extAfter.bolt === `40일 ~${md}` && extAfter.tag.includes(`연장 ~${md}`) && extAfter.admin === extBefore.admin
+    && extAfter.sel === '선택한 회원 없음' && extAfter.toast.includes('1명의 이용 기간을') && extCard.includes(`이용 기간 ${extKey.replace(/-/g, '.')}까지 · 40일 남음`);
+  console.log(`${extOk ? 'PASS' : 'FAIL'} operator members: days-left column, last column 'total training time', tick members (row does not open), select all, pick a calendar date -> extend (a longer pass stays) (${JSON.stringify({ extBefore, pick1, sel2, extAsk, extAfter, extCard: extCard.slice(-60) })})`);
+  if (!extOk) failed = true;
   // 능력치 (ability.js): 월별 최고 기록 저장(13달), 나이대 1등 = 100, 상위 10% 선, 지난달 대비, 이번 달 기록이 없으면 지난 기록을 이어서
   const ab = await page.evaluate(async () => {
     const A = await import('/src/ability.js'), V = await import('/src/activity.js');

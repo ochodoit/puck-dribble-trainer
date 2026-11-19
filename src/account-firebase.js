@@ -724,10 +724,13 @@ export class FirebaseAccountStore {
     return { id: uid, kept: !!kept };
   }
 
-  /** 운영자: 이용권 주기(until = 기한 ms) / 거두기(until = null). 규칙이 베타 종료 뒤 until 까지 정회원으로 본다 */
-  async grantCoupon(uid, until) {
+  /**
+   * 운영자: 이용권 주기(until = 기한 ms) / 거두기(until = null). 규칙이 베타 종료 뒤 until 까지 정회원으로 본다.
+   * kind = 이용권 종류 (추첨 '3m', 회원 현황에서 달력으로 연장 'ext')
+   */
+  async grantCoupon(uid, until, kind = `${COUPON_MONTHS}m`) {
     this._needAdmin();
-    const patch = { until: until ? this.F.Timestamp.fromMillis(until) : null, coupon: until ? `${COUPON_MONTHS}m` : null };
+    const patch = { until: until ? this.F.Timestamp.fromMillis(until) : null, coupon: until ? kind : null };
     await this.F.updateDoc(this._doc('users', uid), patch);
     if (this.user?.id === uid) Object.assign(this.user, { until: until ?? null, coupon: patch.coupon });
     return { id: uid, until: until ?? null };

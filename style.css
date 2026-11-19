@@ -792,6 +792,35 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .mem-table tbody tr[data-uid]:hover td, .mem-table tbody tr[data-uid]:focus-visible td { background: rgba(214, 48, 39, 0.08); }
 .mem-table tbody tr[data-uid]:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
 .mem-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 줄 맞춤: 숫자 칸은 제목도 오른쪽, 첫 칸(고르기)은 좁게, 번호는 표시 글꼴, 마지막 칸(총 훈련 시간)도 다른 숫자 칸과 같은 글꼴 */
+.mem-table th.num { text-align: right; }
+.mem-table th, .mem-table td { padding-left: 10px; padding-right: 10px; }
+.mem-table td:first-child, .mem-table th:first-child { width: 34px; padding: 0 2px 0 8px; font-family: var(--sans); font-size: 14px; font-weight: 400; text-align: center; }
+.mem-table td.mem-no { font-family: var(--display); font-weight: 900; font-size: 17px; }
+.mem-table td:last-child, .mem-table th:last-child { font-family: var(--sans); }
+.mem-table td:last-child { font-size: 14px; font-weight: 700; }
+.mem-pick input { width: 18px; height: 18px; margin: 0; padding: 0; vertical-align: middle; accent-color: var(--red); cursor: pointer; }
+.mem-pick { cursor: default; }
+.mem-table tbody tr.picked td { background: rgba(214, 48, 39, 0.1); }
+.mem-left { font-weight: 700; }
+.mem-table td:nth-child(8), .mem-table th:nth-child(8) { padding-left: 26px; } /* 남은 일수(오른쪽 정렬) 다음 칸과 띄우기 */
+.mem-left.soon { color: var(--red); }
+.mem-table td.num small { font-size: 11.5px; }
+/* 고른 회원 이용 기간 연장 (달력) */
+.mem-ext { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 10px 0 4px; padding: 10px 12px; border: var(--line) solid var(--ink); border-radius: 14px; background: var(--paper-2); }
+.mem-sel { margin: 0 auto 0 0; align-self: center; font-size: 13px; font-weight: 600; color: var(--mute); }
+.mem-sel.on { color: var(--red); }
+.mem-ext-date { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }
+.mem-ext-date input { font-size: 14px; padding: 6px 10px; min-height: 38px; border-radius: 10px; border: var(--line) solid var(--ink); background: var(--paper); color: var(--ink); font-family: var(--sans); accent-color: var(--red); }
+.mem-ext-until { align-self: center; padding-top: 18px; font-size: 13px; color: var(--ink-soft); }
+.mem-ext .btn { min-height: 38px; padding: 6px 16px; font-size: 14px; }
+.mem-ext .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.mm-left { font-weight: 600; }
+@media (max-width: 600px) {
+  .mem-sel { flex: 1 0 100%; }
+  .mem-ext-date { flex: 1 1 auto; }
+  .mem-ext .btn { flex: 1 0 100%; }
+}
 .mem-tag { display: inline-block; font-size: 11px; font-weight: 700; color: var(--ink-soft); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; white-space: nowrap; }
 .member-card header .row { gap: 6px; }
 #mm-chart rect { fill: var(--red); }

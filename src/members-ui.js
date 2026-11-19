@@ -1,8 +1,10 @@
 // 운영자: 회원 현황 (팀·연령대·국가·상태·활동·가입 경로로 거르기, 정렬) + 회원 기록 창 (한 명의 출석·훈련·게임별 기록 한눈에).
 // 데이터: 회원 목록(memberList) + 활동 기록(activityList)을 한 번 읽어 1분 동안 다시 쓰고('새로 고침'은 바로 다시 읽음),
 // 회원 기록 창의 게임별 최고 기록만 그 회원의 기록 문서를 읽는다(memberScores). 계산은 stats.js (화면 없는 순수 계산).
-import { memberRows, memberDetail, filterMembers, sortMembers, membersSummary, teamsOf } from './stats.js';
+// 남은 일수 = 정회원으로 쓸 수 있는 날 (베타 종료일·이용권 기한 중 늦은 날까지). 왼쪽 칸으로 회원을 골라 달력에서 고른 날까지 늘린다 (grantCoupon, 종류 EXT_PASS).
+import { memberRows, memberDetail, filterMembers, sortMembers, membersSummary, teamsOf, extendPlan } from './stats.js';
 import { monthGrid, dayKey, sparkPoints, hoursMinutes, keyInfo } from './activity.js';
+import { addMonths, passName, EXT_PASS } from './account.js';
 import { gameKeyTools } from './me-ui.js';
 import { renderAbility } from './ability-ui.js';
 
@@ -11,14 +13,14 @@ const STATE_LABEL = { beta: '베타 기간', kept: '유지', coupon: '이용권'
 const TTL = 60 * 1000;
 
 /**
- * deps: { $, $$, esc, tr, open, close, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
+ * deps: { $, $$, esc, tr, open, close, toast, app, MODES, PLAY_MINUTES, rankKey, timeLabel, levelLabel,
  *         AGE_GROUPS, countryLabel, jerseyLabel, memberBadge, stickLabel, memberNoLabel, joinLabel, shortDate }
  */
 export function initMembers(deps) {
   const { $, $$, esc, tr, app } = deps;
   const list = $('#panel-members'), card = $('#panel-member');
   const { KEYS, keyLabel, keyOrder } = gameKeyTools(deps);
-  const view = { data: null, f: {}, sort: 'no', uid: null, y: 0, m: 0, detail: null };
+  const view = { data: null, f: {}, sort: 'no', uid: null, y: 0, m: 0, detail: null, sel: new Set(), shown: [] };
   const dotYmd = (k) => (k ? k.replace(/-/g, '.') : '-');
   const hm = (sec) => { const t = hoursMinutes(sec); return t.h ? `${t.h}시간 ${t.m}분` : `${t.m}분`; };
   const ago = (idle) => (idle == null ? '없음' : idle === 0 ? '오늘' : idle === 1 ? '어제' : `${idle}일 전`);
@@ -28,10 +30,31 @@ export function initMembers(deps) {
     const tags = [];
     // 베타 기간 중에도 유지·이용권 표시는 보이게 (등급은 베타가 끝난 뒤에 바뀜)
     if (r.u.kept && r.state !== 'kept') tags.push('<span class="mem-tag">유지</span>');
-    if (r.u.until && r.state !== 'coupon' && Number(r.u.until) > Date.now()) tags.push(`<span class="mem-tag">이용권 ~${dotYmd(dayKey(r.u.until)).slice(5)}</span>`);
+    if (r.u.until && r.state !== 'coupon' && Number(r.u.until) > Date.now()) {
+      const md5 = dotYmd(dayKey(r.u.until)).slice(5);
+      tags.push(r.u.coupon === EXT_PASS ? `<span class="mem-tag">연장 ~${md5}</span>` : `<span class="mem-tag">이용권 ~${md5}</span>`);
+    }
     if (r.u.tempPw) tags.push('<span class="chip-temp">임시 비밀번호</span>');
     if (!r.u.loginId) tags.push('<span class="mem-tag">아이디 없음</span>');
     return `${STATE_LABEL[r.state] || ''}${tags.length ? ' ' + tags.join(' ') : ''}`;
+  };
+  // 남은 일수 칸: 무기한(유지) · 미정(베타 종료일 안 정함) · 종료 · 오늘까지 · N일 (7일 안이면 빨강) + 마지막 날
+  const md = (k) => k.slice(5).replace('-', '.');
+  const leftHtml = (a) => {
+    if (a.kind === 'forever') return '<span class="mem-left">무기한</span>';
+    if (a.kind === 'open') return '<span class="muted">미정</span>';
+    if (a.kind === 'ended') return '<span class="muted">종료</span>';
+    const soon = a.left <= 7 ? ' soon' : '';
+    const n = a.left ? `${a.left}일` : '오늘까지';
+    return `<span class="mem-left${soon}">${n}</span> <small class="muted">~${md(a.lastDay)}</small>`;
+  };
+  /** 회원 기록 창의 이용 기간 한 줄 */
+  const leftText = (a) => {
+    if (a.kind === 'forever') return '이용 기간 기한 없음 (유지)';
+    if (a.kind === 'open') return '이용 기간: 베타 종료일 미정';
+    if (a.kind === 'ended') return `이용 기간 끝남 (${dotYmd(a.lastDay)})`;
+    const n = a.left ? `${a.left}일 남음` : '오늘까지';
+    return `이용 기간 ${dotYmd(a.lastDay)}까지 · ${n}`;
   };
 
   // ---- 거르기·정렬 칸 ----
@@ -47,8 +70,22 @@ export function initMembers(deps) {
   $('#mem-refresh').addEventListener('click', () => load(true));
   // 회원 줄을 누르면(또는 Enter) 그 회원의 기록 창
   const rows = $('#mem-rows');
-  rows.addEventListener('click', (e) => { const row = e.target.closest('tr[data-uid]'); if (row) openMember(row.dataset.uid); });
-  rows.addEventListener('keydown', (e) => { const row = e.target.closest('tr[data-uid]'); if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openMember(row.dataset.uid); } });
+  rows.addEventListener('click', (e) => { if (e.target.closest('.mem-pick')) return; const row = e.target.closest('tr[data-uid]'); if (row) openMember(row.dataset.uid); });
+  rows.addEventListener('keydown', (e) => { if (e.target.closest('.mem-pick')) return; const row = e.target.closest('tr[data-uid]'); if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openMember(row.dataset.uid); } });
+  // ---- 고르기 + 이용 기간 연장 (달력) ----
+  rows.addEventListener('change', (e) => {
+    const box = e.target.closest('.mem-pick input'); if (!box) return;
+    const uid = box.closest('tr[data-uid]').dataset.uid;
+    if (box.checked) view.sel.add(uid); else view.sel.delete(uid);
+    box.closest('tr').classList.toggle('picked', box.checked);
+    renderPick();
+  });
+  $('#mem-all').addEventListener('change', (e) => {
+    for (const r of view.shown) { if (e.target.checked) view.sel.add(r.id); else view.sel.delete(r.id); }
+    renderList();
+  });
+  $('#mem-ext-date').addEventListener('input', renderPick);
+  $('#mem-ext-go').addEventListener('click', extendPicked);
   $('#mm-back').addEventListener('click', () => deps.close(card));
   $('#mm-prev').addEventListener('click', () => { if (--view.m < 1) { view.m = 12; view.y--; } renderCalendar(); });
   $('#mm-next').addEventListener('click', () => {
@@ -69,7 +106,10 @@ export function initMembers(deps) {
     const err = $('#mem-error');
     err.classList.add('hidden');
     if (!force && view.data && Date.now() - view.data.at < TTL) { renderList(); return; }
-    $('#mem-rows').innerHTML = `<tr><td colspan="9" class="muted">${esc(tr('불러오는 중…'))}</td></tr>`;
+    $('#mem-rows').innerHTML = `<tr><td colspan="11" class="muted">${esc(tr('불러오는 중…'))}</td></tr>`;
+    const date = $('#mem-ext-date'), today = dayKey();
+    date.min = today;
+    if (!date.value || date.value < today) date.value = dayKey(addMonths(Date.now(), 1));
     try {
       const [members, acts] = await Promise.all([app.account.memberList(), app.account.activityList()]);
       view.data = { at: Date.now(), members, acts, byUid: new Map(acts.map((a) => [a.uid, a])) };
@@ -98,6 +138,10 @@ export function initMembers(deps) {
   function renderList() {
     const all = currentRows();
     const shown = sortMembers(filterMembers(all, view.f), view.sort);
+    view.shown = shown;
+    // 보이지 않는 회원은 고른 목록에서 뺀다 (거르기로 숨긴 회원이 모르게 연장되지 않게)
+    const ids = new Set(shown.map((r) => r.id));
+    for (const id of [...view.sel]) if (!ids.has(id)) view.sel.delete(id);
     const s = membersSummary(shown);
     $('#mem-sum').innerHTML = [
       tile(`${s.n}명`, '회원', s.n === all.length ? '' : `전체 ${all.length}명 중`),
@@ -108,11 +152,52 @@ export function initMembers(deps) {
     $('#mem-count').textContent = shown.length === all.length ? `회원 ${all.length}명` : `${shown.length}명 / 전체 ${all.length}명`;
     rows.innerHTML = shown.length ? shown.map((r) => {
       const u = r.u, jersey = u.number != null ? ` <span class="jersey">${deps.jerseyLabel(u.number)}</span>` : '';
-      return `<tr data-uid="${esc(u.id)}" data-nick="${esc(u.nick)}" tabindex="0" class="${r.state === 'lapsed' ? 'dim' : ''}">`
-        + `<td>${deps.memberNoLabel(u.memberNo)}</td><td><b data-ugc>${esc(u.nick)}</b>${jersey}</td><td data-ugc>${esc(u.team || '-')}</td><td>${esc(u.ageGroup || '-')}</td>`
-        + `<td>${stateHtml(r)}</td><td>${esc(ago(r.idle))}</td><td class="num">${r.att30}/${r.span30}일 · ${r.rate30}%</td>`
+      const on = view.sel.has(u.id);
+      return `<tr data-uid="${esc(u.id)}" data-nick="${esc(u.nick)}" tabindex="0" class="${[r.state === 'lapsed' ? 'dim' : '', on ? 'picked' : ''].filter(Boolean).join(' ')}">`
+        + `<td class="mem-pick"><input type="checkbox" aria-label="${esc(u.nick)}"${on ? ' checked' : ''} /></td>`
+        + `<td class="mem-no">${deps.memberNoLabel(u.memberNo)}</td><td><b data-ugc>${esc(u.nick)}</b>${jersey}</td><td data-ugc>${esc(u.team || '-')}</td><td>${esc(u.ageGroup || '-')}</td>`
+        + `<td>${stateHtml(r)}</td><td class="num">${leftHtml(r.access)}</td><td>${esc(ago(r.idle))}</td><td class="num">${r.att30}/${r.span30}일 · ${r.rate30}%</td>`
         + `<td class="num">${r.games}판</td><td class="num">${esc(hm(r.sec))}</td></tr>`;
-    }).join('') : `<tr><td colspan="9" class="muted">${esc(tr('조건에 맞는 회원이 없습니다'))}</td></tr>`;
+    }).join('') : `<tr><td colspan="11" class="muted">${esc(tr('조건에 맞는 회원이 없습니다'))}</td></tr>`;
+    renderPick();
+  }
+
+  /** 고른 회원 수 · 모두 고르기 칸 · 연장 버튼 */
+  function renderPick() {
+    const n = view.sel.size, all = $('#mem-all');
+    $('#mem-sel').textContent = n ? `${n}명 선택` : '선택한 회원 없음';
+    $('#mem-sel').classList.toggle('on', n > 0);
+    all.checked = n > 0 && n === view.shown.length;
+    all.indeterminate = n > 0 && n < view.shown.length;
+    $('#mem-ext-go').disabled = !n || !$('#mem-ext-date').value;
+  }
+
+  /** 고른 회원들의 이용 기간을 달력에서 고른 날까지 늘린다 (줄이지 않음, 유지 회원은 그대로) */
+  async function extendPicked() {
+    const key = $('#mem-ext-date').value;
+    if (!key || !view.sel.size) return;
+    const picked = view.shown.filter((r) => view.sel.has(r.id));
+    const plan = extendPlan(picked, key, app.site?.betaEndsAt ?? null);
+    const day = key.replace(/-/g, '.');
+    // 그대로 두는 회원 안내 (한 줄씩: 번역이 줄 단위로 된다)
+    const skip = [];
+    if (plan.later.length) skip.push(`이미 그 뒤까지인 ${plan.later.length}명은 그대로입니다.`);
+    if (plan.kept.length) skip.push(`유지 회원 ${plan.kept.length}명은 기한이 없어 그대로입니다.`);
+    if (!plan.apply.length) { deps.toast?.(tr(['늘릴 회원이 없습니다.', ...skip].join('\n')), 4000); return; }
+    const ask = [`${plan.apply.length}명의 이용 기간을 ${day}까지로 늘립니다.`, ...skip, '진행할까요?'].join('\n');
+    if (!window.confirm(tr(ask))) return;
+    const go = $('#mem-ext-go'), err = $('#mem-error');
+    go.disabled = true; err.classList.add('hidden');
+    let done = 0;
+    try {
+      for (const r of plan.apply) { await app.account.grantCoupon(r.id, plan.until, EXT_PASS); done++; }
+      view.sel.clear();
+      deps.toast?.(`${done}명의 이용 기간을 ${day}까지 늘렸습니다`, 3500);
+    } catch (e) {
+      err.textContent = `${tr('이용 기간을 늘리지 못했습니다')} (${done}/${plan.apply.length}): ${e.message || e}`;
+      err.classList.remove('hidden');
+    }
+    await load(true);
   }
 
   // ---- 회원 기록 창 ----
@@ -135,11 +220,12 @@ export function initMembers(deps) {
     const jersey = u.number != null ? ` <span class="jersey">${deps.jerseyLabel(u.number)}</span>` : '';
     const facts = [esc(deps.countryLabel(u.country)), esc(`${u.ageGroup} (${u.age}세)`), u.stick ? deps.stickLabel(u.stick) : ''].filter(Boolean).join(' · ');
     const end = app.site?.betaEndsAt;
-    const state = r.state === 'beta' && end ? `정회원 · ${deps.shortDate(end)}까지` : r.state === 'coupon' && u.until ? `3개월 이용권 · ${deps.shortDate(u.until)}까지` : STATE_LABEL[r.state] || '';
+    const state = r.state === 'beta' && end ? `정회원 · ${deps.shortDate(end)}까지` : r.state === 'coupon' && u.until ? `${passName(u)} · ${deps.shortDate(u.until)}까지` : STATE_LABEL[r.state] || '';
     const joined = u.joinedAt || u.createdAt ? `가입 ${dotYmd(dayKey(u.joinedAt || u.createdAt))}` : '';
     $('#mm-card').innerHTML = `<div class="me-id"><b data-ugc>${esc(u.nick)}</b>${jersey} <span class="member-badge">${esc(deps.memberBadge(u))}</span></div>
       <p class="me-facts"><span data-ugc>${esc(u.team)}</span> · ${facts}</p>
       <p class="me-facts muted">${[joined, esc(deps.joinLabel(u)), esc(state)].filter(Boolean).join(' · ')}</p>
+      <p class="me-facts mm-left">${esc(leftText(r.access))}</p>
       <p class="me-facts muted">${u.loginId ? `로그인 아이디 <b data-ugc>${esc(u.loginId)}</b>` : '<span class="mem-tag">아이디 없음</span>'}${u.tempPw ? ' <span class="chip-temp">임시 비밀번호</span>' : ''}${u.feedbackAt ? ` · 의견 보냄 ${dotYmd(dayKey(u.feedbackAt))}` : ''}</p>`;
   }
 

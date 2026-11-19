@@ -4,15 +4,17 @@
 // 예전 계정(별명 + 숫자 6자리): 로그인 주소가 u-<별명 hex>@<도메인> (더 예전은 @puck-trainer.app).
 //   별명 + 예전 비밀번호로 로그인하면 아이디·새 비밀번호를 만들 때까지 로그인 전으로 둔다 (needsUpgrade, upgradeLogin).
 //   로그인 주소를 아이디 주소로 바꾸지 못하면(프로젝트 설정) ids/{아이디} 에 적힌 예전 주소로 로그인한다.
+// 비밀번호를 잊으면: 가상 이메일이라 재설정 메일을 받을 수 없다. 운영자가 tools/admin/reset-password.mjs 로 임시 비밀번호를 주고
+//   users/{uid}.tempPw = true 를 적는다. 그 계정은 로그인한 뒤 새 비밀번호를 정할 때까지 로그인 전으로 둔다 (resetTempPassword).
 // 컬렉션: users/{uid} 프로필(= 정회원), nicks/{nickLower} 별명 고유성, ids/{아이디} 아이디 고유성·로그인 주소, scores_{mode}/{uid} 모드별 최고 기록,
 //         codes/{CODE} 가입 코드(오픈베타·1회용·회원의 초대 코드), meta/members 회원 수(정회원 번호), config/site 게스트 안내·베타 종료일,
 //         config/lottery 의견 추첨 결과, admins/{uid} 운영자(콘솔에서 만듦),
 //         feedback/{uid} 개발자에게 (베타 종료일 전에 보내면 3개월 이용권 추첨 대상)
 import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, NOT_READY,
-  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateStrongPassword, validateEdit, INVITE_MAX, COUPON_MONTHS,
+  betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateEdit, INVITE_MAX, COUPON_MONTHS,
   SCORE_MAX, RANK_FIELDS, rankGroup, rankIdx, rankIdxFields, activeFilters, competitionRanks,
-  LOGIN_ID_RE, NICK_RE, normLoginId, validateLoginId, validatePassword, BAD_LOGIN_MSG, USE_ID_MSG, ID_TAKEN,
+  LOGIN_ID_RE, NICK_RE, normLoginId, validateLoginId, validateNewPassword, BAD_LOGIN_MSG, USE_ID_MSG, ID_TAKEN, NEED_TEMP_MSG, SAME_PW_MSG,
   PendingPlays, PLAYS_FLUSH, PLAYS_STEP_MAX,
 } from './account.js';
 import { cleanActivity, addActivity } from './activity.js';
@@ -30,7 +32,9 @@ const BAD_LOGIN = ['auth/user-not-found', 'auth/invalid-credential', 'auth/wrong
 export class FirebaseAccountStore {
   constructor(config) {
     this.kind = 'firebase'; this.config = config; this.user = null; this.site = {}; this._boards = new Map(); this._mine = null;
-    this.upgrade = null; // 예전 계정으로 로그인해 아이디를 아직 만들지 않음: { nick, admin }
+    // 로그인했지만 아직 못 들어온 계정: { nick, admin, kind, loginId, temp }
+    //   kind 'id' = 예전 계정이라 아이디·새 비밀번호를 만들어야 함, 'password' = 임시 비밀번호라 새 비밀번호를 정해야 함
+    this.upgrade = null;
     this.pending = new PendingPlays(); // 아직 쓰지 않은 판수
   }
 
@@ -47,14 +51,17 @@ export class FirebaseAccountStore {
     return this;
   }
 
-  /** 로그인한 계정의 프로필을 읽고, 아이디가 없는 예전 계정이면 아이디를 만들 때까지 로그인 전으로 둔다 */
+  /** 로그인한 계정의 프로필을 읽고, 아이디가 없는 예전 계정·임시 비밀번호 계정이면 새 비밀번호를 정할 때까지 로그인 전으로 둔다 */
   async _settle() {
     const u = await this._loadProfile(this.auth.currentUser.uid);
-    if (u && !u.loginId) { this.upgrade = { nick: u.nick, admin: !!u.admin }; this.user = null; return null; }
+    if (u && (!u.loginId || u.tempPw)) {
+      this.upgrade = { nick: u.nick, admin: !!u.admin, kind: u.loginId ? 'password' : 'id', loginId: u.loginId || null, temp: !!u.tempPw };
+      this.user = null; return null;
+    }
     this.upgrade = null;
     return u;
   }
-  /** 예전 계정이 아이디를 만들어야 하면 { nick, admin }, 아니면 null */
+  /** 예전 계정이 아이디를 만들어야 하거나(kind 'id') 임시 비밀번호를 바꿔야 하면(kind 'password') { nick, admin, kind, loginId }, 아니면 null */
   needsUpgrade() { return this.upgrade; }
 
   current() { return this.user; }
@@ -193,7 +200,7 @@ export class FirebaseAccountStore {
       for (const email of tries) {
         if (!(await this._try(email, password))) continue;
         const u = await this._settle();
-        if (u) { this.logout(); throw new Error(USE_ID_MSG); }
+        if (u || this.upgrade?.loginId) { this.logout(); throw new Error(USE_ID_MSG); }
         return null; // 아이디 만들기 (needsUpgrade)
       }
     }
@@ -208,18 +215,43 @@ export class FirebaseAccountStore {
   async upgradeLogin(loginId, password) {
     const cu = this.auth.currentUser, up = this.upgrade;
     if (!up || !cu) throw new Error('먼저 별명과 예전 비밀번호로 로그인하세요');
-    const err = validateLoginId(loginId, up.nick) || validatePassword(password, { id: loginId, nick: up.nick }) || (up.admin ? validateStrongPassword(password) : null);
+    if (up.kind === 'password') throw new Error(NEED_TEMP_MSG);
+    const err = validateLoginId(loginId, up.nick) || validateNewPassword(password, { id: loginId, nick: up.nick, admin: up.admin });
     if (err) throw new Error(err);
     const lid = normLoginId(loginId), idRef = this._doc('ids', lid);
     if ((await this.F.getDoc(idRef)).exists()) throw new Error(ID_TAKEN);
+    if (up.temp && await this._samePassword(cu, password)) throw new Error(SAME_PW_MSG);
     try { await this.A.updatePassword(cu, String(password)); }
     catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }
     const b = this.F.writeBatch(this.db);
     b.set(idRef, { uid: cu.uid, email: cu.email });
-    b.update(this._doc('users', cu.uid), { loginId: lid });
+    b.update(this._doc('users', cu.uid), up.temp ? { loginId: lid, tempPw: this.F.deleteField() } : { loginId: lid });
     try { await b.commit(); }
     catch (e) { throw new Error(e.code === 'permission-denied' ? ID_TAKEN : `아이디를 만들지 못했습니다 (${e.code || e.message})`); }
     try { await this.A.updateEmail(cu, this._idEmail(lid)); } catch { /* 그대로: ids 의 주소로 로그인 */ }
+    return this._settle();
+  }
+
+  /** 지금 로그인한 계정의 비밀번호가 password 와 같은지 (임시 비밀번호를 그대로 쓰지 못하게) */
+  async _samePassword(cu, password) {
+    try { await this.A.reauthenticateWithCredential(cu, this.A.EmailAuthProvider.credential(cu.email, String(password))); return true; }
+    catch { return false; }
+  }
+
+  /**
+   * 임시 비밀번호(운영자가 줌)로 로그인한 뒤 새 비밀번호 정하기.
+   * 비밀번호를 먼저 바꾸고 tempPw 표시를 지운다 (표시를 못 지우면 다음 로그인 때 한 번 더 정하게 됨)
+   */
+  async resetTempPassword(password) {
+    const cu = this.auth.currentUser, up = this.upgrade;
+    if (!cu || up?.kind !== 'password') throw new Error(NEED_TEMP_MSG);
+    const err = validateNewPassword(password, { id: up.loginId, nick: up.nick, admin: up.admin });
+    if (err) throw new Error(err);
+    if (await this._samePassword(cu, password)) throw new Error(SAME_PW_MSG);
+    try { await this.A.updatePassword(cu, String(password)); }
+    catch (e) { throw new Error(`비밀번호를 바꾸지 못했습니다 (${e.code || e.message})`); }
+    try { await this.F.updateDoc(this._doc('users', cu.uid), { tempPw: this.F.deleteField() }); }
+    catch (e) { throw new Error(`비밀번호는 바뀌었지만 마무리하지 못했습니다. 새 비밀번호로 다시 로그인하세요 (${e.code || e.message})`); }
     return this._settle();
   }
 
@@ -232,12 +264,13 @@ export class FirebaseAccountStore {
     if (flush) flush.finally(out); else out();
   }
 
-  /** 비밀번호 바꾸기 (운영자 화면): 지금 비밀번호로 다시 확인한 뒤 새 비밀번호(12자 이상)로 */
+  /** 비밀번호 바꾸기 (내 정보·운영자 화면): 지금 비밀번호로 다시 확인한 뒤 새 비밀번호로 (회원 8자 이상 영문+숫자, 운영자는 12자 이상도) */
   async changePassword(current, next) {
     const cu = this.auth.currentUser;
     if (!this.user || !cu) throw new Error('로그인이 필요합니다');
-    const err = validateStrongPassword(next);
+    const err = validateNewPassword(next, { id: this.user.loginId, nick: this.user.nick, admin: !!this.user.admin });
     if (err) throw new Error(err);
+    if (String(next) === String(current)) throw new Error('새 비밀번호가 지금 비밀번호와 같습니다');
     try { await this.A.reauthenticateWithCredential(cu, this.A.EmailAuthProvider.credential(cu.email, String(current))); }
     catch (e) { throw new Error(BAD_LOGIN.includes(e.code) ? '지금 비밀번호가 맞지 않습니다' : `확인 실패 (${e.code || e.message})`); }
     try { await this.A.updatePassword(cu, String(next)); }

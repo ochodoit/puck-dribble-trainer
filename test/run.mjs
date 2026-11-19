@@ -445,7 +445,7 @@ const skipSetup = async (page, touch = false) => {
   page.once('dialog', (d) => d.accept());
   await page.click('#adm-lot-ok');
   await page.waitForFunction(() => document.querySelector('#adm-lot-out').textContent.includes('확정된 당첨자 1명'));
-  const won = await page.evaluate(() => ({ row: document.querySelector('#adm-betas tr[data-nick="test123"] td:nth-child(5)').textContent, sum: document.querySelector('#adm-beta-sum').textContent,
+  const won = await page.evaluate(() => ({ row: document.querySelector('#adm-betas tr[data-nick="test123"] td:nth-child(6)').textContent, id: document.querySelector('#adm-betas tr[data-nick="test123"] td:nth-child(3)').textContent, sum: document.querySelector('#adm-beta-sum').textContent,
     ok: document.querySelector('#adm-lot-ok').classList.contains('hidden'), copy: !document.querySelector('#adm-lot-copy').classList.contains('hidden') }));
   await page.click('[data-close="panel-admin"]');
   const chipWin = await page.evaluate(() => document.querySelector('#auth-who .beta-chip')?.textContent || '');
@@ -453,7 +453,7 @@ const skipSetup = async (page, touch = false) => {
     && chip2.includes('이용권 추첨 응모 완료');
   console.log(`${fbOk ? 'PASS' : 'FAIL'} beta end date -> member sends [To the developer] feedback -> entered in the 3-month pass draw, operator reads it (${JSON.stringify({ betaRows, chip1, chip2, toastFb, sum1 })})`);
   if (!fbOk) failed = true;
-  const lotOk = draft.includes('추첨 결과 1명') && draft.includes('test123') && won.row.includes('이용권') && won.sum.includes('이용권 1명') && won.ok && won.copy && chipWin.startsWith('3개월 이용권 ·');
+  const lotOk = draft.includes('추첨 결과 1명') && draft.includes('test123') && won.row.includes('이용권') && won.id === 'opsadmin' && won.sum.includes('이용권 1명') && won.ok && won.copy && chipWin.startsWith('3개월 이용권 ·');
   console.log(`${lotOk ? 'PASS' : 'FAIL'} operator draws among feedback senders, confirms -> winner gets a 3-month pass (${JSON.stringify({ draft: draft.slice(0, 40), won, chipWin })})`);
   if (!lotOk) failed = true;
   // 내 정보 > 친구 초대: 내 초대 링크(3명) -> 다른 탭에서 그 링크로 들어오면 '○○님의 초대 링크예요' + 가입하면 바로 정회원
@@ -522,6 +522,62 @@ const skipSetup = async (page, touch = false) => {
     && upWho.includes('옛친구') && upAfter.byNick === '이제 아이디로 로그인하세요 (아이디를 잊었으면 운영자에게 문의하세요)' && upAfter.oldPin === '아이디 또는 비밀번호가 맞지 않습니다' && upAfter.who === '옛친구';
   console.log(`${upOk ? 'PASS' : 'FAIL'} old nickname + 6-digit account: login opens "create ID", then only the ID + new password works (${JSON.stringify({ upForm, upWho: upWho.trim().slice(0, 30), upAfter })})`);
   if (!upOk) failed = true;
+  // 내 정보 > 비밀번호 바꾸기: 확인이 다르면 안내, 맞으면 바뀌고 새 비밀번호로만 로그인
+  await page.click('#btn-me');
+  await page.waitForSelector('#me-body:not(.hidden)');
+  await page.click('#me-pw-toggle');
+  const pwOpen = await page.evaluate(() => ({ form: !document.querySelector('#me-pw').classList.contains('hidden'), user: document.querySelector('#me-pw-user').value, ph: document.querySelector('#me-pw-new').placeholder }));
+  await page.fill('#me-pw-cur', 'puck2026'); await page.fill('#me-pw-new', 'puck2027'); await page.fill('#me-pw-new2', 'puck2028');
+  await page.click('#me-pw-save');
+  const pwMismatch = await page.textContent('#me-pw-msg');
+  await page.fill('#me-pw-cur', 'wrong999'); await page.fill('#me-pw-new2', 'puck2027');
+  await page.click('#me-pw-save');
+  await page.waitForFunction(() => document.querySelector('#me-pw-msg').textContent.includes('지금 비밀번호'));
+  await page.fill('#me-pw-cur', 'puck2026');
+  await page.click('#me-pw-save');
+  await page.waitForSelector('#me-pw.hidden', { state: 'attached' });
+  const pwToast = await page.textContent('#toast');
+  const pwCleared = await page.evaluate(() => document.querySelector('#me-pw-cur').value === '' && document.querySelector('#me-pw-new').value === '');
+  await page.click('[data-close="panel-me"]');
+  const pwAfter = await page.evaluate(async () => {
+    const a = window.__puckTrainer.account; a.logout();
+    let oldPw = ''; try { await a.login('bungae11', 'puck2026'); } catch (e) { oldPw = e.message; }
+    await a.login('bungae11', 'puck2027'); const ok = a.current()?.nick === '번개손';
+    await a.changePassword('puck2027', 'puck2026'); // 다음 검사를 위해 되돌림
+    return { oldPw, ok };
+  });
+  const pwOk = pwOpen.form && pwOpen.user === 'bungae11' && pwOpen.ph === '8자 이상, 영문+숫자' && pwMismatch === '새 비밀번호가 서로 다릅니다' && pwToast.includes('비밀번호를 바꿨습니다') && pwCleared
+    && pwAfter.oldPw === '아이디 또는 비밀번호가 맞지 않습니다' && pwAfter.ok;
+  console.log(`${pwOk ? 'PASS' : 'FAIL'} My info > change password: mismatch and wrong current are shown, then only the new password logs in (${JSON.stringify({ pwOpen, pwMismatch, pwToast, pwCleared, pwAfter })})`);
+  if (!pwOk) failed = true;
+  // 비밀번호를 잊었어요 -> 인스타 DM 안내. 운영자가 임시 비밀번호를 주면: 로그인 -> 새 비밀번호만 정하는 화면(아이디 칸 없음) -> 임시 비밀번호는 못 씀 -> 정하면 로그인
+  await page.evaluate(async () => { const a = window.__puckTrainer.account; await a._setTempPassword('bungae11', 'abcd-efgh-2345'); a.logout(); });
+  await page.click('#btn-settings'); await page.click('#btn-settings-login');
+  await page.waitForSelector('#panel-login:not(.hidden)');
+  const fgHidden = await page.evaluate(() => document.querySelector('#auth-forgot-box').classList.contains('hidden'));
+  await page.click('#auth-forgot');
+  const forgot = await page.evaluate(() => ({ open: !document.querySelector('#auth-forgot-box').classList.contains('hidden'), exp: document.querySelector('#auth-forgot').getAttribute('aria-expanded'),
+    text: document.querySelector('#auth-forgot-box').textContent, dm: document.querySelector('#auth-forgot-dm a')?.getAttribute('href') || '' }));
+  await page.fill('#auth-id', 'bungae11'); await page.fill('#auth-pin', 'abcd-efgh-2345');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#auth-cancel:not(.hidden)');
+  const tForm = await page.evaluate(() => ({ idHidden: document.querySelector('#auth-id-label').classList.contains('hidden'), hint: !document.querySelector('.upgrade-pw-only').classList.contains('hidden'),
+    idHint: !document.querySelector('.upgrade-id-only').classList.contains('hidden'), tempId: document.querySelector('#auth-temp-id').textContent, btn: document.querySelector('#auth-submit').textContent,
+    pin2: !!document.querySelector('#auth-pin2').offsetParent, forgot: !!document.querySelector('#auth-forgot').offsetParent, cur: window.__puckTrainer.account.current(), focus: document.activeElement?.id }));
+  await page.fill('#auth-pin', 'abcd-efgh-2345'); await page.fill('#auth-pin2', 'abcd-efgh-2345');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#auth-error:not(.hidden)');
+  const tSame = await page.textContent('#auth-error');
+  await page.fill('#auth-pin', 'puck2026'); await page.fill('#auth-pin2', 'puck2026');
+  await page.evaluate(() => document.querySelector('#auth-form').requestSubmit());
+  await page.waitForSelector('#panel-login.hidden', { state: 'attached' });
+  const tDone = await page.evaluate(() => ({ who: document.querySelector('#auth-who').textContent.trim().slice(0, 20), toast: document.querySelector('#toast').textContent,
+    flag: !!JSON.parse(localStorage.getItem('puck-trainer.users.v1'))['번개손'].tempPw, cur: window.__puckTrainer.account.current()?.loginId }));
+  const tOk = fgHidden && forgot.open && forgot.exp === 'true' && forgot.text.includes('메일') && forgot.dm === 'https://ig.me/m/puck.official'
+    && tForm.idHidden && tForm.hint && !tForm.idHint && tForm.tempId === 'bungae11' && tForm.btn === '새 비밀번호 정하기' && tForm.pin2 && !tForm.forgot && tForm.cur === null && tForm.focus === 'auth-pin'
+    && tSame === '지금(임시) 비밀번호와 다른 비밀번호를 정하세요' && tDone.who.includes('번개손') && tDone.toast.includes('새 비밀번호로 바꿨습니다') && !tDone.flag && tDone.cur === 'bungae11';
+  console.log(`${tOk ? 'PASS' : 'FAIL'} forgot password -> Instagram DM guide; temp password login asks only for a new password (not the temp one), then logs in (${JSON.stringify({ fgHidden, forgot: { ...forgot, text: forgot.text.slice(0, 30) }, tForm, tSame, tDone })})`);
+  if (!tOk) failed = true;
   // 베타 종료일이 지난 무료 정회원(번개손): 결과가 랭킹에 안 올라가고 안내 + 프로필 줄에 '베타 종료'
   await page.evaluate(() => { const k = 'puck-trainer.site.v1'; localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k)), betaEndsAt: Date.now() - 1000 })); });
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 99, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 99]] }); });
@@ -990,6 +1046,14 @@ const skipSetup = async (page, touch = false) => {
 {
   const { checkRanks } = await import('./rank-firebase.mjs');
   const { ok, logs } = await checkRanks().catch((e) => ({ ok: false, logs: [`FAIL online ranking check threw: ${e.stack || e}`] }));
+  for (const l of logs) console.log(l);
+  if (!ok) failed = true;
+}
+
+// ---- 8b) 운영자 임시 비밀번호 도구 (가짜 Auth·Firestore): 회원 찾기·임시 비밀번호·재설정 순서·DM 문구 ----
+{
+  const { checkAdminReset } = await import('./admin-reset.mjs');
+  const { ok, logs } = await checkAdminReset().catch((e) => ({ ok: false, logs: [`FAIL admin reset check threw: ${e.stack || e}`] }));
   for (const l of logs) console.log(l);
   if (!ok) failed = true;
 }

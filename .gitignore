@@ -9,3 +9,9 @@ test/screenshot-course.png
 # 디버그 로그 (개인정보가 들어 있을 수 있음)
 firebase-debug.log
 *-debug.log
+
+# 운영자 도구: Firebase 서비스 계정 키는 저장소 밖에 둘 것 (실수로 넣어도 올라가지 않게)
+*firebase-adminsdk*.json
+service-account*.json
+serviceAccount*.json
+tools/admin/*key*.json

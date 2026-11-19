@@ -12,6 +12,8 @@ rules_version = '2';
 //  7) 초대 코드: 정회원 한 사람당 하나, 3명까지, 추가 없음 (프로필의 invite 칸과 한 묶음으로 한 번만 만든다)
 //  8) 로그인 아이디: 로그인은 아이디 + 비밀번호, 랭킹에 보이는 이름은 별명 (따로). 아이디는 ids/{아이디} 로 하나뿐이고,
 //     새 가입은 로그인 주소가 그 아이디 주소(id.<아이디>@…)여야 한다. 예전 계정(별명 + 숫자 6자리)은 아이디를 한 번만 만든다
+//  9) 임시 비밀번호: 운영자가 서버 도구(Admin SDK, 규칙을 거치지 않음)로 비밀번호를 바꾸고 users/{uid}.tempPw 를 적는다.
+//     회원은 새 비밀번호를 정한 뒤 tempPw 를 지울 수만 있다 (스스로 만들거나 다른 칸과 섞어 바꿀 수 없음)
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -169,9 +171,15 @@ service cloud.firestore {
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['age', 'ageGroup'])
           || request.resource.data.ageGroup == ageGroupFor(request.resource.data.age));
       // 본인(예전 계정): 아이디를 처음 한 번 만든다 (새로 만드는 ids/{아이디} 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
+      // 임시 비밀번호를 받은 예전 계정이면 같은 묶음에서 tempPw 도 지운다
       allow update: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loginId'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loginId', 'tempPw'])
+        && !('tempPw' in request.resource.data)
         && !('loginId' in resource.data) && loginIdOk(request.resource.data, uid);
+      // 본인: 임시 비밀번호(운영자가 줌)를 새 비밀번호로 바꾼 뒤 tempPw 표시를 지운다 (지우기만)
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tempPw'])
+        && !('tempPw' in request.resource.data);
       // 본인: 내 초대 코드를 처음 한 번 연결 (새로 만드는 코드 문서와 같은 묶음, 바꾸거나 더 만들 수 없음)
       allow update: if request.auth != null && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invite'])

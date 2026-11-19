@@ -206,8 +206,9 @@
               <button type="button" class="tab" data-tab="register">회원가입</button>
             </div>
             <div class="auth-grid">
-              <p class="upgrade-only hidden auth-hint">이제 로그인은 아이디로 합니다. 아이디와 새 비밀번호를 만들어 주세요. 별명과 기록은 그대로예요. <span class="muted">예전 계정:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
-              <label>아이디<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="예: puckking07" required /></label>
+              <p class="upgrade-id-only hidden auth-hint">이제 로그인은 아이디로 합니다. 아이디와 새 비밀번호를 만들어 주세요. 별명과 기록은 그대로예요. <span class="muted">예전 계정:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
+              <p class="upgrade-pw-only hidden auth-hint">임시 비밀번호로 로그인했어요. 나만 아는 새 비밀번호를 정해야 시작할 수 있어요. <span class="muted">아이디:</span> <b id="auth-temp-id" data-ugc></b></p>
+              <label id="auth-id-label">아이디<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="예: puckking07" required /></label>
               <label>비밀번호<input id="auth-pin" type="password" maxlength="64" autocomplete="current-password" placeholder="8자 이상, 영문+숫자" required /></label>
               <label class="new-pw hidden">비밀번호 확인<input id="auth-pin2" type="password" maxlength="64" autocomplete="new-password" placeholder="비밀번호를 한 번 더" /></label>
               <label class="reg-only hidden">플레이어 별명<input id="auth-nick" type="text" maxlength="12" placeholder="예: 번개손" /></label>
@@ -226,6 +227,19 @@
             <p class="reg-only hidden auth-hint">아이디는 로그인에만 쓰고 공개되지 않아요 (4~20자, 영문 소문자로 시작, 영문·숫자·_). 별명은 랭킹에 공개되니 실명 대신 쓰고, 아이디와 다르게 정하세요. 비밀번호는 8자 이상, 영문과 숫자를 함께 넣으세요.</p>
             <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요.</p>
             <p class="login-only auth-hint muted">예전에 별명과 숫자 6자리로 가입했다면 별명과 그 비밀번호로 로그인하세요. 아이디를 한 번 새로 만들게 됩니다.</p>
+            <div class="login-only auth-forgot">
+              <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">비밀번호를 잊었어요</button>
+              <div id="auth-forgot-box" class="forgot-box hidden">
+                <p>가입할 때 메일 주소를 받지 않아서 비밀번호 찾기 메일은 보낼 수 없어요. 공식 인스타그램으로 DM을 보내 주세요.</p>
+                <ol class="forgot-steps">
+                  <li>DM에 아이디(모르면 별명), 팀 이름, 나이, 스틱(L/R), 가입한 때(대략)를 적어 주세요.</li>
+                  <li>운영자가 확인한 뒤 임시 비밀번호를 DM으로 보내 드려요.</li>
+                  <li>임시 비밀번호로 로그인하면 바로 새 비밀번호를 정하게 됩니다.</li>
+                </ol>
+                <div id="auth-forgot-dm" class="guest-dm"></div>
+                <p class="muted">어린이 회원은 보호자가 대신 보내 주세요. 운영자는 DM으로 비밀번호를 먼저 묻지 않아요.</p>
+              </div>
+            </div>
             <p id="auth-error" class="error hidden"></p>
             <div class="row" style="justify-content:center">
               <button type="submit" id="auth-submit" class="btn btn-primary">로그인</button>
@@ -448,7 +462,7 @@
         <div id="me-body">
           <section class="me-sec">
             <div id="me-card" class="me-profile"></div>
-            <button type="button" id="me-edit-toggle" class="btn btn-ghost">프로필 수정</button>
+            <div class="row me-acts"><button type="button" id="me-edit-toggle" class="btn btn-ghost">프로필 수정</button><button type="button" id="me-pw-toggle" class="btn btn-ghost">비밀번호 바꾸기</button></div>
             <form id="me-edit" class="me-edit hidden" autocomplete="off">
               <div class="adm-row">
                 <label>국가<select id="me-country"></select></label>
@@ -464,6 +478,17 @@
               </div>
               <p id="me-edit-msg" class="error hidden"></p>
               <div class="row"><button type="submit" id="me-edit-save" class="btn btn-primary">저장</button><button type="button" id="me-edit-cancel" class="btn btn-ghost">취소</button></div>
+            </form>
+            <form id="me-pw" class="me-edit hidden">
+              <input id="me-pw-user" type="text" autocomplete="username" class="hidden" tabindex="-1" aria-hidden="true" />
+              <div class="adm-row">
+                <label>지금 비밀번호<input id="me-pw-cur" type="password" maxlength="64" autocomplete="current-password" required /></label>
+                <label>새 비밀번호<input id="me-pw-new" type="password" maxlength="64" autocomplete="new-password" placeholder="8자 이상, 영문+숫자" required /></label>
+                <label>새 비밀번호 확인<input id="me-pw-new2" type="password" maxlength="64" autocomplete="new-password" placeholder="새 비밀번호를 한 번 더" required /></label>
+              </div>
+              <p class="muted">지금 비밀번호를 모르면 로그아웃한 뒤 로그인 화면의 '비밀번호를 잊었어요'를 보세요.</p>
+              <p id="me-pw-msg" class="error hidden"></p>
+              <div class="row"><button type="submit" id="me-pw-save" class="btn btn-primary">바꾸기</button><button type="button" id="me-pw-cancel" class="btn btn-ghost">취소</button></div>
             </form>
           </section>
           <section class="me-sec">
@@ -570,7 +595,7 @@
             <button type="button" id="adm-save-beta-end" class="btn">저장</button>
           </div>
           <p id="adm-beta-sum" class="muted"></p>
-          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>번호</th><th>별명</th><th>가입</th><th>의견</th><th>상태</th><th></th></tr></thead><tbody id="adm-betas"></tbody></table></div>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>번호</th><th>별명</th><th>아이디</th><th>가입</th><th>의견</th><th>상태</th><th></th></tr></thead><tbody id="adm-betas"></tbody></table></div>
         </section>
         <section class="adm-sec">
           <h3>개발자에게 온 의견</h3>

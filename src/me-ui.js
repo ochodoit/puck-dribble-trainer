@@ -41,6 +41,39 @@ export function initMe(deps) {
     const f = $('#me-edit');
     if (f.classList.contains('hidden')) fillEdit();
     f.classList.toggle('hidden');
+    $('#me-pw').classList.add('hidden');
+  });
+  // 비밀번호 바꾸기: 지금 비밀번호를 확인하고 새 비밀번호로 (회원 8자 이상 영문+숫자, 운영자는 12자 이상)
+  const pwForm = $('#me-pw');
+  const clearPw = () => { ['#me-pw-cur', '#me-pw-new', '#me-pw-new2'].forEach((s) => { $(s).value = ''; }); $('#me-pw-msg').classList.add('hidden'); };
+  $('#me-pw-toggle').addEventListener('click', () => {
+    const show = pwForm.classList.contains('hidden');
+    clearPw();
+    if (show) {
+      const u = app.account.current();
+      $('#me-pw-user').value = u?.loginId || '';
+      $('#me-pw-new').placeholder = u?.admin ? '12자 이상, 영문+숫자' : '8자 이상, 영문+숫자';
+    }
+    pwForm.classList.toggle('hidden', !show);
+    $('#me-edit').classList.add('hidden');
+    if (show) $('#me-pw-cur').focus();
+  });
+  $('#me-pw-cancel').addEventListener('click', () => { clearPw(); pwForm.classList.add('hidden'); });
+  pwForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = $('#me-pw-msg'), btn = $('#me-pw-save');
+    const fail = (t) => { msg.textContent = t; msg.classList.remove('hidden'); };
+    msg.classList.add('hidden');
+    if ($('#me-pw-new').value !== $('#me-pw-new2').value) { fail('새 비밀번호가 서로 다릅니다'); return; }
+    btn.disabled = true;
+    try {
+      await app.account.changePassword($('#me-pw-cur').value, $('#me-pw-new').value);
+      clearPw();
+      pwForm.classList.add('hidden');
+      toast('비밀번호를 바꿨습니다. 다음부터 새 비밀번호로 로그인하세요', 4000);
+    } catch (err) {
+      fail(err.message || String(err));
+    } finally { btn.disabled = false; }
   });
   $('#me-edit-cancel').addEventListener('click', () => $('#me-edit').classList.add('hidden'));
   $('#me-edit').addEventListener('submit', async (e) => {
@@ -215,6 +248,7 @@ export function initMe(deps) {
     $('#me-body').classList.toggle('hidden', !u);
     if (!u) return;
     $('#me-edit').classList.add('hidden');
+    clearPw(); pwForm.classList.add('hidden');
     renderProfile();
     renderInvite();
     view.act = null;

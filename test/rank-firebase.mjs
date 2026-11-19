@@ -178,6 +178,54 @@ export async function checkRanks() {
       && r.weak === '비밀번호에 영문과 숫자를 함께 넣으세요' && r.taken === L.ID_TAKEN && r.upgrade === 'ok'
       && r.ids?.uid === 'old1' && r.ids?.email === sa._email('옛친구') && r.profile === 'oldfriend' && r.cur === 'oldfriend'
       && r.byId && r.byNick === L.USE_ID_MSG && r.afterNick.cur === null && !r.afterNick.signedIn && r.oldPin === L.BAD_LOGIN_MSG, r);
+
+    // 임시 비밀번호 (운영자가 tools/admin/reset-password.mjs 로 줌 = 비밀번호를 바꾸고 users/{uid}.tempPw = true)
+    const DEL = '__DELETE_FIELD__';
+    const patch = (prev, d) => { const o = { ...prev }; for (const [k, v] of Object.entries(d)) { if (v === DEL) delete o[k]; else o[k] = v; } return o; };
+    FA.deleteField = () => DEL;
+    FA.updateDoc = async (ref, d) => { FA.docs.set(ref.path, patch(FA.docs.get(ref.path), d)); };
+    FA.writeBatch = () => { const ops = []; return { set: (rf, d) => ops.push(() => FA.docs.set(rf.path, { ...d })), update: (rf, d) => ops.push(() => FA.docs.set(rf.path, patch(FA.docs.get(rf.path), d))), commit: async () => ops.forEach((f) => f()) }; };
+    A.EmailAuthProvider = { credential: (email, password) => ({ email, password }) };
+    A.reauthenticateWithCredential = async (cu, c) => { if (accounts.get(cu.email)?.password !== c.password) throw bad(); };
+    const giveTemp = (email, uid, temp) => { accounts.get(email).password = temp; FA.docs.set(`users/${uid}`, { ...FA.docs.get(`users/${uid}`), tempPw: true }); };
+    const t = {};
+    sa.logout();
+    giveTemp('id.newbie@demo.firebaseapp.com', 'new1', 'abcd-efgh-2345');
+    t.login = await msg(() => sa.login('newbie', 'abcd-efgh-2345'));
+    t.waiting = { cur: sa.current(), up: sa.needsUpgrade() };
+    t.notId = await msg(() => sa.upgradeLogin('newbie2', 'fresh2026'));
+    t.weak = await msg(() => sa.resetTempPassword('12345678'));
+    t.same = await msg(() => sa.resetTempPassword('abcd-efgh-2345'));
+    t.reset = await msg(() => sa.resetTempPassword('fresh2026'));
+    t.after = { nick: sa.current()?.nick, flag: 'tempPw' in FA.docs.get('users/new1'), pw: accounts.get('id.newbie@demo.firebaseapp.com').password };
+    sa.logout();
+    t.relogin = await msg(() => sa.login('newbie', 'fresh2026')) === 'ok' && sa.current()?.nick === '뉴비';
+    t.wrongCur = await msg(() => sa.changePassword('nope1234', 'fresh2027'));
+    t.sameCur = await msg(() => sa.changePassword('fresh2026', 'fresh2026'));
+    t.change = await msg(() => sa.changePassword('fresh2026', 'fresh2027'));
+    t.changed = accounts.get('id.newbie@demo.firebaseapp.com').password;
+    sa.logout();
+    // 아이디를 만든 예전 계정(로그인 주소는 예전 별명 주소): 별명 + 임시 비밀번호로는 못 들어오고 아이디로
+    giveTemp(sa._email('옛친구'), 'old1', 'temp-oldf-2345');
+    t.nickTemp = await msg(() => sa.login('옛친구', 'temp-oldf-2345'));
+    t.idTemp = await msg(() => sa.login('oldfriend', 'temp-oldf-2345')) === 'ok' && sa.needsUpgrade()?.kind === 'password';
+    sa.logout();
+    // 아이디가 없는 예전 계정이 임시 비밀번호를 받음: 아이디 만들기에서 새 비밀번호도 정하고 tempPw 도 지운다
+    accounts.set(sa._email('옛둘'), { uid: 'old2', password: 'x' });
+    FA.docs.set('users/old2', { nick: '옛둘', nickLower: '옛둘', country: 'KR', team: 'T', age: 30, ageGroup: '성인' });
+    giveTemp(sa._email('옛둘'), 'old2', 'temp-two2-2345');
+    t.old2 = await msg(() => sa.login('옛둘', 'temp-two2-2345'));
+    t.old2up = sa.needsUpgrade();
+    t.old2same = await msg(() => sa.upgradeLogin('oldtwo', 'temp-two2-2345'));
+    t.old2ok = await msg(() => sa.upgradeLogin('oldtwo', 'second2026'));
+    t.old2doc = FA.docs.get('users/old2');
+    check('R12 temp password: login stays out until a new password is set (not the temp one), the flag is cleared, then the new password works; members change passwords with the current one',
+      t.login === 'ok' && t.waiting.cur === null && t.waiting.up?.kind === 'password' && t.waiting.up?.loginId === 'newbie'
+      && t.notId === L.NEED_TEMP_MSG && t.weak === '비밀번호에 영문과 숫자를 함께 넣으세요' && t.same === L.SAME_PW_MSG && t.reset === 'ok'
+      && t.after.nick === '뉴비' && !t.after.flag && t.after.pw === 'fresh2026' && t.relogin
+      && t.wrongCur === '지금 비밀번호가 맞지 않습니다' && t.sameCur === '새 비밀번호가 지금 비밀번호와 같습니다' && t.change === 'ok' && t.changed === 'fresh2027'
+      && t.nickTemp === L.USE_ID_MSG && t.idTemp
+      && t.old2 === 'ok' && t.old2up?.kind === 'id' && t.old2same === L.SAME_PW_MSG && t.old2ok === 'ok' && t.old2doc.loginId === 'oldtwo' && !('tempPw' in t.old2doc), t);
   }
 
   check('R10 no query needs a composite index (single-field range/order or equality only)', F.queries.length > 0, { queries: F.queries.length });

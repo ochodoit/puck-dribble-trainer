@@ -55,6 +55,13 @@ export function validatePassword(pw, { id = null, nick = null } = {}) {
 export const BAD_LOGIN_MSG = '아이디 또는 비밀번호가 맞지 않습니다';
 export const USE_ID_MSG = '이제 아이디로 로그인하세요 (아이디를 잊었으면 운영자에게 문의하세요)';
 export const ID_TAKEN = '이미 사용 중인 아이디입니다';
+/** 운영자가 임시 비밀번호를 준 계정: 로그인한 뒤 새 비밀번호를 정해야 들어갈 수 있다 */
+export const NEED_TEMP_MSG = '먼저 운영자에게 받은 임시 비밀번호로 로그인하세요';
+export const SAME_PW_MSG = '지금(임시) 비밀번호와 다른 비밀번호를 정하세요';
+/** 회원 비밀번호 검사: 8자 이상 영문+숫자, 운영자는 12자 이상도 함께 */
+export function validateNewPassword(pw, { id = null, nick = null, admin = false } = {}) {
+  return validatePassword(pw, { id, nick }) || (admin ? validateStrongPassword(pw) : null);
+}
 /** 운영자처럼 보이는 별명은 쓸 수 없음 (firestore.rules 의 validNick 과 같은 목록) */
 export const RESERVED_NICK_RE = /(운영자|관리자|admin|official|퍽 ?트레이너|puck ?trainer)/i;
 /** 운영자 비밀번호: 12~64자 (숫자만 써도 됨). 같은 글자 반복·1234567890 으로 시작하는 것은 안 됨 */
@@ -342,19 +349,21 @@ export class LocalAccountStore {
     this.ACTIVITY = 'puck-trainer.activity.v1'; // { uid: 활동 기록 } 출석·최근 기록·누적 (activity.js)
     this.LOTTERY = 'puck-trainer.lottery.v1';   // { at, until, winners: [{ id, nick, memberNo }] } 의견 추첨
     this.user = null;
-    this.upgrade = null; // 예전 계정(별명 + 숫자 6자리)으로 로그인해 아이디를 아직 만들지 않음: { id, nick, admin }
+    // 로그인했지만 아직 못 들어온 계정: { id, nick, admin, kind, loginId }
+    //   kind 'id' = 예전 계정(별명 + 숫자 6자리)이라 아이디·새 비밀번호를 만들어야 함, 'password' = 운영자가 준 임시 비밀번호라 새 비밀번호를 정해야 함
+    this.upgrade = null;
     const nick = this._get(this.SESSION, null);
     if (nick) { const u = this._users()[normNick(nick)]; if (u) this._signIn(u); }
   }
-  /** 로그인 상태로: 아이디가 없는 예전 계정은 아이디·새 비밀번호를 만들 때까지 로그인 전으로 둔다 */
+  /** 로그인 상태로: 아이디가 없는 예전 계정·임시 비밀번호 계정은 새 비밀번호를 정할 때까지 로그인 전으로 둔다 */
   _signIn(u) {
-    if (u.loginId) { this.upgrade = null; this.user = this._public(u); this._set(this.SESSION, u.nick); return this.user; }
+    if (u.loginId && !u.tempPw) { this.upgrade = null; this.user = this._public(u); this._set(this.SESSION, u.nick); return this.user; }
     this.user = null;
-    this.upgrade = { id: u.id, nick: u.nick, admin: ADMIN_NICKS.includes(normNick(u.nick)) };
+    this.upgrade = { id: u.id, nick: u.nick, admin: ADMIN_NICKS.includes(normNick(u.nick)), kind: u.loginId ? 'password' : 'id', loginId: u.loginId || null };
     try { this.storage.removeItem(this.SESSION); } catch { /* ignore */ }
     return null;
   }
-  /** 예전 계정이 아이디를 만들어야 하면 { nick, admin }, 아니면 null */
+  /** 예전 계정이 아이디를 만들어야 하거나(kind 'id') 임시 비밀번호를 바꿔야 하면(kind 'password') { nick, admin, kind, loginId }, 아니면 null */
   needsUpgrade() { return this.upgrade; }
 
   _get(k, def) { try { const v = this.storage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } }
@@ -367,7 +376,7 @@ export class LocalAccountStore {
       id: u.id, loginId: u.loginId || null, nick: u.nick, number: Number.isInteger(u.number) ? u.number : null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup,
       stick: STICKS.includes(u.stick) ? u.stick : null, joinedAt: u.joinedAt || u.createdAt || null,
       memberNo: Number.isInteger(u.memberNo) ? u.memberNo : null, beta: !!u.beta, code: u.code || null, via: u.via || null,
-      kept: !!u.kept, feedbackAt: this._get(this.FEEDBACK, {})[u.id]?.at ?? null,
+      kept: !!u.kept, tempPw: !!u.tempPw, feedbackAt: this._get(this.FEEDBACK, {})[u.id]?.at ?? null,
       invite: u.invite || null, until: toMs(u.until), coupon: u.coupon || null,
       admin: ADMIN_NICKS.includes(normNick(u.nick)),
     };
@@ -612,25 +621,54 @@ export class LocalAccountStore {
   async upgradeLogin(loginId, password) {
     const up = this.upgrade;
     if (!up) throw new Error('먼저 별명과 예전 비밀번호로 로그인하세요');
-    const err = validateLoginId(loginId, up.nick) || validatePassword(password, { id: loginId, nick: up.nick }) || (up.admin ? validateStrongPassword(password) : null);
+    if (up.kind === 'password') throw new Error(NEED_TEMP_MSG);
+    const err = validateLoginId(loginId, up.nick) || validateNewPassword(password, { id: loginId, nick: up.nick, admin: up.admin });
     if (err) throw new Error(err);
     const users = this._users(), lid = normLoginId(loginId);
     if (this._byLoginId(users, lid)) throw new Error(ID_TAKEN);
     const u = users[up.id];
+    if (u.tempPw && u.pinHash === await hashPin(u.nick, password)) throw new Error(SAME_PW_MSG);
     u.loginId = lid;
     u.fromNick = true; // 예전 별명 계정에서 옮김
     u.pinHash = await hashPin(u.nick, password);
+    delete u.tempPw; // 임시 비밀번호를 받은 예전 계정이었으면 이제 끝
     this._set(this.USERS, users);
     return this._signIn(u);
   }
 
+  /** 임시 비밀번호(운영자가 줌)로 로그인한 뒤 새 비밀번호 정하기 */
+  async resetTempPassword(password) {
+    const up = this.upgrade;
+    if (up?.kind !== 'password') throw new Error(NEED_TEMP_MSG);
+    const err = validateNewPassword(password, { id: up.loginId, nick: up.nick, admin: up.admin });
+    if (err) throw new Error(err);
+    const users = this._users(), u = users[up.id];
+    if (u.pinHash === await hashPin(u.nick, password)) throw new Error(SAME_PW_MSG);
+    u.pinHash = await hashPin(u.nick, password);
+    delete u.tempPw;
+    this._set(this.USERS, users);
+    return this._signIn(u);
+  }
+
+  /** 운영자 재설정 흉내 (기기 내 저장소 테스트용. 실제 서비스는 tools/admin/reset-password.mjs): 임시 비밀번호를 주고 다음 로그인 때 바꾸게 함 */
+  async _setTempPassword(idOrNick, temp) {
+    const users = this._users();
+    const u = this._byLoginId(users, normLoginId(idOrNick)) || users[normNick(idOrNick)];
+    if (!u) throw new Error('그런 회원이 없습니다');
+    u.pinHash = await hashPin(u.nick, temp);
+    u.tempPw = true;
+    this._set(this.USERS, users);
+    return u.id;
+  }
+
   logout() { this.user = null; this.upgrade = null; try { this.storage.removeItem(this.SESSION); } catch { /* ignore */ } }
 
-  /** 비밀번호 바꾸기 (운영자 화면): 지금 비밀번호를 확인하고 새 비밀번호(12자 이상)로 */
+  /** 비밀번호 바꾸기 (내 정보·운영자 화면): 지금 비밀번호를 확인하고 새 비밀번호로 (회원 8자 이상 영문+숫자, 운영자는 12자 이상도) */
   async changePassword(current, next) {
     if (!this.user) throw new Error('로그인이 필요합니다');
-    const err = validateStrongPassword(next);
+    const err = validateNewPassword(next, { id: this.user.loginId, nick: this.user.nick, admin: isAdmin(this.user) });
     if (err) throw new Error(err);
+    if (String(next) === String(current)) throw new Error('새 비밀번호가 지금 비밀번호와 같습니다');
     const users = this._users(); const u = users[this.user.id];
     if (u.pinHash !== await hashPin(u.nick, current)) throw new Error('지금 비밀번호가 맞지 않습니다');
     u.pinHash = await hashPin(u.nick, next);

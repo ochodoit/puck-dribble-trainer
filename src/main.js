@@ -125,6 +125,7 @@ async function setupAuth() {
     $$('#auth-stick button').forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', String(on)); });
   }));
   els.authForm.addEventListener('submit', onAuthSubmit);
+  $('#auth-forgot').addEventListener('click', () => showForgot($('#auth-forgot-box').classList.contains('hidden')));
   $('#auth-guest').addEventListener('click', () => {
     els.authForm.classList.add('hidden'); els.authNote.textContent = '게스트: 기록이 랭킹에 올라가지 않습니다.';
     if (!app.started && !els.btnCamera.disabled) startCamera(); // 게스트로 시작 = 바로 카메라 시작
@@ -226,24 +227,46 @@ async function showInvite() {
 
 /**
  * 로그인 칸 모드: login(아이디 + 비밀번호), register(아이디·비밀번호·확인·별명·프로필),
- * upgrade(예전 별명 계정이 로그인한 뒤 아이디·새 비밀번호 만들기: 탭·게스트 버튼을 숨기고 로그아웃 버튼만)
+ * upgrade(로그인했지만 아직 못 들어온 계정: 탭·게스트 버튼을 숨기고 로그아웃 버튼만)
+ *   - 예전 별명 계정(kind 'id'): 아이디·새 비밀번호 만들기
+ *   - 임시 비밀번호 계정(kind 'password', 운영자가 재설정): 새 비밀번호만 정하기 (아이디 칸 숨김)
  */
 function setAuthTab(tab) {
   app.authTab = tab;
   const reg = tab === 'register', up = tab === 'upgrade';
+  const pend = up ? app.account?.needsUpgrade?.() : null, temp = pend?.kind === 'password';
   $$('.auth-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   $$('.reg-only').forEach((e) => e.classList.toggle('hidden', !reg));
   $$('.login-only').forEach((e) => e.classList.toggle('hidden', tab !== 'login'));
   $$('.upgrade-only').forEach((e) => e.classList.toggle('hidden', !up));
+  $$('.upgrade-id-only').forEach((e) => e.classList.toggle('hidden', !up || temp));
+  $$('.upgrade-pw-only').forEach((e) => e.classList.toggle('hidden', !temp));
+  $('#auth-id-label').classList.toggle('hidden', temp);
+  $('#auth-id').required = !temp;
+  if (tab !== 'login') showForgot(false);
   $$('.new-pw').forEach((e) => e.classList.toggle('hidden', !reg && !up));
   $('#auth-tabs').classList.toggle('hidden', up);
   $('#auth-guest').classList.toggle('hidden', up);
-  if (up) $('#auth-upgrade-nick').textContent = app.account?.needsUpgrade?.()?.nick || '';
-  els.authSubmit.textContent = reg ? '가입하고 시작' : up ? '아이디 만들기' : '로그인';
+  if (up) $('#auth-upgrade-nick').textContent = pend?.nick || '';
+  if (temp) $('#auth-temp-id').textContent = pend.loginId || '';
+  els.authSubmit.textContent = reg ? '가입하고 시작' : temp ? '새 비밀번호 정하기' : up ? '아이디 만들기' : '로그인';
   $('#auth-id').placeholder = up || reg ? '4~20자, 영문 소문자로 시작' : '예: puckking07';
   $('#auth-pin').setAttribute('autocomplete', reg || up ? 'new-password' : 'current-password');
-  $('#auth-pin').placeholder = up ? '새 비밀번호 (8자 이상, 영문+숫자)' : reg ? '8자 이상, 영문+숫자' : '';
+  $('#auth-pin').placeholder = up ? (pend?.admin ? '새 비밀번호 (12자 이상, 영문+숫자)' : '새 비밀번호 (8자 이상, 영문+숫자)') : reg ? '8자 이상, 영문+숫자' : '';
   els.authError.classList.add('hidden');
+}
+
+/** 로그인 칸의 '비밀번호를 잊었어요': 메일로 찾을 수 없으니 공식 인스타 DM으로 운영자에게 (임시 비밀번호를 받음) */
+function showForgot(on) {
+  const box = $('#auth-forgot-box');
+  box.classList.toggle('hidden', !on);
+  $('#auth-forgot').setAttribute('aria-expanded', String(on));
+  if (!on) return;
+  const sns = instaId(app.site?.snsAccount);
+  $('#auth-forgot-dm').innerHTML = sns
+    ? `<a class="btn btn-primary" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span>`
+    : '<span class="muted">공식 인스타 주소를 아직 정하지 않았습니다. 가입 코드를 받은 곳으로 문의해 주세요.</span>';
+  track('forgot_password');
 }
 
 async function onAuthSubmit(e) {
@@ -260,13 +283,17 @@ async function onAuthSubmit(e) {
       $('#auth-code').value = '';
       toast(`환영합니다, ${app.account.current().nick}! ${memberBadge(app.account.current())}`, 4000);
       track('sign_up', { method: ['beta', 'invite'].includes(app.account.current()?.via) ? app.account.current().via : 'one' });
+    } else if (tab === 'upgrade' && app.account.needsUpgrade?.()?.kind === 'password') {
+      await app.account.resetTempPassword(password);
+      toast('새 비밀번호로 바꿨습니다. 다음부터 새 비밀번호로 로그인하세요', 4000);
+      track('login', { method: 'temp' });
     } else if (tab === 'upgrade') {
       await app.account.upgradeLogin(loginId, password);
       toast('아이디를 만들었습니다. 다음부터 아이디로 로그인하세요', 4000);
       track('login', { method: 'upgrade' });
     } else {
       await app.account.login(loginId, password);
-      if (app.account.needsUpgrade?.()) { // 예전 별명 계정: 아이디·새 비밀번호를 만들어야 로그인 완료
+      if (app.account.needsUpgrade?.()) { // 예전 별명 계정(아이디·새 비밀번호) 또는 임시 비밀번호(새 비밀번호)를 정해야 로그인 완료
         $('#auth-id').value = '';
         setAuthTab('upgrade');
       } else track('login', { method: 'id' });
@@ -274,7 +301,7 @@ async function onAuthSubmit(e) {
     $('#auth-pin').value = ''; $('#auth-pin2').value = '';
     els.authError.classList.add('hidden');
     refreshAuthUI();
-    if (app.authTab === 'upgrade') $('#auth-id').focus();
+    if (app.authTab === 'upgrade') (app.account.needsUpgrade?.()?.kind === 'password' ? $('#auth-pin') : $('#auth-id')).focus();
   } catch (err) {
     fail(err.message || String(err));
   } finally { els.authSubmit.disabled = false; }
@@ -663,8 +690,9 @@ async function renderAdminBeta(a) {
     const del = '<button type="button" class="btn btn-ghost btn-del" data-act="delete">삭제</button>';
     const state = `${BETA_LABEL[st[i]] || ''}${u.until ? ` · ${st[i] === 'coupon' ? '' : '이용권 '}${ymd(u.until)}까지` : ''}`;
     return `<tr data-uid="${esc(u.id)}" data-nick="${esc(u.nick)}" data-state="${st[i]}" class="${st[i] === 'lapsed' ? 'dim' : ''}"><td>${memberNoLabel(u.memberNo)}</td><td data-ugc>${esc(u.nick)}</td>
+      <td><span data-ugc>${esc(u.loginId || '-')}</span>${u.tempPw ? ' <span class="chip-temp">임시 비밀번호</span>' : ''}</td>
       <td>${joinLabel(u)}</td><td>${u.feedbackAt ? ymd(u.feedbackAt) : '-'}</td><td>${state}</td><td class="adm-acts">${keep}${coupon}${del}</td></tr>`;
-  }).join('') : '<tr><td colspan="6" class="muted">회원이 없습니다</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="muted">회원이 없습니다</td></tr>';
   $('#adm-feedback').innerHTML = fbs.length ? fbs.map((f) => `<article class="fb-item" data-uid="${esc(f.uid)}" data-nick="${esc(f.nick)}">
     <header><b data-ugc>${esc(f.nick)}</b> <span>${memberNoLabel(f.memberNo)}</span> <time>${f.updatedAt ? ymd(f.updatedAt) : ''}</time><button type="button" class="btn btn-ghost btn-del" data-act="delete-fb">삭제</button></header>
     ${f.good ? `<p><em>좋았던 점</em><span data-ugc>${esc(f.good)}</span></p>` : ''}${f.fix ? `<p><em>고쳤으면 하는 점</em><span data-ugc>${esc(f.fix)}</span></p>` : ''}</article>`).join('')

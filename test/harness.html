@@ -17,7 +17,7 @@
   import { makeFloorMapping } from '../src/geometry.js';
   import { memberStats, lastDays } from '../src/stats.js';
   import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
-  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit, addMonths, couponUntil, lotteryPool, drawLottery, INVITE_MAX, codeInfo } from '../src/account.js';
+  import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit, addMonths, couponUntil, lotteryPool, drawLottery, INVITE_MAX, codeInfo, SAME_PW_MSG, NEED_TEMP_MSG } from '../src/account.js';
   // 계정 테스트 도우미 (아이디 + 비밀번호 로그인): 별명 -> 아이디(u + 별명의 hex), 예전 숫자 6자리 -> 비밀번호(pw + 숫자)
   const ID = (nick) => ('u' + [...new TextEncoder().encode(String(nick).trim().toLowerCase())].map((b) => b.toString(16).padStart(2, '0')).join('')).slice(0, 20);
   const PW = (pin) => `pw${pin}`;
@@ -732,6 +732,22 @@
       let upWeak = null; try { await la.upgradeLogin('opsadmin', 'ops12345'); } catch (e) { upWeak = e.message; }
       await la.upgradeLogin('opsadmin', 'ops-admin-2026');
       check('L0 old nickname account (no ID): login waits for an ID; operator needs a 12+ password', upNeeded && upWeak === '새 비밀번호는 12~64자' && la.current()?.loginId === 'opsadmin', { upNeeded, upWeak });
+      let admShort = null; try { await la.changePassword('ops-admin-2026', 'ops-2026-x'); } catch (e) { admShort = e.message; }
+      await la.changePassword('ops-admin-2026', 'ops-admin-2027');
+      la.logout();
+      const admBack = await la.login('opsadmin', 'ops-admin-2027');
+      // 아이디가 없는 예전 계정이 임시 비밀번호를 받음: 별명 + 임시 비밀번호 -> 아이디 만들기(임시 비밀번호는 못 씀) -> 표시가 지워짐
+      la.logout();
+      await la._setTempPassword('Old2', 'temp-wxyz-2345');
+      const o2t = await la.login('Old2', 'temp-wxyz-2345');
+      const o2up = la.needsUpgrade();
+      let o2same = null; try { await la.upgradeLogin('oldtwo', 'temp-wxyz-2345'); } catch (e) { o2same = e.message; }
+      const o2ok = await la.upgradeLogin('oldtwo', 'second2026');
+      const o2rec = JSON.parse(ls.getItem('puck-trainer.users.v1')).old2;
+      check('L0b operator password change needs 12+; an old account with a temp password creates its ID with a new (different) password',
+        admShort === '새 비밀번호는 12~64자' && admBack?.loginId === 'opsadmin' && o2t === null && o2up?.kind === 'id' && o2same === SAME_PW_MSG
+        && o2ok?.loginId === 'oldtwo' && o2rec.loginId === 'oldtwo' && !('tempPw' in o2rec), { admShort, o2up, o2same, o2rec });
+      la.logout(); await la.login('opsadmin', 'ops-admin-2027');
       const before = { info: await la.membersInfo(), badge: memberBadge(la.current()) };
       const r = await la.initMembers();
       const after = Object.values(JSON.parse(ls.getItem('puck-trainer.users.v1'))).sort((x, y) => x.memberNo - y.memberNo).map((u) => `${u.nick}:${u.memberNo}:${u.beta}`).join(',');
@@ -878,14 +894,34 @@
       const st = new LocalAccountStore(mem());
       st._putCode('SECURE00', { type: 'one' });
       await st.register({ loginId: ID('boss'), nick: 'boss', ...P, code: 'SECURE00' });
-      let wrong = null; try { await st.changePassword(PW('000000'), '483920175562'); } catch (e) { wrong = e.message; }
+      let wrong = null; try { await st.changePassword(PW('000000'), 'puck48392017'); } catch (e) { wrong = e.message; }
       let weak = null; try { await st.changePassword(PW('123456'), '1234'); } catch (e) { weak = e.message; }
-      await st.changePassword(PW('123456'), '483920175562');
+      let digits = null; try { await st.changePassword(PW('123456'), '483920175562'); } catch (e) { digits = e.message; }
+      let same = null; try { await st.changePassword(PW('123456'), PW('123456')); } catch (e) { same = e.message; }
+      await st.changePassword(PW('123456'), 'puck48392017');
       st.logout();
       let oldPin = null; try { await st.login(ID('boss'), PW('123456')); } catch (e) { oldPin = e.message; }
-      const back = await st.login(ID('boss'), '483920175562');
-      check('S3 change password: needs the current one, then only the new one logs in', wrong === '지금 비밀번호가 맞지 않습니다' && weak === '새 비밀번호는 12~64자'
-        && !!oldPin && back?.nick === 'boss', { wrong, weak, oldPin });
+      const back = await st.login(ID('boss'), 'puck48392017');
+      check('S3 member changes password (My info): needs the current one, 8+ letters+digits, not the same; then only the new one logs in', wrong === '지금 비밀번호가 맞지 않습니다' && weak === '비밀번호는 8~64자'
+        && digits === '비밀번호에 영문과 숫자를 함께 넣으세요' && same === '새 비밀번호가 지금 비밀번호와 같습니다' && !!oldPin && back?.nick === 'boss', { wrong, weak, digits, same, oldPin });
+      // 임시 비밀번호 (운영자 재설정): 로그인하면 새 비밀번호를 정할 때까지 로그인 전, 임시 비밀번호를 그대로 쓸 수 없음
+      st.logout();
+      await st._setTempPassword(ID('boss'), 'abcd-efgh-2345');
+      let oldGone = null; try { await st.login(ID('boss'), 'puck48392017'); } catch (e) { oldGone = e.message; }
+      const tl = await st.login(ID('boss'), 'abcd-efgh-2345');
+      const tw = { tl, cur: st.current(), up: st.needsUpgrade() };
+      let tId = null; try { await st.upgradeLogin('bossnew1', 'puck2026'); } catch (e) { tId = e.message; }
+      let tSame = null; try { await st.resetTempPassword('abcd-efgh-2345'); } catch (e) { tSame = e.message; }
+      let tWeak = null; try { await st.resetTempPassword('abcdefgh'); } catch (e) { tWeak = e.message; }
+      const tOk = await st.resetTempPassword('newpuck2026');
+      st.logout();
+      let tOld = null; try { await st.login(ID('boss'), 'abcd-efgh-2345'); } catch (e) { tOld = e.message; }
+      const tBack = await st.login(ID('boss'), 'newpuck2026');
+      let tNone = null; try { await st.resetTempPassword('newpuck2027'); } catch (e) { tNone = e.message; }
+      check('S3b temp password from the operator: stays logged out until a new password (not the temp one) is set, then only the new one works',
+        !!oldGone && tw.tl === null && tw.cur === null && tw.up?.kind === 'password' && tw.up?.loginId === ID('boss') && tId === NEED_TEMP_MSG
+        && tSame === SAME_PW_MSG && tWeak === '비밀번호에 영문과 숫자를 함께 넣으세요' && tOk?.nick === 'boss' && !!tOld && tBack?.nick === 'boss' && tNone === NEED_TEMP_MSG,
+        { oldGone, tw, tId, tSame, tWeak, tOld, tNone });
       const sites = ['https://ochodoit.github.io/puck-dribble-trainer/', 'https://ochodoit.github.io/puck-dribble-trainer/index.html?c=AB', 'https://ochodoit.github.io/semple/',
         'http://127.0.0.1:8080/', 'http://localhost:5173/x', 'https://evil.example/puck-dribble-trainer/', 'http://ochodoit.github.io/puck-dribble-trainer/',
         'https://ochodoit.github.io/other/', 'https://ochodoit.github.io/puck-dribble-trainer-copy/',

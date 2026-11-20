@@ -5,7 +5,8 @@
   "description": "운영자 PC 전용 도구 (Firebase 서비스 계정 키 필요). 사이트에는 배포되지 않음",
   "engines": { "node": ">=22" },
   "scripts": {
-    "reset": "node reset-password.mjs"
+    "reset": "node reset-password.mjs",
+    "cleanup": "node cleanup.mjs"
   },
   "dependencies": {
     "firebase-admin": "14.5.0"

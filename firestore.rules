@@ -2,9 +2,11 @@ rules_version = '2';
 // 온라인 랭킹·정회원용 Firestore 보안 규칙 (Firebase 콘솔 > Firestore > 규칙에 붙여넣기)
 // 지키는 것
 //  1) 칸 제한: 문서마다 정해진 칸만 쓸 수 있다 (정회원 유지·공식 글 같은 칸을 몰래 넣을 수 없음)
-//  2) 사칭 금지: 랭킹·글·기록·의견의 별명·팀·나이·등번호는 내 프로필과 같아야 한다. 별명은 가입할 때 한 번만 정하고,
+//  2) 사칭 금지: 랭킹·글·기록·의견의 별명·팀·나이대·등번호는 내 프로필과 같아야 한다. 별명은 가입할 때 한 번만 정하고,
 //     운영자·관리자·admin 같은 이름은 쓸 수 없다
-//  3) 개인정보: 프로필(나이·가입 코드)은 본인과 운영자만 읽는다. 랭킹에는 화면에 보이는 칸만 남는다
+//  3) 개인정보: 프로필(나이·가입 코드)은 본인과 운영자만 읽는다. 랭킹에는 화면에 보이는 칸만 남는다.
+//     공개 문서(랭킹·글·도전 기록)에는 정확한 나이를 쓰지 않는다 — 나이대(ageGroup)만. 예전 앱이 쓰던 '내 나이와 같은 값'은
+//     옮겨 가는 동안만 받는다 (ageOk). 별명 목록은 통째로 읽을 수 없다 (하나씩 있는지만)
 //  4) 정리: 운영자는 글·도전 기록·랭킹 기록·의견을 지울 수 있다
 //  5) 랭킹: 최고 기록은 내려가지 않고, 같은 모드는 2초에 한 번만 쓸 수 있다 (서버 시간). 순위 색인 칸은 점수·묶음과 맞아야 한다.
 //     앱은 최고 기록이 오를 때만 쓰고 판수는 모아서 쓴다: 판수는 한 번에 1~50 늘고, 점수가 그대로면 기록 시각도 그대로
@@ -14,6 +16,8 @@ rules_version = '2';
 //     새 가입은 로그인 주소가 그 아이디 주소(id.<아이디>@…)여야 한다. 예전 계정(별명 + 숫자 6자리)은 아이디를 한 번만 만든다
 //  9) 임시 비밀번호: 운영자가 서버 도구(Admin SDK, 규칙을 거치지 않음)로 비밀번호를 바꾸고 users/{uid}.tempPw 를 적는다.
 //     회원은 새 비밀번호를 정한 뒤 tempPw 를 지울 수만 있다 (스스로 만들거나 다른 칸과 섞어 바꿀 수 없음)
+//  10) 시각: 앱이 정하는 글·도전 기록·응원·랭킹의 시각(밀리초)은 서버 시각 + 2분을 넘을 수 없다 (미래 시각으로 맨 위 고정 금지)
+//  11) 랭킹 컬렉션: 게임에 있는 모드 키(scores_arcade@60, scores_figure8-inv …)에만 쓸 수 있다
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -64,6 +68,24 @@ service cloud.firestore {
       return d.nick is string && d.nick.matches('^[\\p{L}\\p{N}_.\\- ]{2,12}$') && !d.nick.matches('^ .*|.* $')
         && d.nickLower == d.nick.lower()
         && !d.nickLower.matches('.*(운영자|관리자|admin|official|퍽 ?트레이너|puck ?trainer).*');
+    }
+    // 공개 문서의 정확한 나이: 없어야 한다. 옮겨 가는 동안은 예전 앱이 쓰던 '내 프로필 나이와 같은 값'도 받는다
+    function ageOk(d, u) {
+      return !('age' in d) || d.age == u.get('age', null);
+    }
+    // 나이대의 가장 많은 나이 (community.js 의 AGE_GROUP_MAX 와 같음)
+    function ageGroupMax(g) {
+      return g == 'U8' ? 7 : (g == 'U10' ? 9 : (g == 'U12' ? 11 : (g == 'U14' ? 13 : (g == 'U16' ? 15 : (g == 'U18' ? 17 : (g == '성인' ? 39 : 99))))));
+    }
+    // 기록 자랑 도전: 글쓴이와 나이가 같거나 어린 선수만. 글에 정확한 나이가 없으면 글쓴이 나이대의 가장 많은 나이까지 (나이대도 없으면 제한 없음)
+    function challengeAgeOk(post, u) {
+      return (post.get('age', null) is int)
+        ? (u.age <= post.age)
+        : ((post.get('ageGroup', '') in ['U8', 'U10', 'U12', 'U14', 'U16', 'U18', '성인', '시니어']) ? (u.age <= ageGroupMax(post.ageGroup)) : true);
+    }
+    // 앱이 정하는 시각(밀리초): 정수이고 서버 시각 + 2분을 넘지 않는다 (미래 시각으로 글을 맨 위에 고정하지 못하게)
+    function notFuture(ms) {
+      return ms is int && ms <= request.time.toMillis() + 120000;
     }
     // 화면에 보이는 글쓴이 칸이 내 프로필과 같은가 (사칭 금지)
     function sameAuthor(d, u) {
@@ -224,7 +246,8 @@ service cloud.firestore {
     }
     // 별명 고유성: 가입하는 묶음에서 내 프로필의 별명(소문자)으로만 한 번 만든다. 고치거나 지울 수 없다
     match /nicks/{nick} {
-      allow read: if true;
+      allow get: if true;            // 이 별명을 쓸 수 있는지 하나씩만 (목록은 운영자만: 별명을 통째로 모으지 못하게)
+      allow list: if isAdmin();
       allow create: if joiningNow()
         && request.resource.data.keys().hasOnly(['uid']) && request.resource.data.uid == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.nickLower == nick;
@@ -279,7 +302,7 @@ service cloud.firestore {
       return d.type in ['course', 'record', 'beat']
         && d.title is string && d.title.size() > 0 && d.title.size() <= 30
         && d.body is string && d.body.size() <= 200
-        && d.at is int
+        && notFuture(d.at)
         && (d.type == 'record'
           ? (d.modeId is string && d.modeId.size() <= 40 && d.seconds is number && d.seconds >= 0 && d.seconds <= 3600
             && d.score is int && d.score >= 0 && d.score <= 1000000 && d.invisible is bool)
@@ -290,7 +313,7 @@ service cloud.firestore {
     function newPostOk(d) {
       let u = me();
       return activeMember(u) && d.keys().hasOnly(postKeys()) && d.uid == request.auth.uid
-        && sameAuthor(d, u) && d.get('age', null) == u.get('age', null) && d.get('ageGroup', null) == u.get('ageGroup', null)
+        && sameAuthor(d, u) && ageOk(d, u) && d.get('ageGroup', null) == u.get('ageGroup', null)
         && validPost(d);
     }
     // 고치기(기록 자랑을 새 기록으로 바꾸기 포함)는 본인만. 글쓴이·별명·종류는 바꿀 수 없다
@@ -300,7 +323,7 @@ service cloud.firestore {
       return activeMember(u) && old.uid == request.auth.uid
         && changed.hasOnly(postKeys().removeAll(['uid', 'nick', 'type']))
         && (!changed.hasAny(['team', 'country', 'number', 'age', 'ageGroup'])
-          || (sameAuthor(d, u) && d.get('age', null) == u.get('age', null) && d.get('ageGroup', null) == u.get('ageGroup', null)))
+          || (sameAuthor(d, u) && ageOk(d, u) && d.get('ageGroup', null) == u.get('ageGroup', null)))
         && validPost(d);
     }
     // 도전 기록 (한 사람당 문서 하나, 자기 것만)
@@ -310,7 +333,7 @@ service cloud.firestore {
       let u = me();
       let path = /databases/$(database)/documents/posts/$(postId);
       let post = exists(path) ? get(path).data : null;
-      return activeMember(u) && d.uid == uid && sameAuthor(d, u) && d.at is int
+      return activeMember(u) && d.uid == uid && sameAuthor(d, u) && notFuture(d.at)
         && (post == null
           ? (postId.matches('starter-[a-z0-9-]+') && courseRow(d))
           : (post.type == 'record' ? scoreRow(d, post, u, uid) : courseRow(d)));
@@ -323,8 +346,7 @@ service cloud.firestore {
       return d.keys().hasOnly(['uid', 'nick', 'number', 'team', 'country', 'age', 'score', 'at'])
         && post.uid != uid
         && d.score is int && d.score >= 0 && d.score <= 1000000
-        && d.get('age', null) == u.get('age', null)
-        && (post.get('age', null) == null || u.age <= post.age);
+        && ageOk(d, u) && challengeAgeOk(post, u);
     }
     // 글은 누구나 읽고, 정회원 본인만 쓰고 고친다. 지우기는 본인 또는 운영자
     match /posts/{id} {
@@ -341,7 +363,7 @@ service cloud.firestore {
       match /cheers/{uid} {
         allow read: if true;
         allow create: if isMember() && request.auth.uid == uid
-          && request.resource.data.keys().hasOnly(['at']) && request.resource.data.at is int
+          && request.resource.data.keys().hasOnly(['at']) && notFuture(request.resource.data.at)
           && (id.matches('starter-[a-z0-9-]+') || exists(/databases/$(database)/documents/posts/$(id)));
         allow delete: if request.auth != null && (request.auth.uid == uid || isAdmin());
       }
@@ -366,8 +388,8 @@ service cloud.firestore {
         && d.keys().hasOnly(['uid', 'nick', 'number', 'country', 'team', 'age', 'ageGroup', 'mode', 'score', 'at', 'plays', 't', 'ags', 'cts', 'tms'])
         && rankIdxOk(d)
         && d.uid == uid && d.mode is string && col == 'scores_' + d.mode
-        && sameAuthor(d, u) && d.get('age', null) == u.get('age', null) && d.get('ageGroup', null) == u.get('ageGroup', null)
-        && d.score is int && d.score >= 0 && d.score <= 1000000 && d.at is int && d.plays is int
+        && sameAuthor(d, u) && ageOk(d, u) && d.get('ageGroup', null) == u.get('ageGroup', null)
+        && d.score is int && d.score >= 0 && d.score <= 1000000 && notFuture(d.at) && d.plays is int
         && d.t == request.time
         && (old == null
           ? d.plays >= 1 && d.plays <= 50
@@ -375,9 +397,14 @@ service cloud.firestore {
             && (d.score > old.data.score || (d.score == old.data.score && d.at == old.data.at))
             && request.time > old.data.get('t', timestamp.date(2000, 1, 1)) + duration.value(2, 's')));
     }
+    // 쓸 수 있는 랭킹 컬렉션 = 게임에 있는 모드 키만 (game.js rankKey): 시간제 모드(아케이드·퍽 피하기·와이드)는 @60·@180·@300,
+    // 투명 모드 -inv, 난이도(아케이드·퍽 피하기만) -easy·-hard. 읽기·지우기는 예전 키도 되게 넓은 모양 그대로
+    function scoreCol(col) {
+      return col.matches('scores_((arcade|obstacle)(@(60|180|300))?(-inv)?(-(easy|hard))?|wide(@(60|180|300))?(-inv)?|(figure8|quick|reaction)(-inv)?)');
+    }
     match /{col}/{uid} {
       allow read: if col.matches('scores_[A-Za-z0-9@_-]{1,40}');
-      allow create, update: if col.matches('scores_[A-Za-z0-9@_-]{1,40}') && request.auth != null && request.auth.uid == uid
+      allow create, update: if scoreCol(col) && request.auth != null && request.auth.uid == uid
         && (scoreOk(col, uid, request.resource.data, resource)
           || (resource != null && rankIdxOnly(request.resource.data, resource)));
       allow delete: if col.matches('scores_[A-Za-z0-9@_-]{1,40}') && request.auth != null && (request.auth.uid == uid || isAdmin());

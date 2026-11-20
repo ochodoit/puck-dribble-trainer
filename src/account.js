@@ -76,6 +76,19 @@ export function validateStrongPassword(pw) {
   return null;
 }
 
+/**
+ * 공개 문서(랭킹·글·도전 기록) 쓰기: 정확한 나이 없이 쓴다 (화면·규칙은 나이대만 씀).
+ * 예전 규칙(공개 문서의 나이 칸이 프로필 나이와 같아야 함)이 아직 게시돼 있으면 거절되므로, 그때만 나이를 넣어 한 번 더 쓴다.
+ * 새 규칙(firestore.rules 의 ageOk)을 게시하면 되풀이는 일어나지 않는다. write(data) -> Promise, age = 내 프로필 나이
+ */
+export async function writePublic(write, data, age) {
+  try { return await write(data); }
+  catch (e) {
+    if (e?.code !== 'permission-denied' || !Number.isInteger(age)) throw e;
+    return write({ ...data, age });
+  }
+}
+
 /** 등번호(선택): 비어 있으면 null, 아니면 0~99 정수. 형식이 틀리면 NaN */
 export function jerseyOf(v) {
   if (v === undefined || v === null || String(v).trim() === '') return null;

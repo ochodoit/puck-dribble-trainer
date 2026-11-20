@@ -16,8 +16,19 @@ import socket
 import ssl
 import subprocess
 import sys
+import urllib.parse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+# 같은 Wi-Fi 의 다른 기기에서도 열리므로 내주지 않는 곳: 점으로 시작하는 폴더·파일(.git, .certs 의 개발 인증서 키, .claude …)과 운영자 도구
+BLOCKED_PREFIXES = ('tools/admin',)
+
+
+def blocked(raw_path):
+    """요청 경로가 막아 둔 곳인가 (%2e 처럼 감춘 점·역슬래시도 풀어서 본다)"""
+    path = urllib.parse.unquote(raw_path.split('?', 1)[0].split('#', 1)[0]).replace('\\', '/')
+    parts = [p for p in path.split('/') if p]
+    rel = '/'.join(parts).lower()
+    return any(p.startswith('.') for p in parts) or any(rel == b or rel.startswith(b + '/') for b in BLOCKED_PREFIXES)
 CERT_DIR = os.path.join(ROOT, '.certs')
 CERT = os.path.join(CERT_DIR, 'dev.crt')
 KEY = os.path.join(CERT_DIR, 'dev.key')
@@ -34,6 +45,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
+
+    def send_head(self):  # GET·HEAD 공통
+        if blocked(self.path):
+            self.send_error(404)
+            return None
+        return super().send_head()
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')

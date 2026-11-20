@@ -13,7 +13,7 @@
 import {
   validateProfile, ageGroupOf, matches, jerseyOf, normCode, CODE_RE, codeStatus, codeInfo, codeError, makeCode, toMs, NOT_READY,
   betaState, isActiveMember, isBetaUser, LAPSED, validateFeedback, validateEdit, INVITE_MAX, COUPON_MONTHS,
-  SCORE_MAX, RANK_FIELDS, rankGroup, rankIdx, rankIdxFields, activeFilters, competitionRanks,
+  SCORE_MAX, RANK_FIELDS, rankGroup, rankIdx, rankIdxFields, activeFilters, competitionRanks, writePublic,
   LOGIN_ID_RE, NICK_RE, normLoginId, validateLoginId, validateNewPassword, BAD_LOGIN_MSG, USE_ID_MSG, ID_TAKEN, NEED_TEMP_MSG, SAME_PW_MSG, RELOGIN_MSG,
   PendingPlays, PLAYS_FLUSH, PLAYS_STEP_MAX,
 } from './account.js';
@@ -367,9 +367,12 @@ export class FirebaseAccountStore {
   }
   _dropBoards(mode) { for (const k of this._boards.keys()) if (k.startsWith(`${mode}|`)) this._boards.delete(k); }
 
-  /** 기록 문서 하나 (작성자 칸은 지금 프로필로: 규칙이 프로필과 같은지 본다). t = 서버 시간 (규칙이 2초에 한 번만 받음) */
+  /**
+   * 기록 문서 하나 (작성자 칸은 지금 프로필로: 규칙이 프로필과 같은지 본다). t = 서버 시간 (규칙이 2초에 한 번만 받음).
+   * 정확한 나이는 쓰지 않는다 (공개 문서라 나이대만) — 쓰기는 writePublic 으로
+   */
   _entry(u, mode, score, at, plays) {
-    const e = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, age: u.age, ageGroup: u.ageGroup, mode, score, at, plays, t: this.F.serverTimestamp() };
+    const e = { uid: u.id, nick: u.nick, number: u.number ?? null, country: u.country, team: u.team, ageGroup: u.ageGroup, mode, score, at, plays, t: this.F.serverTimestamp() };
     return Object.assign(e, rankIdxFields(e));
   }
   /** 내 기록 문서 (uid 를 직접 받음: 로그아웃하는 중에도 쓸 수 있게) */
@@ -399,7 +402,7 @@ export class FirebaseAccountStore {
       }
       const add = Math.min(this.pending.get(u.id, mode), PLAYS_STEP_MAX - 1);
       const entry = this._entry(u, mode, s, Date.now(), (prev ? prev.plays || 1 : 0) + add + 1);
-      try { await this.F.setDoc(ref, entry); }
+      try { await writePublic((d) => this.F.setDoc(ref, d), entry, u.age); }
       catch (err) {
         // 다른 기기에서 기록·판수가 바뀌었으면 기억해 둔 문서가 낡았다: 다시 읽고 한 번 더
         if (err?.code !== 'permission-denied' || attempt) throw err;
@@ -431,7 +434,7 @@ export class FirebaseAccountStore {
       if (!prev) { this.pending.take(u.id, m, n); continue; }
       const add = Math.min(n, PLAYS_STEP_MAX);
       const entry = this._entry(u, m, prev.score, prev.at, (prev.plays || 1) + add);
-      try { await this.F.setDoc(this._doc(`scores_${m}`, u.id), entry); }
+      try { await writePublic((d) => this.F.setDoc(this._doc(`scores_${m}`, u.id), d), entry, u.age); }
       catch (err) {
         if (err?.code !== 'permission-denied') throw err;
         if (this._mine?.uid === u.id) this._mine.docs.delete(m); // 낡은 문서였을 수 있다: 다음에 다시 읽고 시도

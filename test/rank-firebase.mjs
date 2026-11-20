@@ -8,20 +8,29 @@ import { fileURLToPath } from 'node:url';
 
 /** 메모리 Firestore: 이 앱이 쓰는 함수만. reads = 요금이 매겨지는 읽기 수 */
 function fakeFirestore() {
-  const docs = new Map(); // 'col/id' -> data
+  const docs = new Map(); // 'col/id' (하위 컬렉션은 'posts/p1/records/u1') -> data
+  const DEL = Symbol('deleteField');
+  let autoId = 0;
   const F = {
     docs, reads: 0, writes: 0, queries: [],
-    collection: (_db, name) => ({ name, cons: [] }),
+    collection: (_db, ...path) => ({ name: path.join('/'), cons: [] }),
     doc: (_db, ...path) => ({ path: path.join('/') }),
     where: (field, op, value) => ({ t: 'where', field, op, value }),
     orderBy: (field, dir = 'asc') => ({ t: 'order', field, dir }),
     limit: (n) => ({ t: 'limit', n }),
     query: (col, ...cons) => ({ name: col.name, cons: [...col.cons, ...cons] }),
     serverTimestamp: () => 'SERVER_TIME',
-    async getDoc(ref) { F.reads += 1; const d = docs.get(ref.path); return { exists: () => !!d, data: () => (d ? { ...d } : undefined) }; },
+    deleteField: () => DEL,
+    async getDoc(ref) { F.reads += 1; const d = docs.get(ref.path); return { id: ref.path.split('/').pop(), exists: () => !!d, data: () => (d ? { ...d } : undefined) }; },
     async setDoc(ref, d) { F.writes += 1; docs.set(ref.path, { ...d }); },
-    async updateDoc(ref, d) { docs.set(ref.path, { ...docs.get(ref.path), ...d }); },
-    async getDocs(q) { const rows = run(q); F.reads += Math.max(1, rows.length); return { docs: rows.map((r) => ({ data: () => ({ ...r }) })) }; },
+    async addDoc(col, d) { F.writes += 1; const id = `auto${++autoId}`; docs.set(`${col.name}/${id}`, { ...d }); return { id }; },
+    async updateDoc(ref, d) {
+      const next = { ...docs.get(ref.path) };
+      for (const [k, v] of Object.entries(d)) { if (v === DEL) delete next[k]; else next[k] = v; }
+      docs.set(ref.path, next);
+    },
+    async deleteDoc(ref) { F.writes += 1; docs.delete(ref.path); },
+    async getDocs(q) { const rows = run(q); F.reads += Math.max(1, rows.length); return { size: rows.length, docs: rows.map(([p, r]) => ({ id: p.split('/').pop(), data: () => ({ ...r }) })) }; },
     async getCountFromServer(q) { const n = run(q).length; F.reads += Math.max(1, Math.ceil(n / 1000)); return { data: () => ({ count: n }) }; },
   };
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -33,10 +42,11 @@ function fakeFirestore() {
     const onlyEq = wh.every((c) => c.op === '==') && !ord.length;
     if (!onlyEq && fields.size > 1) throw new Error(`query needs a composite index: ${JSON.stringify(q.cons)}`);
     F.queries.push(q);
-    let rows = [...docs].filter(([p]) => p.startsWith(`${q.name}/`)).map(([, d]) => d);
-    for (const c of wh) rows = rows.filter((d) => c.field in d && test(d[c.field], c.op, c.value));
-    for (const c of ord) rows = rows.filter((d) => c.field in d);
-    if (ord.length) rows.sort((a, b) => ord.reduce((r, c) => r || (c.dir === 'desc' ? -cmp(a[c.field], b[c.field]) : cmp(a[c.field], b[c.field])), 0));
+    // 이 컬렉션 바로 아래 문서만 (하위 컬렉션 문서는 빼고): [경로, 데이터]
+    let rows = [...docs].filter(([p]) => p.startsWith(`${q.name}/`) && !p.slice(q.name.length + 1).includes('/'));
+    for (const c of wh) rows = rows.filter(([, d]) => c.field in d && test(d[c.field], c.op, c.value));
+    for (const c of ord) rows = rows.filter(([, d]) => c.field in d);
+    if (ord.length) rows.sort(([, a], [, b]) => ord.reduce((r, c) => r || (c.dir === 'desc' ? -cmp(a[c.field], b[c.field]) : cmp(a[c.field], b[c.field])), 0));
     return lim ? rows.slice(0, lim.n) : rows;
   }
   return F;
@@ -269,6 +279,59 @@ export async function checkRanks() {
     check('R13 stale login: changing the password is refused -> logged out with a re-login notice, nothing changed; after logging in again the ID is created. Old saved logins (4+ min) ask to log in first',
       s.login === 'ok' && s.stale === L.RELOGIN_MSG && s.after.cur === null && s.after.up === null && !s.after.signedIn && s.after.ids === null && s.after.pw === '246810'
       && s.again === 'ok' && s.ok === 'ok' && s.loginId === 'oldthree' && s.fresh === true && s.old === false && s.unknown === true, s);
+  }
+
+  // ===== 보안: 공개 문서에 정확한 나이를 쓰지 않음 (예전 규칙이 남아 있으면 그때만 나이를 넣어 다시 씀) · 커뮤니티 읽기 제한 =====
+  {
+    const { writePublic } = await import('../src/account.js');
+    const { FirebaseCommunityStore, RECORD_LIMIT, CHEER_LIMIT } = await import('../src/community-firebase.js');
+    // P1) 랭킹 기록: 새 규칙이면 나이 없이, 예전 규칙(나이 칸 = 프로필 나이)이면 한 번 거절된 뒤 나이를 넣어 다시
+    const FS = fakeFirestore();
+    const u = { id: 'kid', nick: 'kid', number: null, country: 'KR', team: 'T', age: 10, ageGroup: 'U12' };
+    const sNew = Object.assign(new FirebaseAccountStore({}), { F: FS, db: {}, site: {}, user: u });
+    await sNew.submitScore('quick', 30);
+    const newDoc = FS.docs.get('scores_quick/kid');
+    const FO = fakeFirestore(), oldSet = FO.setDoc;
+    let denied = 0;
+    FO.setDoc = async (ref, d) => { if (!('age' in d)) { denied++; throw Object.assign(new Error('denied'), { code: 'permission-denied' }); } return oldSet(ref, d); };
+    const sOld = Object.assign(new FirebaseAccountStore({}), { F: FO, db: {}, site: {}, user: u });
+    await sOld.submitScore('quick', 30);
+    const oldDoc = FO.docs.get('scores_quick/kid');
+    let other = null;
+    try { await writePublic(async () => { throw Object.assign(new Error('x'), { code: 'unavailable' }); }, {}, 10); } catch (e) { other = e.code; }
+    check('P1 ranking docs are written without the exact age; under the old rules it retries once with the age; other errors are not retried',
+      newDoc && !('age' in newDoc) && newDoc.ageGroup === 'U12' && oldDoc?.age === 10 && denied === 1 && other === 'unavailable', { newDoc, oldDoc, denied, other });
+
+    // P2) 커뮤니티: 글·도전 기록에 나이 없음, 기록 자랑을 바꾸면 예전 글의 나이 칸도 지움
+    const FC = fakeFirestore();
+    const acct = { F: FC, db: {}, user: { id: 'me', nick: 'me', team: 'T', country: 'KR', number: 7, age: 12, ageGroup: 'U14' } };
+    const cs = new FirebaseCommunityStore(acct);
+    const brag = await cs.create(acct.user, { type: 'record', title: '1200점', body: '', modeId: 'arcade', seconds: 60, invisible: false, score: 1200 });
+    const bragDoc = FC.docs.get(`posts/${brag.id}`);
+    FC.docs.set('posts/oldbrag', { ...bragDoc, at: 1, age: 12 }); FC.docs.delete(`posts/${brag.id}`); // 예전 앱이 쓴 (나이가 든) 같은 모드 글
+    await cs.create(acct.user, { type: 'record', title: '1300점', body: '', modeId: 'arcade', seconds: 60, invisible: false, score: 1300 });
+    const replaced = FC.docs.get('posts/oldbrag');
+    FC.docs.set('posts/other', { type: 'record', uid: 'x', nick: 'x', ageGroup: 'U14', modeId: 'arcade', seconds: 60, invisible: false, score: 5000, title: 't', body: '', at: 2 });
+    await cs.submitScore(acct.user, 'other', 900);
+    const recDoc = FC.docs.get('posts/other/records/me');
+    check('P2 community posts and challenge records carry no exact age (only the age group); replacing a brag removes the old age field',
+      bragDoc && !('age' in bragDoc) && bragDoc.ageGroup === 'U14' && replaced && !('age' in replaced) && replaced.score === 1300 && recDoc && !('age' in recDoc) && recDoc.score === 900,
+      { bragDoc, replaced, recDoc });
+
+    // P3) 글을 열 때 읽는 양: 도전 기록은 상위 100개(+ 내 기록), 응원은 50개까지(넘으면 개수만 세고 내 응원 확인)
+    const FR = fakeFirestore();
+    FR.docs.set('posts/big', { type: 'record', uid: 'a', nick: 'a', ageGroup: '성인', modeId: 'arcade', seconds: 60, score: 99999, title: 't', body: '', at: 3 });
+    for (let i = 0; i < 150; i++) FR.docs.set(`posts/big/records/r${i}`, { uid: `r${i}`, nick: `r${i}`, score: 1000 + i, at: 1 });
+    FR.docs.set('posts/big/records/me', { uid: 'me', nick: 'me', score: 5, at: 1 });       // 꼴찌: 상위 100개 밖
+    for (let i = 0; i < 80; i++) FR.docs.set(`posts/big/cheers/c${String(i).padStart(2, '0')}`, { at: 1 });
+    FR.docs.set('posts/big/cheers/me', { at: 1 });                                        // 50개 밖에 있는 내 응원 (맨 나중에 넣음)
+    const cr = new FirebaseCommunityStore({ F: FR, db: {}, user: { id: 'me' } });
+    FR.reads = 0;
+    const big = await cr.get('big');
+    const reads = FR.reads, top = big.records.slice(0, RECORD_LIMIT).every((r, i, a) => i === 0 || a[i - 1].score >= r.score);
+    check('P3 opening a post reads the top 100 records (+ mine) and up to 50 cheers (+ a count and my own cheer), not everything',
+      big.records.length === RECORD_LIMIT + 1 && big.records[0].score === 1149 && top && big.records.some((r) => r.uid === 'me')
+      && big.cheers.length === 81 && big.cheers.includes('me') && reads <= RECORD_LIMIT + CHEER_LIMIT + 5, { n: big.records.length, cheers: big.cheers.length, reads });
   }
 
   check('R10 no query needs a composite index (single-field range/order or equality only)', F.queries.length > 0, { queries: F.queries.length });

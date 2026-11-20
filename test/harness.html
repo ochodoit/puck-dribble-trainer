@@ -1455,6 +1455,24 @@
       check('PLC camera placement check: 50 cm -> raise, 80 cm -> minimum (do not go lower), 1.2 m -> good, 2 m on the TV -> room to lower; beside the TV (1 m to the side) 1.2 m -> good, 50 cm -> raise',
         plc.map((x) => x.verdict).join() === 'raise,minimum,good,room,good,raise', plc);
     }
+    // SEC) 규칙 파일(firestore.rules)과 앱이 같은 약속을 쓰는지: 게임이 만드는 모든 랭킹 키가 규칙의 쓰기 허용 모양에 맞고(어긋나면
+    //      그 모드 기록이 거절됨) 이상한 키는 안 맞는다. 규칙의 '나이대 → 가장 많은 나이' 표가 화면(community.js)과 같다
+    {
+      const rulesText = await (await fetch('../firestore.rules')).text();
+      const pat = /scoreCol\(col\) \{\s*return col\.matches\('([^']+)'\)/.exec(rulesText)?.[1];
+      const re = new RegExp(`^${pat}$`);
+      const { MODES, PLAY_MINUTES } = await import('../src/game.js');
+      const { postAge } = await import('../src/community.js');
+      const keys = new Set();
+      for (const m of MODES) for (const min of PLAY_MINUTES) for (const inv of [false, true]) for (const lv of ['normal', 'easy', 'hard']) if (m.id !== 'free') keys.add(rankKey(m.id, min * 60, inv, lv));
+      const bad = [...keys].filter((k) => !re.test(`scores_${k}`));
+      const junk = ['scores_free', 'scores_hack', 'scores_arcade@61', 'scores_quick-hard', 'scores_wide-easy', 'scores_arcade@60-inv-inv', 'scores_', 'scores_figure8@60'].filter((k) => re.test(k));
+      const ages = Object.fromEntries([...rulesText.matchAll(/g == '([^']+)' \? (\d+)/g)].map((x) => [x[1], +x[2]]));
+      const agesOk = Object.keys(ages).length === 7 && Object.entries(ages).every(([gk, n]) => postAge({ ageGroup: gk }) === n) && postAge({ ageGroup: '시니어' }) === 99 && /'성인' \? 39 : 99\)/.test(rulesText);
+      check('SEC rules and app agree: every ranked key the game makes fits the rules write pattern (junk keys do not); the age-group table matches the app',
+        !!pat && bad.length === 0 && junk.length === 0 && keys.size >= 20 && agesOk, { pat, bad, junk, n: keys.size, ages });
+    }
+
     // B) 스틱이 퍽을 가림 (스틱 지정 시): 블레이드 옆에서 사라진 퍽은 블레이드 + 간격으로 잇는다
     {
       const sb = new StickBridge(); let t = 0;

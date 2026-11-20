@@ -1242,6 +1242,13 @@ const skipSetup = async (page, touch = false) => {
   for (const l of logs) console.log(l);
   if (!ok) failed = true;
 }
+// ---- 8c) 운영자 정리 도구 (가짜 Firestore·Auth): 공개 문서의 나이 칸 지우기·예전 6자리 계정 목록 ----
+{
+  const { checkAdminCleanup } = await import('./admin-cleanup.mjs');
+  const { ok, logs } = await checkAdminCleanup().catch((e) => ({ ok: false, logs: [`FAIL admin cleanup check threw: ${e.stack || e}`] }));
+  for (const l of logs) console.log(l);
+  if (!ok) failed = true;
+}
 
 // ---- 9) 시작 준비 3단계(영역 -> 퍽 등록 -> 네 모서리 움직여 보기)와 난이도별 랭킹 (휴대폰 가로 = TV 미러링 화면) ----
 {

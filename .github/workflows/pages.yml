@@ -23,8 +23,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
         with:
           enablement: true
       - name: Collect site files
@@ -34,8 +34,8 @@ jobs:
           # 검색엔진·AI 검색용 (tools/build-site.mjs 로 만든 파일): 영어 첫 화면, 안내 페이지, 사이트맵 등
           cp -r en guide games faq pages.css robots.txt sitemap.xml llms.txt 404.html google3d8a4c89a20c8fb9.html _site/
           touch _site/.nojekyll
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: _site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

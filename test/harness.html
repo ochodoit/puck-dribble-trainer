@@ -8,6 +8,7 @@
 <script type="module">
   import { Vision, AutoCalibrator } from '../src/vision.js';
   import { Tracker } from '../src/tracker.js';
+  import { StickBridge } from '../src/occlusion.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
   import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
@@ -1269,6 +1270,100 @@
     const duTop = mp.toUV(170 * 0.375 + 20, 130 * 0.375)[0] - mp.toUV(170 * 0.375, 130 * 0.375)[0];
     const duBot = mp.toUV(170 * 0.375 + 20, 430 * 0.375)[0] - mp.toUV(170 * 0.375, 430 * 0.375)[0];
     check('T3 perspective mapping: same pixel step is a larger floor step at the back', duTop > duBot * 1.15, { duTop, duBot });
+
+    // ===== 보정 개선: 터치로 지정이 작은 퍽에 붙기 · 원 안 자동 지정의 배경 중앙값 · 작은 퍽 · 가림 =====
+    {
+      // Q1) 터치로 지정: 작은 공에서 손가락이 5px 빗나가도 공으로 붙고, 바닥과 섞인 가장자리 대신 공 색
+      const v5 = new Vision(240); v5.mirror = false; v5.setSourceSize(640, 480);
+      const s5 = { ...settings, floorMode: 'auto', manualQuad: null, puckModel: { r: 0, g: 0, b: 0, area: 0 }, stickModel: null };
+      const drawSmall = () => { drawScene({ puck: null }); sctx.fillStyle = '#1d4ed8'; sctx.beginPath(); sctx.arc(320, 260, 6, 0, Math.PI * 2); sctx.fill(); };
+      for (let i = 0; i < 12; i++) { drawSmall(); v5.process(scene, s5); }
+      const tapX = Math.round(320 * 0.375 + 5), tapY = Math.round(260 * 0.375 - 3);
+      const miss = v5.sampleObject(tapX, tapY, 95), old = v5._sampleAt(tapX, tapY, 95);
+      check('Q1 tap a few px off a small ball snaps to it with its true color', miss.snapped && Math.abs(miss.cx - 120) < 1.5 && Math.abs(miss.cy - 97.5) < 1.5 && miss.b > 150 && miss.r < 90 && miss.area >= 4 && miss.area < 40 && miss.tol >= 45, { miss, old });
+      check('Q1 (the old 5x5 average at that spot was floor color)', old.r > 170 && old.g > 170, old);
+      const plain = v5.sampleObject(70, 135, 70);
+      check('Q1 tap on empty floor does not snap (old behavior, floor-like)', plain && !plain.snapped && v5.isFloorLike(plain, s5), plain);
+
+      // Q2) 원 바깥 고리를 어두운 다리 두 개가 덮어도(고리의 약 45%) 바닥색은 중앙값으로 — 바닥이 물체로 보여 '너무 큼'이 되지 않음
+      const v6 = new Vision(240); v6.mirror = false; v6.setSourceSize(640, 480);
+      const s6 = { ...matSettings, floorMode: 'full', puckModel: { r: 0, g: 0, b: 0, area: 0 } };
+      sctx.fillStyle = '#eceae4'; sctx.fillRect(0, 0, 640, 480);
+      sctx.fillStyle = '#1f2937'; sctx.fillRect(0, 0, 230, 480); sctx.fillRect(410, 0, 230, 480);
+      sctx.fillStyle = '#111827'; sctx.beginPath(); sctx.ellipse(320, 240, 14, 9, 0, 0, Math.PI * 2); sctx.fill();
+      v6.process(scene, s6);
+      const legs = v6.autoCalibSample();
+      check('Q2 legs around the circle do not hide the puck (median background)', legs.status === 'ok' && legs.r < 60 && Math.abs(legs.cx - 120) < 2 && Math.abs(legs.cy - 90) < 2, legs);
+
+      // Q3) 게임 영역이 원보다 조금만 큰 경우: 영역 밖(회색)이 아니라 영역 안 바닥색을 배경으로
+      const v7 = new Vision(240); v7.mirror = false; v7.setSourceSize(640, 480);
+      const s7 = { ...matSettings, floorMode: 'manual', manualQuad: [[0.35, 0.3], [0.65, 0.3], [0.65, 0.7], [0.35, 0.7]], puckModel: { r: 0, g: 0, b: 0, area: 0 } };
+      sctx.fillStyle = '#4b5563'; sctx.fillRect(0, 0, 640, 480);
+      sctx.fillStyle = '#f3f4f6'; sctx.fillRect(224, 144, 192, 192);
+      sctx.fillStyle = '#f97316'; sctx.beginPath(); sctx.arc(320, 240, 10, 0, Math.PI * 2); sctx.fill();
+      v7.process(scene, s7);
+      const small = v7.autoCalibSample();
+      check('Q3 small game area: background measured inside the area', small.status === 'ok' && small.r > 200 && small.b < 90 && small.bg.r > 200, small);
+
+      // Q4) 아주 작은 퍽(처리 해상도에서 지름 3px 남짓)도 원 안에 3초 두면 등록
+      const v8 = new Vision(240); v8.mirror = false; v8.setSourceSize(640, 480);
+      const cal8 = new AutoCalibrator(3); let d8 = null;
+      for (let i = 0; i < 120 && !d8; i++) {
+        sctx.fillStyle = '#eceae4'; sctx.fillRect(0, 0, 640, 480);
+        sctx.fillStyle = '#111827'; sctx.beginPath(); sctx.arc(320, 240, 4.5, 0, Math.PI * 2); sctx.fill();
+        v8.process(scene, s6); d8 = cal8.update(v8.autoCalibSample(), 0.033);
+      }
+      // 색은 바닥과 섞인 가장자리를 빼고 잰다 (예전: 작은 검정 퍽이 회색 rgb(70,75,85)로 등록돼 추적 색이 틀어짐)
+      check('Q4 tiny puck (area < 15px) registers from the circle with its true (dark) color', !!d8 && d8.area >= 5 && d8.area < 15 && d8.r < 50 && d8.g < 50, d8);
+    }
+    // Q5) 스틱 블레이드에 80% 가린 퍽: 마지막 자리 바로 그곳이면 작은 조각도 퍽으로
+    {
+      const v9 = new Vision(240); v9.mirror = false; v9.setSourceSize(640, 480);
+      const s9 = { ...settings, floorMode: 'auto', manualQuad: null, puckModel: { r: 17, g: 24, b: 39, area: 54 }, puckTol: 95, stickModel: null };
+      for (let i = 0; i < 12; i++) { drawScene({ puck: { x: 330, y: 260 } }); v9.process(scene, s9); }
+      drawScene({ puck: { x: 330, y: 260 } }); sctx.fillStyle = '#f97316'; sctx.fillRect(311, 245, 26, 30); // 오른쪽 끝 약 20%만 남김
+      const pr = v9.process(scene, s9);
+      check('Q5 puck mostly under the blade still tracked at its spot', pr.puck && Math.abs(pr.puck.x - 330 * 0.375) < 6 && Math.abs(pr.puck.y - 260 * 0.375) < 3 && pr.puck.area < 54 * 0.25, pr.puck);
+      drawScene({ puck: { x: 330, y: 260 } });
+      const pr2 = v9.process(scene, s9);
+      check('Q5 remembered size unchanged by the partial view', pr2.puck && v9.lastPuck.area > 40, { area: v9.lastPuck.area });
+    }
+    // B) 스틱이 퍽을 가림 (스틱 지정 시): 블레이드 옆에서 사라진 퍽은 블레이드 + 간격으로 잇는다
+    {
+      const sb = new StickBridge(); let t = 0;
+      for (let i = 0; i < 10; i++) { sb.step({ u: 0.4 + i * 0.01, v: 0.5 }, { u: 0.45 + i * 0.01, v: 0.5 }, t); t += 33; }
+      const a1 = sb.step(null, { u: 0.55, v: 0.5 }, t); t += 33;
+      const a2 = sb.step(null, { u: 0.65, v: 0.55 }, t); t += 33;
+      check('B1 hidden puck follows the blade with the last gap', a1?.bridged && Math.abs(a1.u - 0.5) < 0.01 && a2?.bridged && Math.abs(a2.u - 0.6) < 0.01 && Math.abs(a2.v - 0.55) < 0.01 && sb.active, { a1, a2 });
+      const back = sb.step({ u: 0.61, v: 0.55 }, { u: 0.66, v: 0.55 }, t); t += 33;
+      check('B1 puck seen again -> its real position', back && !back.bridged && back.u === 0.61 && !sb.active);
+      const sb2 = new StickBridge(); t = 0;
+      for (let i = 0; i < 5; i++) { sb2.step({ u: 0.2, v: 0.5 }, { u: 0.7, v: 0.5 }, t); t += 33; }
+      check('B2 puck far from the blade is not bridged', sb2.step(null, { u: 0.7, v: 0.5 }, t) === null && !sb2.active);
+      const sb3 = new StickBridge(); t = 0;
+      for (let i = 0; i < 5; i++) { sb3.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
+      const lostAt = t; let lastOk = null;
+      for (let i = 0; i < 70; i++) { if (sb3.step(null, { u: 0.52, v: 0.5 }, t)) lastOk = t; t += 33; }
+      check('B3 bridging stops after 1.5 s', lastOk !== null && lastOk - lostAt >= 1400 && lastOk - lostAt <= 1500 && !sb3.active, { held: lastOk - lostAt });
+      const sb4 = new StickBridge(); t = 0;
+      for (let i = 0; i < 5; i++) { sb4.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
+      check('B4 no blade in view -> nothing to bridge with', sb4.step(null, null, t) === null);
+    }
+    // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
+    {
+      const k1 = new Tracker(); let t = 0;
+      for (let i = 0; i < 10; i++) { k1.update({ u: 0.5, v: 0.5 }, t); t += 33; }
+      for (let i = 0; i < 30; i++) { k1.update(null, t); t += 33; } // 약 1초 가림
+      const held = k1.state === 'predicted' && !!k1.pos && Math.abs(k1.pos.x - 0.5) < 0.02;
+      k1.update({ u: 0.62, v: 0.52 }, t); t += 33;
+      check('K2 puck hidden mid-area is held ~1.5 s, then snaps to where it reappears', held && k1.state === 'tracked' && Math.abs(k1.pos.x - 0.62) < 0.005, { held, pos: k1.pos, state: k1.state });
+      for (let i = 0; i < 50; i++) { k1.update(null, t); t += 33; }
+      check('K2 ...but not forever', k1.state === 'lost' && !k1.pos);
+      const k2 = new Tracker(); t = 0;
+      for (let i = 0; i < 10; i++) { k2.update({ u: 0.02, v: 0.5 }, t); t += 33; }
+      for (let i = 0; i < 15; i++) { k2.update(null, t); t += 33; }
+      check('K2 puck gone at the edge (left the area) is dropped after 0.4 s', k2.state === 'lost');
+    }
 
     // C) 커뮤니티: 코스 공유 · 기록 게시판 · 기록 갱신
     {

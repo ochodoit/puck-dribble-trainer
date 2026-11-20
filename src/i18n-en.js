@@ -387,6 +387,8 @@ export const EN = {
   '화면에서 퍽을 터치하세요': 'Tap the puck on the screen',
   '화면에서 스틱 블레이드(테이프)를 터치하세요': 'Tap the stick blade (tape) on the screen',
   '바닥(흰색)과 구분되지 않는 색입니다. 다른 색의 물체/테이프를 사용하세요.': 'That color is too close to the (white) floor. Use an object or tape of a different color.',
+  '퍽 색 지정 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요': 'Puck color set · the puck looks small, so detection resolution was raised to 400',
+  '퍽 등록 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요': 'Puck registered · the puck looks small, so detection resolution was raised to 400',
   '{0} 등록 완료': '{0} registered',
   '크기 {0#}px': 'size {0}px',
   '원 안에 3초 더 두면 시작': 'hold 3 s more in the circle to start',

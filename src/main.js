@@ -3,6 +3,7 @@ import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨
 import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
+import { StickBridge } from './occlusion.js';
 import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
 import { C, rgba } from './theme.js';
 import { Renderer, dodgeField } from './render.js';
@@ -46,6 +47,7 @@ const settings = loadSettings();
 const camera = new Camera(els.video);
 const vision = new Vision(settings.procWidth);
 const tracker = new Tracker();
+const stickBridge = new StickBridge(); // 스틱이 퍽을 가린 동안 블레이드로 퍽 자리를 잇는다 (스틱 지정 시)
 const sfx = new Sfx();
 const game = new Game(sfx);
 const renderer = new Renderer(els.overlay);
@@ -940,7 +942,7 @@ function bindUI() {
       case 'm': case 'M': renderModeList(); open(els.panelMode); break;
       case 'a': case 'A': if (app.setup && app.setup !== 'area') beginAreaSetup(); else toggleAreaEdit(); break;
       case 'd': case 'D': settings.debug = !settings.debug; $('#set-debug').checked = settings.debug; els.debug.classList.toggle('hidden', !settings.debug); persist(); break;
-      case 'Escape': closeAllPanels(); if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); else if (app.setup === 'test') finishSetup(); break;
+      case 'Escape': closeAllPanels(); if (app.calibTarget) endPick(); else if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); else if (app.setup === 'test') finishSetup(); break;
     }
   });
 }
@@ -1235,13 +1237,19 @@ function loop(raw) {
     if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
 
     // 조작 대상(퍽 또는 스틱 블레이드) 측정값 -> 정규화 바닥 좌표
-    let meas = null;
     const m = result.floor.mapping;
-    const obj = settings.controller === 'stick' ? result.stick : result.puck;
-    if (m && obj) {
+    const toUV = (obj) => {
+      if (!m || !obj) return null;
       const [u, v] = m.toUV(obj.x, obj.y);
-      if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) meas = { u: clamp(u, 0, 1), v: clamp(v, 0, 1) };
-    }
+      return u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05 ? { u: clamp(u, 0, 1), v: clamp(v, 0, 1) } : null;
+    };
+    let meas;
+    if (settings.controller === 'stick') meas = toUV(result.stick);
+    else if (settings.stickModel) {
+      // 스틱이 지정돼 있으면: 블레이드 바로 옆에서 퍽이 사라졌을 때(스틱에 가림) 잠시 블레이드 자리로 퍽을 잇는다
+      meas = stickBridge.step(toUV(result.puck), toUV(result.stick), now);
+      if (meas?.bridged && m) { const [bx, by] = m.toPx(meas.u, meas.v); vision.holdPuckAt(bx, by); }
+    } else meas = toUV(result.puck);
     tracker.update(meas, now);
 
   }
@@ -1273,7 +1281,7 @@ function loop(raw) {
   game.arcade.idleHold = app.idleHold;
   applyWash(); // 게임마다 다른 배경·퍽 투명도 규칙 (모드가 바뀌어도 바로)
   updatePuckCover(result, now);
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null });
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null, pick: app.calibTarget });
   drawTransparencyPreview(result);
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
@@ -1489,7 +1497,7 @@ function bindCoursePoint(el) {
 
 /** 코스 표시 상태: 자유 연습일 때만 보이고, 플레이 중에는 다음/완료 표시 */
 function updateCourseUI() {
-  const show = app.started && game.mode.id === 'free' && !app.calib.manual && !app.areaEditing;
+  const show = app.started && game.mode.id === 'free' && !app.calib.manual && !app.areaEditing && !app.calibTarget;
   const layer = $('#course');
   layer.classList.toggle('hidden', !show);
   if (!show) return;
@@ -1607,10 +1615,14 @@ function updateIdleCircle(dt) {
 function commitLearnedModel(target, done, refresh = false) {
   const model = { r: done.r, g: done.g, b: done.b, area: done.area };
   $('#btn-replace-puck').classList.add('hidden');
+  let boosted = false;
   if (target === 'puck') {
     if (!app.mouseMode) track('puck_registered');
+    // 아주 작게 보이는 퍽은 인식 해상도를 올려 따라간다 (면적·자리는 새 해상도로 환산)
+    const k = boostForSmallPuck(model.area);
+    if (k !== 1) { boosted = true; model.area = Math.round(model.area * k * k); }
     settings.puckModel = model; settings.puckTol = done.tol;
-    vision.seedPuck(done.cx, done.cy, done.area); tracker.reset();
+    vision.seedPuck(done.cx * k, done.cy * k, model.area); tracker.reset(); stickBridge.reset();
     $('#set-puckTol').value = done.tol; $('#out-puckTol').value = done.tol;
   } else {
     settings.stickModel = model; settings.stickTol = done.tol;
@@ -1621,6 +1633,7 @@ function commitLearnedModel(target, done, refresh = false) {
   sfx.target();
   if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); return; }
   if (refresh) toast('등록된 퍽을 다시 인식했어요 · 원에 3초 더 두면 시작', 3500);
+  else if (boosted) toast('퍽 등록 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요', 4000);
   else toast(target === 'puck' ? '퍽 등록 완료 · 원에 3초 더 두면 시작' : '스틱 등록 완료', 3500);
 }
 
@@ -1683,7 +1696,7 @@ function updateChips(result) {
     els.chipFps.textContent = `${app.fps} fps`;
     return;
   }
-  setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && tracker.state === 'predicted') ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
+  setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && (tracker.state === 'predicted' || stickBridge.active)) ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
   if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', stickCtl ? '스틱(조작)' : '스틱');
   else setChip(els.chipStick, '', '스틱(미지정)');
   els.chipFps.textContent = app.frozenWarned || app.cameraLost ? '영상 없음' : `${app.fps} fps`;
@@ -2183,11 +2196,32 @@ function updateAutoCalibration(dt) {
 // =============== 보정 (터치로 색 지정) ===============
 function beginCalibration(target) {
   if (app.calib.manual) cancelAutoCalibration();
+  // 게임 중이면 멈춘다: 지정하는 동안은 게임 화면(흰 배경) 대신 카메라 영상을 보여 주고, 날아오는 퍽·시간도 멈춰야 한다
+  if (game.running) game.stop('manual');
   app.calibTarget = target;
   close(els.panelCalib);
+  $('#btn-replace-puck').classList.add('hidden');
   els.tapHint.textContent = target === 'puck' ? '화면에서 퍽을 터치하세요' : '화면에서 스틱 블레이드(테이프)를 터치하세요';
   els.tapHint.classList.remove('hidden');
   els.view.classList.add('calibrating');
+}
+
+/** 터치로 지정 끝 (지정했거나 Esc 로 취소) */
+function endPick() {
+  app.calibTarget = null;
+  els.tapHint.classList.add('hidden');
+  els.view.classList.remove('calibrating');
+}
+
+/** 퍽이 처리 해상도에서 이 면적(px)보다 작게 보이면 인식 해상도를 올린다 (멀리 둔 노트북 웹캠·작은 공) */
+const SMALL_PUCK_AREA = 20;
+/** 아주 작게 보이는 퍽: 인식 해상도를 400 으로 올려 더 많은 픽셀로 따라가게. 반환: 좌표 배율 (그대로면 1) */
+function boostForSmallPuck(area) {
+  if (app.mouseMode || !(area > 0) || area >= SMALL_PUCK_AREA || settings.procWidth >= 400) return 1;
+  const before = vision.PW;
+  settings.procWidth = 400; vision.setProcWidth(400); layout();
+  $('#set-procWidth').value = '400';
+  return vision.PW / before;
 }
 
 function onViewTap(e) {
@@ -2198,20 +2232,29 @@ function onViewTap(e) {
   const nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height;
   const [px, py] = vision.toProc(nx, ny);
   const tol = app.calibTarget === 'puck' ? settings.puckTol : settings.stickTol;
+  // 누른 자리 근처에서 바닥과 색이 다른 물체로 붙어(손가락이 조금 빗나가도) 그 물체 한가운데 색을 잰다
   const sample = vision.sampleObject(px, py, tol);
-  els.tapHint.classList.add('hidden');
-  els.view.classList.remove('calibrating');
-  const target = app.calibTarget; app.calibTarget = null;
+  const target = app.calibTarget;
+  endPick();
   if (!sample) return;
-  if (vision.isFloorLike(sample, settings)) {
+  if (!sample.snapped && vision.isFloorLike(sample, settings)) {
     toast('바닥(흰색)과 구분되지 않는 색입니다. 다른 색의 물체/테이프를 사용하세요.');
     return;
   }
   const model = { r: sample.r, g: sample.g, b: sample.b, area: Math.max(4, Math.min(3000, sample.area)) };
-  if (target === 'puck') { settings.puckModel = model; vision.seedPuck(px, py, model.area); tracker.reset(); }
-  else settings.stickModel = model;
+  let sx = sample.snapped ? sample.cx : px, sy = sample.snapped ? sample.cy : py, boosted = false;
+  if (target === 'puck') {
+    const k = boostForSmallPuck(model.area);
+    if (k !== 1) { boosted = true; model.area = Math.round(model.area * k * k); sx *= k; sy *= k; }
+    settings.puckModel = model; vision.seedPuck(sx, sy, model.area); tracker.reset(); stickBridge.reset();
+  } else settings.stickModel = model;
+  // 주변 바닥과의 색 차이에 맞춘 허용 오차 (원 안에 3초 자동 지정과 같은 기준)
+  if (sample.snapped && sample.tol) {
+    const key = target === 'puck' ? 'puckTol' : 'stickTol';
+    settings[key] = sample.tol; $(`#set-${key}`).value = sample.tol; $(`#out-${key}`).value = sample.tol;
+  }
   persist(); refreshCalibUI();
-  toast(`${target === 'puck' ? '퍽' : '스틱'} 색 지정 완료`);
+  toast(boosted ? '퍽 색 지정 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요' : `${target === 'puck' ? '퍽' : '스틱'} 색 지정 완료`, boosted ? 3500 : undefined);
 }
 
 function refreshCalibUI() {

@@ -186,14 +186,25 @@ const skipSetup = async (page, touch = false) => {
   await page.waitForTimeout(200);
   await page.click('#btn-start'); // 중지
   await page.click('[data-close="panel-result"]');
+  // 퍽 피하기처럼 배경이 흰 화면(투명도 0 고정)인 게임이어도, 지정하는 동안은 흰 칠 없이 카메라 영상이 보여야 퍽을 누를 수 있다
+  const overlayAlpha = () => page.evaluate(() => { const c = document.querySelector('#overlay'); return c.getContext('2d').getImageData(Math.round(c.width * 0.31), Math.round(c.height * 0.57), 1, 1).data[3]; });
+  await page.evaluate(() => { window.__puckTrainer.settings.autoStart = false; }); // 대기 원 없이 게임 화면 그대로
+  await page.waitForTimeout(150);
+  const whiteBefore = await overlayAlpha();
   await page.click('#btn-calib');
   await page.click('[data-calib="puck"]');
   const hintVisible = await page.isVisible('#tap-hint');
+  await page.waitForTimeout(150);
+  const whileAlpha = await overlayAlpha();
   await page.mouse.click(600, 400);
   await page.waitForTimeout(200);
   const hintHidden = !(await page.isVisible('#tap-hint'));
+  await page.evaluate(() => { window.__puckTrainer.settings.autoStart = true; });
   console.log(`${hintVisible && hintHidden ? 'PASS' : 'FAIL'} calibration tap flow`);
   if (!(hintVisible && hintHidden)) failed = true;
+  const pickClear = whiteBefore > 200 && whileAlpha < 40;
+  console.log(`${pickClear ? 'PASS' : 'FAIL'} tap-to-pick shows the camera, not the white game screen (overlay alpha ${whiteBefore} -> ${whileAlpha})`);
+  if (!pickClear) failed = true;
   // 모드 화면 3×3: 가운데(5번)는 비어 있고 9번은 커뮤니티
   await page.click('#btn-mode');
   const grid = await page.evaluate(() => { const kids = [...document.querySelector('#mode-list').children]; return { n: kids.length, mid: kids[4].className, last: kids[8].className, lastText: kids[8].textContent, cards: document.querySelectorAll('#mode-list .mode-card').length, cols: getComputedStyle(document.querySelector('#mode-list')).gridTemplateColumns.split(' ').length }; });

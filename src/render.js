@@ -32,7 +32,7 @@ export class Renderer {
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false, pick = null }) {
     const { ctx, canvas } = this;
     this.peek = peek; // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중처럼 (내 퍽 투명도 적용)
     const W = canvas.width, H = canvas.height;
@@ -56,7 +56,8 @@ export class Renderer {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     const pa = game.running || peek ? this.puckAlpha : 1; // 내 퍽 표시 농도: 대기·등록 화면에서는 항상 또렷이
     // 지금 그리는 화면: 'setup'(영역·등록·움직여 보기) · 'arcade' · 'floor'(바닥 위에 원근대로) · 'flat'(평면 판)
-    const playing = mapping && !areaEditing && !(calib?.active && calib.circle && !calib.plane) && !setupTest; // calib.plane: 8자 대기 원은 흰 훈련 화면 위에
+    // pick: 보정 '터치로 지정' 중 ('puck'|'stick') — 게임 화면 대신 카메라 영상을 보여 줘야 화면에서 물체를 누를 수 있다
+    const playing = mapping && !areaEditing && !(calib?.active && calib.circle && !calib.plane) && !setupTest && !pick; // calib.plane: 8자 대기 원은 흰 훈련 화면 위에
     const view = !playing ? 'setup' : game.mode.id === 'arcade' ? 'arcade' : FLOOR_MODES.has(game.mode.id) ? 'floor' : 'flat';
 
     // ---- 게임 영역 (평면 판 모드에서는 그리지 않음: 평면 판이 곧 영역이라 뒤에 비치는 사다리꼴은 헷갈리기만 한다) ----
@@ -93,8 +94,9 @@ export class Renderer {
     }
 
     if (!mapping) return;
-    // 영역 편집 중에는 게임 화면을 그리지 않는다 (바닥 영상과 격자만 보이게)
-    if (areaEditing) return;
+    // 영역 편집 중·터치로 지정 중에는 게임 화면을 그리지 않는다 (바닥 영상과 격자만 보이게).
+    // 아케이드·퍽 피하기·8자처럼 배경이 흰 화면(배경 투명도 0 고정)인 게임에서도 카메라 속 퍽·스틱이 보여야 누를 수 있다
+    if (areaEditing || pick) return;
     // 시작 준비 3/3 움직여 보기: 네 모서리 표적 + 내 퍽만
     if (setupTest) {
       this._drawSetupTest(ctx, setupTest, uvToC, unit, hair, fs);
@@ -543,8 +545,8 @@ export class Renderer {
     const starting = calib.status === 'puck';
     const mismatch = calib.status === 'mismatch';
     const learning = calib.status === 'ok' || calib.status === 'refresh';
+    // 원 안은 칠하지 않는다: 영상 속 퍽이 흐릿해 보이지 않게 (인식은 오버레이가 아닌 원본 영상으로 하지만, 눈으로도 또렷이)
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = rgba(C.paper, 0.28); ctx.fill();
     ctx.setLineDash(starting || learning ? [] : [unit * 0.014, unit * 0.012]);
     inkStroke(ctx, hair * 1.5, mismatch ? C.red : C.ink);
     ctx.setLineDash([]);

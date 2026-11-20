@@ -6,6 +6,8 @@ const FLOOR_ON_FRAMES = 10;    // 흰 바닥으로 전환하기 위한 연속 �
 const FLOOR_OFF_FRAMES = 90;   // 전체 화면으로 되돌리기 위한 연속 미검출 프레임 (~3초)
 const ROW_RATIO = 0.10;        // 바닥으로 인정할 행/열의 흰색 비율
 const MIN_FLOOR_SPAN = 0.25;   // 바닥 최소 크기(프레임 대비)
+const PUCK_DIAMETER_M = 0.076; // 하키 퍽 지름 (등록 전 퍽 크기 추정)
+const CIRCLE_PUCK_RATIO = 2;   // 가운데 원 지름 = 퍽 지름 × 2
 
 export class Vision {
   constructor(procWidth = 240) {
@@ -142,7 +144,7 @@ export class Vision {
     }
 
     const mapping = quad ? makeFloorMapping(quad) : null;
-    this.useArea(mapping);
+    this.useArea(mapping, { area: settings.puckModel?.area || 0, widthM: settings.floorWidthM || 0 });
     this.scan = mapping ? quadScanlines(quad, PH) : null; // 게임 영역 행별 x 범위 (가운데 원의 배경색을 영역 안에서만 재는 데도 씀)
     const result = {
       floor: { quad, mapping, detected: floorDetected, locked: this.floorLocked, polygon: this.floorPolygon, mode: settings.floorMode, fallback: settings.floorMode === 'auto' && this.floorFallback },
@@ -508,17 +510,40 @@ export class Vision {
    * 게임 영역(바닥)이 정해지면 그 가운데를 기억한다: 퍽 등록·핸즈프리 시작 원이 영역 한가운데에 오게.
    * mapping: 바닥 사상 (없으면 화면 가운데). 카메라는 process() 가, 마우스 테스트 모드는 main 이 부른다
    */
-  useArea(mapping) {
+  useArea(mapping, hint = null) {
     const c = mapping ? mapping.toPx(0.5, 0.5) : null;
     this.areaCenter = c && Number.isFinite(c[0]) && Number.isFinite(c[1]) ? c : null;
+    // 영역 한가운데 줄의 바닥 폭(px): 원근 때문에 위·아래 변이 아니라 가운데에서 잰다 (퍽 크기 추정용)
+    let w = 0;
+    if (this.areaCenter) {
+      const a = mapping.toPx(0.4, 0.5), b = mapping.toPx(0.6, 0.5);
+      w = Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.2;
+    }
+    this.areaWidthPx = Number.isFinite(w) && w > 0 ? w : 0;
+    this.puckHint = hint; // { area: 등록된 퍽 면적(px, 0 = 미등록), widthM: 영역 실제 폭(m) }
+  }
+
+  /**
+   * 퍽이 영역 한가운데에서 보일 반지름(처리 px) 추정.
+   * 등록된 퍽이 있으면 그 면적으로, 없으면 영역 폭 × (퍽 지름 7.6cm / 영역 실제 폭) — 실제 폭을 모르면 영역 폭의 3%
+   */
+  expectedPuckR() {
+    const h = this.puckHint;
+    if (h && h.area > 0) return Math.sqrt(h.area / Math.PI);
+    const w = this.areaWidthPx || this.PW * 0.96;
+    const frac = h && h.widthM > 0 ? PUCK_DIAMETER_M / h.widthM : 0.03;
+    return (w * frac) / 2;
   }
 
   /**
    * 가운데 원 (퍽 등록·핸즈프리 시작): 게임 영역의 한가운데(원근 기준 바닥 가운데). 원이 화면 밖으로 나가지 않게 안쪽으로.
+   * 크기는 퍽 지름의 약 2배 (지정한 영역 기준 — 화면이 아니라 퍽에 맞춰 작게). 너무 작으면 놓기 어렵고, 예전 크기(짧은 변의 9.5%)보다는 크지 않게.
    * scale: 인식할 때는 그린 원보다 조금 넓게 본다 (원 가장자리에 걸쳐도 됨) — 자리는 같고 반지름만
    */
-  calibCircle(scale = 1) {
-    const { PW, PH } = this, r0 = Math.min(PW, PH) * 0.095;
+  calibCircle(scale = 1, target = 'puck') {
+    const { PW, PH } = this, m = Math.min(PW, PH);
+    // 스틱 블레이드 테이프는 퍽보다 훨씬 길어서 예전 크기 그대로
+    const r0 = target === 'stick' ? m * 0.095 : Math.min(m * 0.095, Math.max(5, m * 0.03, CIRCLE_PUCK_RATIO * this.expectedPuckR()));
     const [cx, cy] = this.areaCenter || [PW / 2, PH / 2];
     const x = Math.min(PW - r0, Math.max(r0, cx)), y = Math.min(PH - r0, Math.max(r0, cy));
     return { x, y, r: r0 * scale };
@@ -549,10 +574,10 @@ export class Vision {
    * 가운데 원 안에서 주변 배경(고리 영역)과 색이 다른 픽셀 덩어리를 찾는다.
    * 반환: { status: 'none'|'too_big'|'ok', r,g,b, area, cx, cy, bg:{r,g,b}, dist }
    */
-  autoCalibSample() {
+  autoCalibSample(target = 'puck') {
     if (!this.frame) return { status: 'none' };
     const { PW, PH } = this; const d = this.frame.data;
-    const c = this.calibCircle(1.3); // 그린 원보다 조금 넓게 (원에 걸친 퍽도 인식)
+    const c = this.calibCircle(1.3, target); // 그린 원보다 조금 넓게 (원에 걸친 퍽도 인식)
     // 배경 고리는 예전(큰) 원 크기 바깥에서 잰다: 원보다 큰 물체가 고리까지 덮어 '너무 큼'을 놓치지 않게
     const ringR = Math.min(PW, PH) * 0.19;
     const r2 = c.r * c.r, ring0 = (ringR * 1.1) ** 2, ring1 = (ringR * 1.5) ** 2;

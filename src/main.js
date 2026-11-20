@@ -1308,7 +1308,7 @@ function stepMouse(now) {
     });
   }
   app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas, floorMap);
-  vision.useArea(app.lastVision.floor.mapping);
+  vision.useArea(app.lastVision.floor.mapping, { area: 0, widthM: settings.floorWidthM }); // 마우스: 등록된 퍽 크기 대신 영역 폭으로
   app.lastFrameAt = now;
   app.frames++;
   if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
@@ -2164,7 +2164,7 @@ function beginAutoCalibration(target) {
   if (game.running) game.stop('manual');
   closeAllPanels();
   autoCal.reset();
-  app.calib = { active: true, manual: true, target, hold: 0, status: 'none', sample: null, circle: vision.calibCircle() };
+  app.calib = { active: true, manual: true, target, hold: 0, status: 'none', sample: null, circle: vision.calibCircle(1, target) };
   app.calibTarget = null;
   $('#btn-replace-puck').classList.add('hidden');
   els.tapHint.classList.add('hidden');
@@ -2183,8 +2183,8 @@ function cancelAutoCalibration(msg) {
 
 function updateAutoCalibration(dt) {
   const c = app.calib;
-  c.circle = vision.calibCircle();
-  const sample = vision.autoCalibSample();
+  c.circle = vision.calibCircle(1, c.target);
+  const sample = vision.autoCalibSample(c.target);
   const done = autoCal.update(sample, dt);
   c.hold = autoCal.hold; c.status = autoCal.status; c.sample = autoCal.sample;
   if (!done) return;

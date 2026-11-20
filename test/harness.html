@@ -1034,12 +1034,25 @@
       const c0 = vc.calibCircle();
       vc.useArea(makeFloorMapping([[120, 20], [220, 20], [230, 120], [110, 120]]));
       const c1 = vc.calibCircle(), c13 = vc.calibCircle(1.3);
-      vc.useArea(makeFloorMapping([[0, 150], [40, 150], [40, 180], [0, 180]]));
+      vc.useArea(makeFloorMapping([[0, 177], [40, 177], [40, 180], [0, 180]]));
       const c2 = vc.calibCircle();
       vc.useArea(null);
       const c3 = vc.calibCircle();
       check('PL5 puck registration / start circle sits at the center of the play area, kept inside the picture', c0.x === 120 && c0.y === 90 && near(c1.x, 170, 1e-6) && c1.y > 60 && c1.y < 70
-        && c13.x === c1.x && c13.y === c1.y && near(c13.r, c1.r * 1.3) && near(c2.y, 180 - c2.r) && c2.x > c2.r && c3.x === 120 && c3.y === 90, { c0, c1, c2, c3 });
+        && c13.x === c1.x && c13.y === c1.y && near(c13.r, c1.r * 1.3) && near(c2.y, 180 - c2.r) && c2.x >= c2.r && c3.x === 120 && c3.y === 90, { c0, c1, c2, c3 });
+      // 원 크기: 화면이 아니라 퍽 크기 기준 (지름 = 퍽 지름의 2배). 등록 전에는 영역 폭 × 7.6cm/실제 폭으로 퍽 크기 추정
+      const area = makeFloorMapping([[60, 40], [180, 40], [200, 160], [40, 160]]);
+      vc.useArea(area, { area: 50, widthM: 1.5 });
+      const rReg = vc.calibCircle().r, rStick = vc.calibCircle(1, 'stick').r;
+      vc.useArea(area, { area: 0, widthM: 1.5 });
+      const rEst = vc.calibCircle().r, wMid = vc.areaWidthPx;
+      vc.useArea(makeFloorMapping([[0, 0], [240, 0], [240, 180], [0, 180]]), { area: 900, widthM: 0.5 });
+      const rCap = vc.calibCircle().r;
+      vc.useArea(makeFloorMapping([[110, 85], [130, 85], [130, 95], [110, 95]]), { area: 0, widthM: 3 });
+      const rMin = vc.calibCircle().r;
+      check('PL6 circle is ~2x the puck (registered size, else estimated from the area), never bigger than before, not too tiny; stick keeps the old size',
+        near(rReg, 2 * Math.sqrt(50 / Math.PI), 1e-6) && near(rEst, wMid * 0.076 / 1.5, 1e-6) && wMid > 120 && wMid < 160
+        && near(rCap, 180 * 0.095, 1e-6) && near(rStick, 180 * 0.095, 1e-6) && near(rMin, 180 * 0.03, 1e-6) && rReg < 180 * 0.095 * 0.6, { rReg, rEst, wMid, rCap, rStick, rMin });
     }
 
     // ===== 운영자 통계(회원 기준) · 방문·플레이 통계(GA4)는 공식 주소에서만, 개인정보 없이 =====

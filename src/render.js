@@ -554,12 +554,15 @@ export class Renderer {
     const prog = starting ? idleHold / 3 : calib.hold / 3;
     if (prog > 0) {
       ctx.beginPath(); ctx.arc(cx, cy, r * 1.13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, prog));
-      ctx.lineWidth = unit * 0.009; ctx.strokeStyle = C.red; ctx.stroke();
-      text(ctx, String(Math.max(1, Math.ceil(3 - prog * 3))), cx, cy, r * 1.1, { family: F.display, weight: 900 });
+      ctx.lineWidth = Math.min(unit * 0.009, r * 0.22); ctx.strokeStyle = C.red; ctx.stroke();
+      // 3·2·1: 원이 작으면(퍽 크기의 2배) 원 안에 쓰면 퍽을 가리므로 원 오른쪽에
+      const n = String(Math.max(1, Math.ceil(3 - prog * 3)));
+      const big = r * 1.1 >= fs * 2.2, size = big ? r * 1.1 : fs * 1.6;
+      text(ctx, n, big ? cx : cx + r * 1.13 + size * 0.6, cy, size, { family: F.display, weight: 900 });
     }
     if (calib.sample?.status === 'ok' && !starting) {
       const [ox, oy] = toC(calib.sample.cx, calib.sample.cy);
-      ctx.beginPath(); ctx.arc(ox, oy, unit * 0.014, 0, Math.PI * 2); ctx.fillStyle = `rgb(${calib.sample.r},${calib.sample.g},${calib.sample.b})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(ox, oy, Math.min(unit * 0.014, r * 0.3), 0, Math.PI * 2); ctx.fillStyle = `rgb(${calib.sample.r},${calib.sample.g},${calib.sample.b})`; ctx.fill();
       inkStroke(ctx, hair, C.ink);
     }
     if (mismatch && calib.registered) {

@@ -1385,6 +1385,50 @@
       const pr2 = v9.process(scene, s9);
       check('Q5 remembered size unchanged by the partial view', pr2.puck && v9.lastPuck.area > 40, { area: v9.lastPuck.area });
     }
+    // CAM) 카메라 높이: 실제 크기 3D 장면(2m×1.5m 흰 연습판, 지름 7.6cm·두께 2.5cm 퍽, 화각 66°)을 높이별로 찍어
+    //      가운데 원 등록 -> 5×5 격자 추적. 안내(1~1.5m 권장, 최소 80cm)의 근거가 되는 수치를 지킨다
+    {
+      const W = 2.0, Dp = 1.5, PR = 0.038, PT = 0.025, FL = 320 / Math.tan(33 * Math.PI / 180);
+      const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      const nrm = (a) => { const l = Math.hypot(...a); return a.map((x) => x / l); };
+      const corners3 = [[-W / 2, Dp, 0], [W / 2, Dp, 0], [W / 2, 0, 0], [-W / 2, 0, 0]];
+      const camAt = (h, L) => { const C = [0, -L, h], f = nrm(sub3([0, Dp / 2, 0], C)), r = nrm(cross3(f, [0, 0, 1])); return { C, f, r, u: cross3(r, f) }; };
+      const pj = (cam, P) => { const d = sub3(P, cam.C), z = dot3(d, cam.f); return [320 + FL * dot3(d, cam.r) / z, 240 - FL * dot3(d, cam.u) / z, z]; };
+      const fitCam = (h) => { for (let L = 0.1; L < 10; L += 0.02) { const cam = camAt(h, L); if (corners3.every((P) => { const [x, y, z] = pj(cam, P); return z > 0 && x >= 19 && x <= 621 && y >= 14 && y <= 466; })) return cam; } return null; };
+      const fillPoly = (cam, pts) => { sctx.beginPath(); pts.forEach((P, i) => { const [x, y] = pj(cam, P); i ? sctx.lineTo(x, y) : sctx.moveTo(x, y); }); sctx.closePath(); sctx.fill(); };
+      const draw3 = (cam, at) => {
+        sctx.fillStyle = '#8a7f72'; sctx.fillRect(0, 0, 640, 480);
+        sctx.fillStyle = '#eceae4'; fillPoly(cam, corners3);
+        const N = 32, bot = [], top = [];
+        for (let k = 0; k < N; k++) { const a = k * 2 * Math.PI / N; bot.push([at[0] + PR * Math.cos(a), at[1] + PR * Math.sin(a), 0]); top.push([at[0] + PR * Math.cos(a), at[1] + PR * Math.sin(a), PT]); }
+        sctx.fillStyle = '#111827';
+        for (let k = 0; k < N; k++) fillPoly(cam, [bot[k], bot[(k + 1) % N], top[(k + 1) % N], top[k]]);
+        fillPoly(cam, top);
+      };
+      const world = (u, v) => [(u - 0.5) * W, Dp * (1 - v)];
+      const camRun = (h) => {
+        const cam = fitCam(h);
+        const quad = corners3.map((P) => { const [x, y] = pj(cam, P); return [x / 640, y / 480]; });
+        const vc3 = new Vision(240); vc3.mirror = false; vc3.setSourceSize(640, 480);
+        const sc = { ...settings, floorMode: 'manual', manualQuad: quad, floorWidthM: W, puckModel: { r: 0, g: 0, b: 0, area: 0 }, puckTol: 95, stickModel: null, debug: false };
+        const cc = new AutoCalibrator(3); let dn = null;
+        for (let i = 0; i < 150 && !dn; i++) { draw3(cam, world(0.5, 0.5)); vc3.process(scene, sc); dn = cc.update(vc3.autoCalibSample(), 0.033); }
+        if (!dn) return { h, registered: false };
+        sc.puckModel = { r: dn.r, g: dn.g, b: dn.b, area: dn.area }; sc.puckTol = dn.tol; vc3.seedPuck(dn.cx, dn.cy, dn.area);
+        let prev = [0.5, 0.5], hit = 0, sum = 0, worst = 0;
+        [0.1, 0.3, 0.5, 0.7, 0.9].forEach((vv, j) => { const us = [0.1, 0.3, 0.5, 0.7, 0.9]; for (const uu of j % 2 ? us.reverse() : us) {
+          for (let k = 1; k <= 6; k++) { draw3(cam, world(prev[0] + (uu - prev[0]) * k / 6, prev[1] + (vv - prev[1]) * k / 6)); vc3.process(scene, sc); }
+          let rr; for (let k = 0; k < 2; k++) { draw3(cam, world(uu, vv)); rr = vc3.process(scene, sc); }
+          if (rr.puck) { const [mu, mv] = rr.floor.mapping.toUV(rr.puck.x, rr.puck.y); const e = Math.hypot((mu - uu) * W, (mv - vv) * Dp) * 100; if (e < 15) { hit++; sum += e; worst = Math.max(worst, e); } }
+          prev = [uu, vv];
+        } });
+        return { h, tracked: hit, meanCm: hit ? +(sum / hit).toFixed(1) : null, worstCm: +worst.toFixed(1) };
+      };
+      const c08 = camRun(0.8), c12 = camRun(1.2), c025 = camRun(0.25);
+      check('CAM camera height: at 1.2 m every grid point is tracked within ~5 cm, at 0.8 m within ~9 cm; on the floor (25 cm) tracking fails (why the guide says 1–1.5 m, at least 80 cm)',
+        c12.tracked === 25 && c12.meanCm < 4.5 && c12.worstCm < 6 && c08.tracked === 25 && c08.meanCm < 7 && c08.worstCm < 9 && c025.tracked < 10, { c12, c08, c025 });
+    }
     // B) 스틱이 퍽을 가림 (스틱 지정 시): 블레이드 옆에서 사라진 퍽은 블레이드 + 간격으로 잇는다
     {
       const sb = new StickBridge(); let t = 0;

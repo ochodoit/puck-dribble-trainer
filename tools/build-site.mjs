@@ -227,7 +227,8 @@ function guidePage(lang, page) {
       <div class="g-rules"><p class="g-rules-h">${esc(s.rulesTitle)}</p><ul>${s.rules.map(([big, small]) => `<li><b>${esc(big)}</b><span>${esc(small)}</span></li>`).join('')}</ul></div>`,
     camera: (s) => `<div class="g-two"><figure class="g-fig">${cameraDiagram(s.art, s.artLabel)}</figure>
       <figure class="g-fig"><figcaption><b>${esc(s.chart.title)}</b><span>${esc(s.chart.note)}</span></figcaption>${heightChart(s.chart.rows, s.chart)}</figure></div>
-      <ul class="g-points">${s.points.map((x) => `<li>${md(x)}</li>`).join('')}</ul>`,
+      <ul class="g-points">${s.points.map((x) => `<li>${md(x)}</li>`).join('')}</ul>${s.tv ? `
+      <div class="g-tv">${icon('tv')}<div><h3>${esc(s.tv.title)}</h3><ul class="g-points">${s.tv.items.map((x) => `<li>${md(x)}</li>`).join('')}</ul></div></div>` : ''}`,
     puck: (s) => `<ul class="g-swatches">${s.cards.map(([sw, label]) => `<li class="${sw.ok ? 'ok' : 'no'}">${puckSwatch(sw)}<span>${esc(label)}</span></li>`).join('')}</ul>
       <p class="g-note">${md(s.note)}</p>`,
     screens: (s) => `<ol class="g-screens">${s.options.map(([icons, title, tag, pros, how], i) => `<li class="g-screen${i === 0 ? ' g-first' : ''}">

@@ -4,6 +4,7 @@ import { Camera, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
+import { placementCheck } from './placement.js';
 import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
 import { C, rgba } from './theme.js';
 import { Renderer, dodgeField } from './render.js';
@@ -829,7 +830,12 @@ function bindUI() {
   $('#setup-back').addEventListener('click', () => beginAreaSetup());
   $('#test-repuck').addEventListener('click', () => beginPuckSetup());
   $('#test-area').addEventListener('click', () => beginAreaSetup());
-  $('#test-skip').addEventListener('click', () => finishSetup());
+  $('#test-skip').addEventListener('click', () => {
+    // 움직여 보기를 건너뛰어도, 영역 모양만으로 카메라가 너무 낮아 보이면 알려 준다
+    const pc = checkPlacement();
+    finishSetup();
+    if (pc?.verdict === 'raise') toast('카메라가 낮아 보여요 · 먼 쪽에서 퍽을 놓칠 수 있으니 더 높이(1~1.5m) 두세요', 6000);
+  });
   els.btnFlip.addEventListener('click', flipCamera);
   $$('#time-seg button').forEach((b) => b.addEventListener('click', () => {
     if (game.running) game.stop('manual');
@@ -1034,9 +1040,31 @@ const TEST_R = 0.13; // 표적 반지름 (바닥 좌표)
 function beginTestSetup() {
   quietCalibReset();
   setSetup('test');
-  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, doneAt: 0 };
+  // meas: 카메라 위치 점검용 — 표적에 닿았을 때 퍽 크기(먼 쪽·가까운 쪽), 먼 쪽 절반에 있는 동안 놓친 영상 수
+  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, doneAt: 0, advice: null, lastV: null, frameAt: -1,
+    meas: { far: [], near: [], farFrames: 0, farMissed: 0 } };
   $('#test-hint').textContent = '퍽을 네 모서리 표적에';
   paintTest();
+}
+
+/**
+ * 카메라 위치 점검 결과 -> 안내 글 (짧게: 3/3 막대, 길게: 모드 창 위 안내).
+ * 높이세요 / 지금이 최소(더 낮추지 말 것) / 좋아요 / 여유 있음(화면을 가리면 조금 낮춰도 됨)
+ */
+const PLACEMENT_ADVICE = {
+  raise: ['먼 쪽이 작게 보여요 · 카메라를 더 높이', '준비 완료 · 먼 쪽 바닥에서 퍽이 작게 보여요. 카메라를 더 높이(1~1.5m) 두고 영역을 다시 맞추면 더 정확해요'],
+  minimum: ['잘 잡혀요 · 지금 높이가 최소예요', '준비 완료 · 전체가 잡혀요. 지금 높이가 최소라 더 낮추지 마세요 (높일수록 더 정확해요)'],
+  good: ['잘 잡혀요 · 카메라 위치 좋아요', '준비 완료 · 카메라 위치 좋아요. 게임을 고르세요'],
+  room: ['아주 잘 잡혀요 · 높이 여유 있음', '준비 완료 · 아주 잘 보여요. 카메라가 화면(TV)을 가리면 조금 낮춰도 돼요'],
+};
+
+/** 지금 영역·등록된 퍽으로 카메라 위치 점검 (measured: 3/3 에서 잰 값, 없으면 어림만). 마우스 모드·미등록이면 null */
+function checkPlacement(measured = null) {
+  const m = app.lastVision?.floor?.mapping;
+  if (app.mouseMode || !m || !(settings.puckModel.area > 0)) return null;
+  const r = placementCheck({ mapping: m, puckArea: settings.puckModel.area, PW: vision.PW, measured });
+  app.placement = r; // 테스트·문제 확인용
+  return r;
 }
 
 function paintTest() {
@@ -1047,16 +1075,38 @@ function paintTest() {
 function updateSetupTest(dt, now) {
   const t = app.test; if (!t) return;
   app.calib.active = false; app.idleHold = 0;
-  if (t.doneAt) { if (now >= t.doneAt) { finishSetup(); toast('준비 완료 · 게임을 고르세요', 2500); } return; }
+  if (t.doneAt) {
+    if (now >= t.doneAt) { finishSetup(); toast(t.advice ? t.advice[1] : '준비 완료 · 게임을 고르세요', t.advice ? 6000 : 2500); }
+    return;
+  }
   const seen = tracker.state === 'tracked' && !!tracker.pos;
   t.lostFor = seen ? 0 : t.lostFor + dt;
+  if (seen) t.lastV = tracker.pos.y;
+  // 카메라 위치 점검: 새 영상마다 한 번, 퍽이 먼 쪽 절반(화면 위쪽)에 있는 동안 놓친 비율
+  const res = app.lastVision;
+  if (res && app.lastFrameAt !== t.frameAt) {
+    t.frameAt = app.lastFrameAt;
+    const v = seen ? tracker.pos.y : t.lastV;
+    if (v != null && v < 0.35) { t.meas.farFrames++; if (!res.puck) t.meas.farMissed++; }
+  }
   if (seen) {
     for (const g of t.targets) {
-      if (!g.hit && Math.hypot(tracker.pos.x - g.x, tracker.pos.y - g.y) < t.r) { g.hit = true; sfx.tick(); paintTest(); }
+      if (!g.hit && Math.hypot(tracker.pos.x - g.x, tracker.pos.y - g.y) < t.r) {
+        g.hit = true; sfx.tick(); paintTest();
+        if (res?.puck) (g.y < 0.5 ? t.meas.far : t.meas.near).push(res.puck.area); // 그 자리에서 퍽이 보인 크기
+      }
     }
   }
-  if (t.targets.every((g) => g.hit)) { t.doneAt = now + 900; sfx.target(); $('#test-hint').textContent = '잘 잡혀요!'; return; }
-  const hint = t.lostFor > 1.2 ? '퍽이 안 보여요 · 퍽 다시 등록' : '퍽을 네 모서리 표적에';
+  if (t.targets.every((g) => g.hit)) {
+    // 네 모서리 모두 잡힘 -> 카메라 높이 점검 결과를 잠깐 보여 주고 모드 창으로
+    const pc = checkPlacement(t.meas);
+    t.advice = pc ? PLACEMENT_ADVICE[pc.verdict] : null;
+    t.doneAt = now + (t.advice ? 1800 : 900); sfx.target();
+    $('#test-hint').textContent = t.advice ? t.advice[0] : '잘 잡혀요!';
+    return;
+  }
+  const farLost = t.meas.farFrames > 40 && t.meas.farMissed / t.meas.farFrames > 0.35 && t.lastV != null && t.lastV < 0.35;
+  const hint = t.lostFor > 1.2 ? (farLost ? '먼 쪽에서 자꾸 놓쳐요 · 카메라를 더 높이' : '퍽이 안 보여요 · 퍽 다시 등록') : '퍽을 네 모서리 표적에';
   if ($('#test-hint').textContent !== hint) $('#test-hint').textContent = hint;
 }
 

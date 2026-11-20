@@ -78,6 +78,8 @@ let community = null;   // 커뮤니티 화면 (initCommunity 반환값)
 const autoCal = new AutoCalibrator(3);
 // init() 안에서 바로 쓰므로 init() 호출보다 위에 둔다 (const는 선언 전에 못 씀)
 const INVITE_KEY = 'puck-trainer.invite.v1';
+// 설정 창의 슬라이더 (바닥 밝기·채도는 뺐다: 영역을 네 모서리로 정한 뒤로는 인식에 쓰이지 않는다)
+const SLIDER_KEYS = ['puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency'];
 
 // 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등).
 // 내 컴퓨터(localhost)에서 열었을 때만 만든다. 공개 사이트에서는 콘솔로 게임 상태를 바꿔 기록을 조작하는 데 쓰일 수 있어서
@@ -817,6 +819,8 @@ function bindUI() {
   els.btnStart.addEventListener('click', toggleRun);
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
   els.btnSettings.addEventListener('click', () => { refreshAuthUI(); refreshVisualLocks(); open(els.panelSettings); requestAnimationFrame(() => drawTransparencyPreview(app.lastVision)); }); // 계정 줄·운영자 버튼은 열 때 새로. 카메라 전에도 미리보기
+  // 모드 창의 '설정': 모드 창 위에 설정 창을 연다 (닫으면 모드 창으로 돌아옴)
+  $('#btn-mode-settings').addEventListener('click', () => els.btnSettings.click());
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleAreaEdit);
   $('#area-done').addEventListener('click', () => endAreaEdit());
@@ -869,9 +873,10 @@ function bindUI() {
 
   // 설정
   $('#set-mirror').addEventListener('change', (e) => { settings.mirror = e.target.checked; applyMirror(); persist(); });
-  $('#set-debug').addEventListener('change', (e) => { settings.debug = e.target.checked; els.debug.classList.toggle('hidden', !settings.debug); persist(); });
   $('#set-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; sfx.enabled = settings.sound; persist(); });
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
+  // 인식 세부 조정을 펼치면 미리보기를 바로 그린다 (그 뒤로는 설정 창이 열려 있는 동안 매 영상마다)
+  $('.settings-adv').addEventListener('toggle', () => drawMaskPreview(app.lastVision));
+  for (const key of SLIDER_KEYS) {
     const input = $('#set-' + key), out = $('#out-' + key);
     input.addEventListener('input', () => { settings[key] = Number(input.value); out.value = input.value; persist(); game.arcade.floorWidthM = settings.floorWidthM; applyWash(); refreshVisualLocks(); drawTransparencyPreview(app.lastVision); });
     if (key === 'bgTransparency' || key === 'puckTransparency') {
@@ -941,7 +946,7 @@ function bindUI() {
       case 'f': case 'F': toggleFullscreen(); break;
       case 'm': case 'M': renderModeList(); open(els.panelMode); break;
       case 'a': case 'A': if (app.setup && app.setup !== 'area') beginAreaSetup(); else toggleAreaEdit(); break;
-      case 'd': case 'D': settings.debug = !settings.debug; $('#set-debug').checked = settings.debug; els.debug.classList.toggle('hidden', !settings.debug); persist(); break;
+      case 'd': case 'D': settings.debug = !settings.debug; els.debug.classList.toggle('hidden', !settings.debug); persist(); break; // 개발용 (게임 중에는 숨김)
       case 'Escape': closeAllPanels(); if (app.calibTarget) endPick(); else if (app.calib.manual) cancelAutoCalibration('자동 지정 취소'); else if (app.setup === 'test') finishSetup(); break;
     }
   });
@@ -1281,7 +1286,7 @@ function loop(raw) {
   game.arcade.idleHold = app.idleHold;
   applyWash(); // 게임마다 다른 배경·퍽 투명도 규칙 (모드가 바뀌어도 바로)
   updatePuckCover(result, now);
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null, pick: app.calibTarget });
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug && !game.running, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null, pick: app.calibTarget });
   drawTransparencyPreview(result);
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
@@ -2277,7 +2282,6 @@ function refreshCalibUI() {
 // =============== 설정 UI ===============
 function applySettingsToUI() {
   $('#set-mirror').checked = settings.mirror;
-  $('#set-debug').checked = settings.debug;
   $('#set-sound').checked = settings.sound;
   $('#set-autoStart').checked = settings.autoStart;
   $('#set-flipDepth').checked = settings.flipDepth;
@@ -2285,7 +2289,7 @@ function applySettingsToUI() {
   els.invisibleToggle.checked = settings.invisible;
   game.invisible = settings.invisible;
   els.debug.classList.toggle('hidden', !settings.debug);
-  for (const key of ['whiteV', 'whiteC', 'puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'puckTransparency']) {
+  for (const key of SLIDER_KEYS) {
     $('#set-' + key).value = settings[key]; $('#out-' + key).value = settings[key];
   }
   applyWash();
@@ -2343,7 +2347,7 @@ function drawTransparencyPreview(result) {
   ctx.globalAlpha = 1;
 }
 
-/** 설정 창이 열려 모든 것이 멈춘 동안에도 투명도 미리보기는 실시간으로: 영상에서 퍽만 찾고, 게임·추적·대기 원은 그대로 멈춰 둔다 */
+/** 설정 창이 열려 모든 것이 멈춘 동안에도 투명도·인식 미리보기는 실시간으로: 영상에서 퍽만 찾고, 게임·추적·대기 원은 그대로 멈춰 둔다 */
 function previewWhilePaused(now) {
   if (els.panelSettings.classList.contains('hidden')) return;
   const video = els.video;
@@ -2352,7 +2356,36 @@ function previewWhilePaused(now) {
     app.lastVision = vision.process(video, settings);
   }
   drawTransparencyPreview(app.lastVision);
+  drawMaskPreview(app.lastVision);
   if (app.tpPeek) drawPeek(now);
+}
+
+/**
+ * 설정 창 '인식 세부 조정'의 인식 미리보기: 인식에 쓰는 영상(처리 해상도 그대로) 위에 퍽(빨강)·스틱(초록)으로 잡힌 픽셀을 칠하고,
+ * 퍽으로 고른 덩어리에 동그라미. 허용 오차 슬라이더를 움직이면 칠해지는 곳이 바로 바뀐다.
+ * 설정 창 안에서만 그리므로 게임 화면은 가리지 않는다
+ */
+let maskImg = null;
+function drawMaskPreview(result) {
+  const cv = $('#mask-preview'), adv = $('.settings-adv');
+  if (!cv || !adv?.open || els.panelSettings.classList.contains('hidden')) return;
+  const { PW, PH } = vision, f = vision.frame;
+  if (cv.width !== PW || cv.height !== PH) { cv.width = PW; cv.height = PH; }
+  const ctx = cv.getContext('2d');
+  if (app.mouseMode || !f || f.width !== PW || f.height !== PH) { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, PW, PH); return; }
+  if (!maskImg || maskImg.width !== PW || maskImg.height !== PH) maskImg = new ImageData(PW, PH);
+  const s = f.data, o = maskImg.data, pm = vision.puckMask, sm = settings.stickModel ? vision.stickMask : null;
+  for (let i = 0, p = 0; i < PW * PH; i++, p += 4) {
+    if (pm[i]) { o[p] = 232; o[p + 1] = 38; o[p + 2] = 38; }
+    else if (sm && sm[i]) { o[p] = 24; o[p + 1] = 196; o[p + 2] = 72; }
+    else { o[p] = 140 + s[p] * 0.42; o[p + 1] = 140 + s[p + 1] * 0.42; o[p + 2] = 140 + s[p + 2] * 0.42; } // 바탕은 흐리게
+    o[p + 3] = 255;
+  }
+  ctx.putImageData(maskImg, 0, 0);
+  const q = result?.floor?.quad;
+  if (q) { ctx.beginPath(); q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(22,22,22,0.7)'; ctx.stroke(); }
+  const p = result?.puck;
+  if (p) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.sqrt(p.area / Math.PI) + 3, 0, Math.PI * 2); ctx.lineWidth = 1.5; ctx.strokeStyle = '#161616'; ctx.stroke(); }
 }
 
 /**

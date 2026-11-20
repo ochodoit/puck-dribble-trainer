@@ -1328,6 +1328,23 @@
       }
       // 색은 바닥과 섞인 가장자리를 빼고 잰다 (예전: 작은 검정 퍽이 회색 rgb(70,75,85)로 등록돼 추적 색이 틀어짐)
       check('Q4 tiny puck (area < 15px) registers from the circle with its true (dark) color', !!d8 && d8.area >= 5 && d8.area < 15 && d8.r < 50 && d8.g < 50, d8);
+
+      // Q6) 두 가지 색 퍽(가운데 흰색·테두리 검정): 바닥과 더 다른 쪽 색으로 등록되고 움직여도 따라감 (흰 바닥 = 검정 테두리, 어두운 바닥 = 흰 가운데)
+      const twoTone = (floor) => {
+        const drawT = (x, y) => { sctx.fillStyle = floor; sctx.fillRect(0, 0, 640, 480); sctx.fillStyle = '#111827'; sctx.beginPath(); sctx.arc(x, y, 14, 0, Math.PI * 2); sctx.fill(); sctx.fillStyle = '#f8fafc'; sctx.beginPath(); sctx.arc(x, y, 9, 0, Math.PI * 2); sctx.fill(); };
+        const vt = new Vision(240); vt.mirror = false; vt.setSourceSize(640, 480);
+        const st = { ...s6, puckModel: { r: 0, g: 0, b: 0, area: 0 } };
+        const ct = new AutoCalibrator(3); let dt = null;
+        for (let i = 0; i < 140 && !dt; i++) { drawT(320, 240); vt.process(scene, st); dt = ct.update(vt.autoCalibSample(), 0.033); }
+        if (!dt) return { registered: false };
+        st.puckModel = { r: dt.r, g: dt.g, b: dt.b, area: dt.area }; st.puckTol = dt.tol; vt.seedPuck(dt.cx, dt.cy, dt.area);
+        let seen = 0;
+        for (let i = 0; i < 60; i++) { const x = 320 + Math.sin(i / 9) * 200, y = 260 + Math.cos(i / 13) * 120; drawT(x, y); const pr = vt.process(scene, st).puck; if (pr && Math.hypot(pr.x - x * 0.375, pr.y - y * 0.375) < 3) seen++; }
+        return { registered: true, color: [dt.r, dt.g, dt.b], seen };
+      };
+      const ttWhite = twoTone('#f3f4f6'), ttDark = twoTone('#374151');
+      check('Q6 two-tone puck (white center, black rim) registers by the part that differs from the floor and is tracked',
+        ttWhite.registered && ttWhite.color[0] < 60 && ttWhite.seen >= 57 && ttDark.registered && ttDark.color[0] > 200 && ttDark.seen >= 57, { ttWhite, ttDark });
     }
     // Q5) 스틱 블레이드에 80% 가린 퍽: 마지막 자리 바로 그곳이면 작은 조각도 퍽으로
     {

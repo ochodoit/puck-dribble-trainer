@@ -211,6 +211,15 @@ const skipSetup = async (page, touch = false) => {
   const gridOk = grid.n === 9 && grid.mid === 'mode-wait' && /mode-community/.test(grid.last) && /커뮤니티/.test(grid.lastText) && grid.cards === 8 && grid.cols === 3;
   console.log(`${gridOk ? 'PASS' : 'FAIL'} mode grid 3x3 with empty center and community in cell 9 (${JSON.stringify(grid)})`);
   if (!gridOk) failed = true;
+  // 모드 창의 '설정'(닫기 왼쪽): 모드 창 위에 설정 창, 닫으면 모드 창으로
+  const modeBtns = await page.evaluate(() => [...document.querySelectorAll('#panel-mode .head-actions .btn')].map((b) => b.textContent.trim()).join(','));
+  await page.click('#btn-mode-settings');
+  const overMode = await page.evaluate(() => !document.querySelector('#panel-settings').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
+  await page.click('[data-close="panel-settings"]');
+  const backMode = await page.evaluate(() => document.querySelector('#panel-settings').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
+  const modeSetOk = modeBtns === '설정,닫기' && overMode && backMode;
+  console.log(`${modeSetOk ? 'PASS' : 'FAIL'} mode window has Settings left of Close; settings opens over it and closing returns to the modes (${JSON.stringify({ modeBtns, overMode, backMode })})`);
+  if (!modeSetOk) failed = true;
   // 자유 연습(8번 칸) 선택 -> 코스 편집: 번호 3, 1을 끌어다 놓기 -> 저장, 번호 순서 정렬
   await page.click('#mode-list > :nth-child(8)');
   await page.waitForSelector('#course:not(.hidden)');
@@ -381,6 +390,12 @@ const skipSetup = async (page, touch = false) => {
   // 노트북 웹캠 흐름: 조작 대상 스틱(미지정이면 시작 거부) + 해상도 변경 (영역은 화면 끝까지 맞춘 틀)
   await page.click('#btn-settings');
   await page.evaluate(() => { document.querySelector('.settings-adv').open = true; }); // 인식 세부 조정은 접혀 있음
+  await page.waitForTimeout(300);
+  // 인식 미리보기: 설정 창 안에서 인식 해상도 그대로 그려지고, 쓰이지 않는 바닥 밝기·채도 칸과 화면 마스크 스위치는 없다
+  const adv = await page.evaluate(() => { const c = document.querySelector('#mask-preview'), d = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data; return { w: c.width, pw: window.__puckTrainer.vision.PW, drawn: d[3] === 255, gone: !document.querySelector('#set-whiteV') && !document.querySelector('#set-whiteC') && !document.querySelector('#set-debug'), hints: document.querySelectorAll('.settings-adv .hint').length }; });
+  const advOk = adv.w === adv.pw && adv.drawn && adv.gone && adv.hints === 3;
+  console.log(`${advOk ? 'PASS' : 'FAIL'} detection fine-tuning: live preview inside settings, hint per control, unused floor sliders removed (${JSON.stringify(adv)})`);
+  if (!advOk) failed = true;
   await page.selectOption('#set-procWidth', '320');
   await page.selectOption('#set-controller', 'stick');
   await page.click('[data-close="panel-settings"]');

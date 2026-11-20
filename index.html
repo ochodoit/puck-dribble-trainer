@@ -284,7 +284,10 @@
               <button type="button" data-level="hard">어려움</button>
             </div>
           </div>
-          <button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button></header>
+          <div class="head-actions">
+            <button type="button" id="btn-mode-settings" class="btn btn-ghost">설정</button>
+            <button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button>
+          </div></header>
         <p class="muted pick-hint"><span id="mode-pick-hint">퍽을 카드 가운데에 2초 두면 선택</span> <span>랭킹은 시간·난이도별로 따로 (난이도: 아케이드·퍽 피하기)</span></p>
         <i id="mode-cursor" class="pick-cursor hidden" aria-hidden="true"></i>
         <div id="mode-list" class="mode-list"></div>
@@ -340,17 +343,16 @@
         <details class="settings-adv">
           <summary>인식 세부 조정 (퍽이 잘 안 잡힐 때만)</summary>
           <div class="settings-grid">
+            <p class="adv-intro">퍽·스틱을 보정에서 등록하면 허용 오차는 자동으로 맞춰집니다. 미리보기에서 빨간색이 퍽으로, 초록색이 스틱으로 인식되는 곳이에요. 퍽만 빨갛게 칠해지면 그대로 두세요.</p>
+            <!-- 인식 미리보기: 인식에 쓰는 영상 위에 퍽·스틱으로 잡힌 픽셀을 칠한다 (설정 창 안에서만 — 게임 화면은 가리지 않음) -->
+            <figure class="mask-preview"><canvas id="mask-preview" aria-hidden="true"></canvas><figcaption>인식 미리보기 · 빨강 퍽 · 초록 스틱 · 동그라미 = 퍽으로 고른 자리</figcaption></figure>
             <label>퍽 색 허용 오차 <output id="out-puckTol"></output>
               <input type="range" id="set-puckTol" min="20" max="200" step="1" />
+              <small class="hint">퍽이 덜 칠해지거나 그늘·빠른 움직임에 사라지면 올리고, 신발·그림자·바닥 무늬까지 빨개지면 내리세요</small>
             </label>
             <label>스틱 색 허용 오차 <output id="out-stickTol"></output>
               <input type="range" id="set-stickTol" min="20" max="200" step="1" />
-            </label>
-            <label>바닥 밝기 기준 <output id="out-whiteV"></output>
-              <input type="range" id="set-whiteV" min="80" max="240" step="1" />
-            </label>
-            <label>바닥 채도 허용 <output id="out-whiteC"></output>
-              <input type="range" id="set-whiteC" min="10" max="120" step="1" />
+              <small class="hint">블레이드 테이프가 덜 칠해지면 올리고, 다른 물체까지 초록이 되면 내리세요</small>
             </label>
             <label>인식 해상도
               <select id="set-procWidth">
@@ -358,8 +360,8 @@
                 <option value="320">높음 (320px)</option>
                 <option value="400">최고 (400px, 퍽이 작게 보일 때)</option>
               </select>
+              <small class="hint">퍽이 작거나 멀리 보이면 높이세요 (처리가 조금 무거워짐). 아주 작은 퍽은 등록할 때 자동으로 400이 됩니다</small>
             </label>
-            <label class="switch"><input type="checkbox" id="set-debug" /><span>인식 마스크 표시(디버그)</span></label>
           </div>
         </details>
         <div class="row">

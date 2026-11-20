@@ -58,6 +58,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 #app.playing .view video { filter: saturate(0.4) contrast(0.96) brightness(1.04); }
 #overlay { pointer-events: none; }
 #debug { pointer-events: none; opacity: 0.55; mix-blend-mode: multiply; }
+#app.playing #debug { display: none; } /* 인식 마스크는 게임 중에는 숨긴다 (플레이 화면을 가리지 않게) */
 
 #floor-handles .handle { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
   border: 2px solid var(--ink); background: rgba(244, 241, 234, 0.85); padding: 0; touch-action: none; z-index: 4; box-shadow: 0 0 0 4px rgba(244, 241, 234, 0.5); }
@@ -273,6 +274,9 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .modal-card header.mode-head { flex-wrap: wrap; gap: 8px 12px; }
 .mode-opts { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; justify-content: center; }
 .mode-opts .seg button { padding: 6px 14px; min-height: 34px; font-size: 13px; }
+/* 모드 창 오른쪽 위: 설정 · 닫기 */
+.head-actions { display: flex; gap: 6px; align-items: center; }
+.head-actions .btn { padding: 6px 12px; min-height: 36px; }
 /* 3×3 배치: 가운데(5번)는 퍽이 대기하는 자리라 비워 둔다. 9번은 Coming soon */
 .mode-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 10px; } /* 모든 칸 같은 높이 */
 .mode-wait, .mode-soon { border-radius: var(--radius); min-height: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--mute); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -347,6 +351,12 @@ input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
 .settings-adv summary::after { content: "+"; font-family: var(--display); font-size: 22px; line-height: 1; }
 .settings-adv[open] summary::after { content: "–"; }
 .settings-adv .settings-grid { padding-bottom: 6px; }
+.adv-intro { grid-column: 1 / -1; margin: 0; font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; }
+/* 인식 미리보기: 인식에 쓰는 작은 영상 그대로(칸 모양이 보이게) 키운다 */
+.mask-preview { grid-column: 1 / -1; margin: 0; display: flex; flex-direction: column; gap: 4px; width: min(100%, 440px); justify-self: center; }
+.mask-preview canvas { display: block; width: 100%; height: auto; border: var(--line) solid var(--ink); border-radius: 10px; background: var(--paper-2); image-rendering: pixelated; }
+.mask-preview figcaption { font-size: 11px; color: var(--mute); text-align: center; }
+.settings-grid label .hint { font-size: 11.5px; font-weight: 400; letter-spacing: 0; color: var(--mute); line-height: 1.45; }
 .calib-item b { font-family: var(--display); font-weight: 900; font-size: 18px; }
 .calib-item small { display: block; color: var(--ink-soft); font-size: 12px; }
 .swatch { width: 32px; height: 32px; border-radius: 50%; border: var(--line) solid var(--ink); background: #000; }

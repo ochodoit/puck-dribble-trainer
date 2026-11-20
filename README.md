@@ -54,6 +54,7 @@
 
 - **언어별 주소**: 한국어 `https://puck-trainer.com/`, 영어 `https://puck-trainer.com/en/`. 화면 언어는 주소로 정합니다(검색엔진이 언어마다 따로 색인). 언어 버튼을 누르면 그 언어 주소로 옮겨 가고 선택을 기억합니다(다음에 첫 주소로 와도 고른 언어 주소로). 처음 온 사람의 브라우저 언어가 다르면 첫 화면에 다른 언어 주소 안내가 한 줄 나옵니다. 게임을 시작한 뒤에는 그 자리에서 바뀝니다.
 - **만들어 두는 파일** (`node tools/build-site.mjs`, 내용은 `tools/site-content.mjs`): `index.html` 의 `<!-- seo:start -->`~`<!-- seo:end -->`(제목·설명·canonical·hreflang·공유 미리보기·구조화 데이터·소유 확인 태그), `en/index.html`(영어 사전으로 미리 번역한 첫 화면 — 자바스크립트를 돌리지 않는 AI 크롤러도 영어를 봄), 안내 페이지 `guide/`·`games/`·`faq/`(한·영), `sitemap.xml`, `robots.txt`(모든 검색·AI 크롤러 허용), `llms.txt`(AI용 사이트 요약), `404.html`, 구글 소유 확인 파일. **`index.html` 이나 영어 사전을 고친 뒤에는 꼭 다시 실행**하세요 — 테스트(`test/site-check.mjs`)가 오래된 파일을 잡아냅니다.
+  - **사용 가이드**(`guide/`)는 디자인된 한 장짜리 안내입니다: 내용은 `site-content.mjs` 의 `guide`(짧은 글 + 펼쳐 보기), 그림(아이콘·카메라 옆모습·높이별 그래프·퍽 견본)은 `tools/guide-art.mjs` 의 인라인 SVG, 모양은 `pages.css`, 스크롤을 따라다니는 목차(넓은 화면 = 왼쪽, 휴대폰·태블릿 = 위에 붙는 가로 띠)와 지금 절 표시는 `src/page.js`. 안내 페이지는 CSP 로 `style` 속성·`<style>` 을 막으므로 SVG 도 속성(fill·stroke)만 씁니다.
 - **공유 미리보기 이미지**: `node tools/make-og.mjs` → `icons/og-image.png`(한국어), `icons/og-image-en.png`(영어), 1200×630.
 - **한 줄 정의**: 첫 화면 소개·안내 페이지·구조화 데이터·llms.txt 에 같은 문장(`DEF`)을 씁니다. AI 검색이 인용하기 쉽게.
 - **검색엔진 등록**: 구글 서치 콘솔(URL 접두어 `https://puck-trainer.com/`, HTML 태그 + 파일), Bing 웹마스터 도구(메타 태그) 소유 확인 · 사이트맵 제출. 네이버 서치어드바이저·다음 웹마스터도구는 각 계정 로그인 후 등록 (네이버는 `naver-site-verification` 태그를 `tools/site-content.mjs` 의 `VERIFY` 에 넣고 다시 만들면 됩니다).

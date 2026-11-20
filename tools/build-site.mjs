@@ -9,6 +9,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE, VERIFY, SAME_AS, DEF, NAME, HOME, GAMES, PAGES, UI } from './site-content.mjs';
+import { icon, cameraDiagram, heightChart, puckSwatch } from './guide-art.mjs';
 
 export const ROOT = normalize(join(fileURLToPath(import.meta.url), '..', '..'));
 const LANGS = ['ko', 'en'];
@@ -84,7 +85,7 @@ function pageLd(lang, page) {
     isPartOf: { '@id': `${SITE}/#website` }, about: { '@id': `${url(pathOf(lang))}#app` }, publisher: { '@id': `${SITE}/#org` } }, crumbLd(lang, page)];
   if (p.faq) graph.push({ '@type': 'FAQPage', mainEntity: p.faq.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: plain(answer(lang, a)) } })) });
   if (p.howto) {
-    const ol = p.sections.find(([, b]) => Array.isArray(b) && b[0] === 'ol')?.[1][1] || [];
+    const ol = p.guide?.setup?.steps || p.sections?.find(([, b]) => Array.isArray(b) && b[0] === 'ol')?.[1][1] || [];
     graph.push({ '@type': 'HowTo', name: p.howto.name, step: p.howto.steps.map((name, i) => ({ '@type': 'HowToStep', position: i + 1, name, text: plain(ol[i] || name).replace(/^[^—]*—\s*/, '') })) });
   }
   if (page.slug === 'games') graph.push({ '@type': 'ItemList', name: p.gamesTitle, itemListElement: GAMES.map((g, i) => ({ '@type': 'ListItem', position: i + 1, name: g[lang].name, description: g[lang].what })) });
@@ -171,7 +172,7 @@ function block(b) {
   return `<${tag}>${items.map((x) => `<li>${md(x)}</li>`).join('')}</${tag}>`;
 }
 
-function shell(lang, { head, body, slug = '' }) {
+function shell(lang, { head, body, slug = '', wide = false }) {
   const u = UI[lang], other = u.otherLang;
   const nav = PAGES.map((q) => `<a href="${pathOf(lang, q.slug)}"${q.slug === slug ? ' aria-current="page"' : ''}>${esc(q[lang].nav)}</a>`).join('');
   return `<!doctype html>
@@ -193,12 +194,12 @@ function shell(lang, { head, body, slug = '' }) {
   <link href="/pages.css" rel="stylesheet" />
   <script type="module" src="/src/page.js"></script>
 </head>
-<body>
+<body${wide ? ' class="wide"' : ''}>
   <header class="top">
     <a class="brand" href="${pathOf(lang)}">Puck Dribble <span>Trainer</span></a>
     <nav class="links" aria-label="${esc(u.navLabel)}">${nav}<a class="lang" href="${pathOf(other, slug)}" hreflang="${other}" lang="${other}" data-ugc>${esc(u.other)}</a></nav>
   </header>
-  <main class="doc">
+  <main class="doc${wide ? ' guide-doc' : ''}">
 ${body}
   </main>
   <footer class="foot">
@@ -211,7 +212,55 @@ ${body}
 `;
 }
 
+/**
+ * 사용 가이드: 디자인된 한 장짜리 안내. 왼쪽(휴대폰·태블릿은 위쪽)에 스크롤을 따라다니는 목차,
+ * 핵심은 그림·카드로 짧게, 자세한 내용은 펼쳐 보기(details). 그림은 tools/guide-art.mjs, 모양은 pages.css
+ */
+function guidePage(lang, page) {
+  const p = page[lang], g = p.guide, u = UI[lang];
+  const secs = [g.glance, g.camera, g.puck, g.screens, g.setup, g.routine, g.headsup, g.cautions, g.help];
+  const no = (i) => String(i + 1).padStart(2, '0');
+  const head = (s, i) => `<h2><span class="g-no">${no(i)}</span>${esc(s.title)}</h2>`;
+  const lead = (s) => (s.lead ? `<p class="g-lead">${md(s.lead)}</p>` : '');
+  const html = {
+    glance: (s) => `<ol class="g-steps">${s.steps.map(([ic, t, d], i) => `<li><span class="g-step-no">${i + 1}</span>${icon(ic)}<b>${esc(t)}</b><span>${esc(d)}</span></li>`).join('')}</ol>
+      <div class="g-rules"><p class="g-rules-h">${esc(s.rulesTitle)}</p><ul>${s.rules.map(([big, small]) => `<li><b>${esc(big)}</b><span>${esc(small)}</span></li>`).join('')}</ul></div>`,
+    camera: (s) => `<div class="g-two"><figure class="g-fig">${cameraDiagram(s.art, s.artLabel)}</figure>
+      <figure class="g-fig"><figcaption><b>${esc(s.chart.title)}</b><span>${esc(s.chart.note)}</span></figcaption>${heightChart(s.chart.rows, s.chart)}</figure></div>
+      <ul class="g-points">${s.points.map((x) => `<li>${md(x)}</li>`).join('')}</ul>`,
+    puck: (s) => `<ul class="g-swatches">${s.cards.map(([sw, label]) => `<li class="${sw.ok ? 'ok' : 'no'}">${puckSwatch(sw)}<span>${esc(label)}</span></li>`).join('')}</ul>
+      <p class="g-note">${md(s.note)}</p>`,
+    screens: (s) => `<ol class="g-screens">${s.options.map(([icons, title, tag, pros, how], i) => `<li class="g-screen${i === 0 ? ' g-first' : ''}">
+        <div class="g-screen-head"><span class="g-rank">${i + 1}</span><span class="g-icons">${icons.map((n) => icon(n)).join('<i aria-hidden="true">+</i>')}</span>${tag ? `<em class="g-tag">${esc(tag)}</em>` : ''}</div>
+        <h3>${esc(title)}</h3><p class="g-pros">${esc(pros)}</p>
+        <details><summary>${esc(s.howLabel)}</summary><p>${md(how)}</p></details></li>`).join('')}</ol>
+      <ul class="g-chips">${s.tips.map((x) => `<li>${md(x)}</li>`).join('')}</ul>`,
+    setup: (s) => `<ol class="g-setup">${s.steps.map((x) => `<li>${md(x)}</li>`).join('')}</ol>`,
+    routine: (s) => `<div class="g-bar" aria-hidden="true">${s.items.map(([, m], i) => `<span class="m${m} c${i + 1}">${m}</span>`).join('')}</div>
+      <ol class="g-routine">${s.items.map(([n, m, d], i) => `<li class="c${i + 1}"><b>${esc(n)}</b><span class="g-min">${m}${esc(s.unit)}</span><span>${esc(d)}</span></li>`).join('')}</ol>`,
+    headsup: (s) => `<div class="g-headsup">${icon('eye')}<p>${md(s.text)}</p></div>`,
+    cautions: (s) => `<ul class="g-cautions">${s.items.map(([ic, t, d]) => `<li>${icon(ic)}<b>${esc(t)}</b><span>${esc(d)}</span></li>`).join('')}</ul>`,
+    help: (s) => `<div class="g-help">${s.items.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${md(a)}</p></details>`).join('')}</div>`,
+  };
+  const keys = ['glance', 'camera', 'puck', 'screens', 'setup', 'routine', 'headsup', 'cautions', 'help'];
+  const body = [
+    '    <div class="guide">',
+    `      <div class="g-hero"><nav class="crumb" aria-label="${esc(u.crumbLabel)}"><a href="${pathOf(lang)}">${esc(u.home)}</a> › <span>${esc(p.nav)}</span></nav>`,
+    `      <h1>${esc(p.h1)}</h1>`,
+    `      <p class="lead">${esc(DEF[lang])} ${esc(p.lead)}</p></div>`,
+    `      <nav class="toc" aria-label="${esc(g.toc)}"><p class="toc-h">${esc(g.toc)}</p><ol>${secs.map((s, i) => `<li><a href="#${s.id}"><span class="toc-no">${no(i)}</span>${esc(s.toc)}</a></li>`).join('')}</ol></nav>`,
+    '      <div class="g-body">',
+    ...keys.map((k, i) => `      <section class="g-sec gs-${k}" id="${secs[i].id}">${head(secs[i], i)}${lead(secs[i])}\n      ${html[k](secs[i])}</section>`),
+    `      <p class="cta"><a class="btn" href="${pathOf(lang)}">${esc(u.start)}</a></p>`,
+    '      </div>',
+    '    </div>',
+  ].join('\n');
+  const headTags = seoHead({ lang, slug: page.slug, title: p.title, description: p.description, ld: pageLd(lang, page) });
+  return shell(lang, { head: headTags, body, slug: page.slug, wide: true });
+}
+
 function contentPage(lang, page) {
+  if (page[lang].guide) return guidePage(lang, page);
   const p = page[lang], u = UI[lang];
   const parts = [
     `    <nav class="crumb" aria-label="${esc(u.crumbLabel)}"><a href="${pathOf(lang)}">${esc(u.home)}</a> › <span>${esc(p.nav)}</span></nav>`,

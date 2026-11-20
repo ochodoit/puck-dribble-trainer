@@ -230,7 +230,8 @@ function guidePage(lang, page) {
       <ul class="g-points">${s.points.map((x) => `<li>${md(x)}</li>`).join('')}</ul>${s.tv ? `
       <div class="g-tv">${icon('tv')}<div><h3>${esc(s.tv.title)}</h3><ul class="g-points">${s.tv.items.map((x) => `<li>${md(x)}</li>`).join('')}</ul></div></div>` : ''}`,
     puck: (s) => `<ul class="g-swatches">${s.cards.map(([sw, label]) => `<li class="${sw.ok ? 'ok' : 'no'}">${puckSwatch(sw)}<span>${esc(label)}</span></li>`).join('')}</ul>
-      <p class="g-note">${md(s.note)}</p>`,
+      <p class="g-note">${md(s.note)}</p>${s.floors ? `
+      <div class="g-floors"><h3>${esc(s.floors.title)}</h3><p class="g-floors-note">${esc(s.floors.note)}</p><ul>${s.floors.items.map(([f, tip, score, ok]) => `<li class="${ok ? 'ok' : 'warn'}"><b>${esc(f)}</b><span>${esc(tip)}</span>${score ? `<em>${esc(score)}</em>` : ''}</li>`).join('')}</ul></div>` : ''}`,
     screens: (s) => `<ol class="g-screens">${s.options.map(([icons, title, tag, pros, how], i) => `<li class="g-screen${i === 0 ? ' g-first' : ''}">
         <div class="g-screen-head"><span class="g-rank">${i + 1}</span><span class="g-icons">${icons.map((n) => icon(n)).join('<i aria-hidden="true">+</i>')}</span>${tag ? `<em class="g-tag">${esc(tag)}</em>` : ''}</div>
         <h3>${esc(title)}</h3><p class="g-pros">${esc(pros)}</p>

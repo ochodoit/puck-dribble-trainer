@@ -153,6 +153,15 @@ html { scroll-behavior: smooth; }
 .g-swatches li { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; line-height: 1.35; }
 .g-swatches li.no span { color: var(--ink-soft); font-weight: 500; }
 .g-note { margin: 14px 0 0; font-size: 15px; color: var(--ink-soft); }
+.g-floors { margin-top: 16px; border: 1.5px solid var(--ink); border-radius: 18px; padding: 14px 16px 10px; background: rgba(255, 255, 255, 0.45); }
+.g-floors h3 { margin: 0; font-size: 16px; }
+.g-floors-note { margin: 2px 0 8px; font-size: 12.5px; color: var(--mute); }
+.g-floors li { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) auto; gap: 2px 14px; align-items: baseline; padding: 9px 0 9px 18px; border-top: 1px solid rgba(22, 22, 22, 0.14); position: relative; font-size: 14.5px; line-height: 1.5; }
+.g-floors li::before { content: ""; position: absolute; left: 2px; top: 1.05em; width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+.g-floors li.warn::before { background: var(--red); }
+.g-floors li > span { color: var(--ink-soft); }
+.g-floors em { font-style: normal; font-family: var(--display); font-weight: 900; font-size: 13.5px; white-space: nowrap; color: var(--ink); }
+@media (max-width: 600px) { .g-floors li { grid-template-columns: minmax(0, 1fr) auto; } .g-floors li > span { grid-column: 1 / -1; grid-row: 2; } }
 
 /* 04 큰 화면 연결: 순위 카드 */
 .g-screens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

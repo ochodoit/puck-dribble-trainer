@@ -1345,6 +1345,33 @@
       const ttWhite = twoTone('#f3f4f6'), ttDark = twoTone('#374151');
       check('Q6 two-tone puck (white center, black rim) registers by the part that differs from the floor and is tracked',
         ttWhite.registered && ttWhite.color[0] < 60 && ttWhite.seen >= 57 && ttDark.registered && ttDark.color[0] > 200 && ttDark.seen >= 57, { ttWhite, ttDark });
+
+      // Q7) 검정 퍽이 검정 스케이트에 닿아 한 덩어리가 돼도 퍽 모양 부분만 떼어 낸다. 퍽을 집어 가면 스케이트 앞코를 퍽으로 잡지 않고, 붙은 채로는 1.5초까지만
+      const drawSkate = (puck, px, py, bootR, bootY = py) => {
+        sctx.fillStyle = '#eceae4'; sctx.fillRect(0, 0, 640, 480);
+        sctx.fillStyle = '#16181d'; sctx.beginPath(); sctx.roundRect(bootR - 110, bootY - 26, 110, 40, 14); sctx.fill();
+        sctx.fillStyle = '#c7ccd4'; sctx.fillRect(bootR - 104, bootY + 14, 98, 5);
+        if (puck) { sctx.fillStyle = '#111827'; sctx.beginPath(); sctx.ellipse(px, py, 12, 8, 0, 0, Math.PI * 2); sctx.fill(); }
+      };
+      const skateRun = () => { const vk = new Vision(240); vk.mirror = false; vk.setSourceSize(640, 480); return vk; };
+      const sk = { ...s6, puckModel: { r: 17, g: 24, b: 39, area: 40 }, puckTol: 120 };
+      const at = (r, px, py) => !!r.puck && Math.hypot(r.puck.x - px * 0.375, r.puck.y - py * 0.375) < 3;
+      const touch = {};
+      for (const gap of [0, -4]) {
+        const vk = skateRun(); let n = 0;
+        for (let i = 0; i < 6; i++) { drawSkate(true, 400, 260, 340); vk.process(scene, sk); }
+        for (let i = 0; i < 20; i++) { drawSkate(true, 400 + (i % 2), 260, 388 - gap + (i % 2)); if (at(vk.process(scene, sk), 400 + (i % 2), 260)) n++; }
+        touch[gap] = n;
+      }
+      const vg = skateRun(); let ghost = 0;
+      for (let i = 0; i < 6; i++) { drawSkate(true, 400, 260, 340); vg.process(scene, sk); }
+      for (let i = 0; i < 8; i++) { drawSkate(true, 400, 260, 388); vg.process(scene, sk); }
+      for (let i = 0; i < 60; i++) { drawSkate(false, 0, 260, 388); if (vg.process(scene, sk).puck) ghost++; }
+      const vh = skateRun(); let held = 0;
+      for (let i = 0; i < 6; i++) { drawSkate(true, 400, 260, 340); vh.process(scene, sk); }
+      for (let i = 0; i < 60; i++) { drawSkate(true, 400 + (i % 2), 260, 388 + (i % 2)); if (at(vh.process(scene, sk), 400 + (i % 2), 260)) held++; }
+      check('Q7 black puck touching a black skate is split out of the merged blob; picking the puck up leaves no ghost; held contact ends after 1.5 s',
+        touch[0] === 20 && touch[-4] === 20 && ghost === 0 && held >= 40 && held <= 46, { touch, ghost, held });
     }
     // Q5) 스틱 블레이드에 80% 가린 퍽: 마지막 자리 바로 그곳이면 작은 조각도 퍽으로
     {

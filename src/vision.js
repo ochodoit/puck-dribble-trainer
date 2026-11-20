@@ -8,6 +8,7 @@ const ROW_RATIO = 0.10;        // 바닥으로 인정할 행/열의 흰색 비�
 const MIN_FLOOR_SPAN = 0.25;   // 바닥 최소 크기(프레임 대비)
 const PUCK_DIAMETER_M = 0.076; // 하키 퍽 지름 (등록 전 퍽 크기 추정)
 const CIRCLE_PUCK_RATIO = 2;   // 가운데 원 지름 = 퍽 지름 × 2
+const SPLIT_MAX_FRAMES = 45;   // 같은 색 물체에 붙은 퍽을 떼어 내는 것만으로 이어 가는 최대 프레임 (~1.5초)
 
 export class Vision {
   constructor(procWidth = 240) {
@@ -24,6 +25,7 @@ export class Vision {
     this.floorOnCount = 0; this.floorOffCount = 0;
     this.floorFallback = false; // 흰 바닥이 없어 카메라 화면 전체를 쓰는 중
     this.lastPuck = null;       // {x,y,area,vx,vy,missed} 추적 게이트 (proc px)
+    this.splitRun = 0;          // 같은 색 큰 덩어리에서 퍽을 떼어 내 이어 온 연속 프레임 수
     this.lastStick = null;
     this.debugImage = null;
     this._alloc();
@@ -238,10 +240,14 @@ export class Vision {
     }
 
     const nearR = Math.max(4, 0.05 * PW);
+    // 같은 색 큰 물체(검정 스케이트·신발·검정 테이프)에 퍽이 닿으면 한 덩어리가 되어 '너무 큼'으로 걸러진다 -> 예측 자리에 걸친 큰 덩어리를 기억
+    const padP = last ? 2 * Math.sqrt(last.area / Math.PI) : 0;
+    let bigNear = false;
     let best = null, bestScore = 0;
     for (const c of comps) {
       const cx = c.sx / c.area, cy = c.sy / c.area;
       const near = !!last && Math.hypot(cx - predX, cy - predY) < nearR;
+      if (c.area > maxA && last && predX >= c.minx - padP && predX <= c.maxx + padP && predY >= c.miny - padP && predY <= c.maxy + padP) bigNear = true;
       if (c.area < (near ? minNear : minA) || c.area > maxA) continue;
       // 놓친 뒤 재획득: 마지막으로 본 퍽과 크기가 비슷한 것만 허용 (바로 그 자리면 가려져 작아진 조각도)
       if (last && reacquiring) {
@@ -274,10 +280,18 @@ export class Vision {
         if (near && nearScore >= bestScore * 0.45) { best = near; bestScore = nearScore; }
       }
     }
+    // 퍽이 같은 색 큰 덩어리에 붙어 사라졌으면(못 찾았거나, 찾은 게 예측 자리에서 먼 다른 물체면) 그 덩어리 안에서 퍽 모양 부분만 떼어 낸다.
+    // 붙은 채로 너무 오래(1.5초) 이것만으로 이어지면 그만둔다 (퍽을 집어 갔는데 스케이트 앞코를 퍽으로 계속 잡는 일 방지)
+    let split = false;
+    if (bigNear && calibrated && this.splitRun < SPLIT_MAX_FRAMES && (!best || bestScore < 0.18 || Math.hypot(best.cx - predX, best.cy - predY) > sigma * 0.8)) {
+      const sp = this._splitFromBlob(predX, predY, last.area);
+      if (sp) { best = sp; bestScore = Math.max(0.18, sp.score); split = true; result.puckCandidates.push(sp); }
+    }
+    this.splitRun = split ? this.splitRun + 1 : best && bestScore >= 0.18 ? 0 : this.splitRun;
     if (best && bestScore >= 0.18) {
-      result.puck = { x: best.cx, y: best.cy, area: best.area, w: best.maxx - best.minx + 1, h: best.maxy - best.miny + 1, score: bestScore };
-      // 가려져 작아진 조각은 퍽 크기 기억을 바꾸지 않는다 (다시 다 보일 때 '크기가 다르다'고 거부하지 않게)
-      const partial = best.area < minA;
+      result.puck = { x: best.cx, y: best.cy, area: best.area, w: best.maxx - best.minx + 1, h: best.maxy - best.miny + 1, score: bestScore, split };
+      // 가려져 작아진 조각·떼어 낸 부분은 퍽 크기 기억을 바꾸지 않는다 (다시 다 보일 때 '크기가 다르다'고 거부하지 않게)
+      const partial = best.area < minA || split;
       if (last && last.missed === 0) {
         const vx = best.cx - last.x, vy = best.cy - last.y;
         this.lastPuck = { x: best.cx, y: best.cy, area: partial ? last.area : last.area + (best.area - last.area) * 0.3, vx: last.vx + (vx - last.vx) * 0.6, vy: last.vy + (vy - last.vy) * 0.6, missed: 0 };
@@ -382,6 +396,50 @@ export class Vision {
       }
     }
     return comps;
+  }
+
+  /**
+   * 같은 색 큰 물체에 붙은 퍽 떼어 내기: 예측 자리(px,py) 둘레에서 '퍽 크기 원은 퍽 색으로 꽉 차고, 바로 바깥 고리는 대부분 비어 있는' 곳을 찾는다.
+   * 스케이트·신발 안쪽은 고리까지 꽉 차서, 덩어리 가장자리는 원이 반쯤 비어서 걸러진다. 같은 점수면 예측 자리에 가까운 쪽.
+   * 반환: 퍽 후보 {cx, cy, area, minx..maxy, score, split:true} | null
+   */
+  _splitFromBlob(px, py, area) {
+    const { PW, PH, puckMask } = this;
+    const rP = Math.max(1.5, Math.sqrt(area / Math.PI));
+    const rIn = rP * 0.85, r1 = rP * 1.35, r2 = rP * 1.9, R2 = Math.ceil(r2);
+    const disc = [], ring = [];
+    for (let dy = -R2; dy <= R2; dy++) for (let dx = -R2; dx <= R2; dx++) {
+      const q = dx * dx + dy * dy;
+      if (q <= rIn * rIn) disc.push(dy * PW + dx); else if (q >= r1 * r1 && q <= r2 * r2) ring.push(dy * PW + dx);
+    }
+    const S = Math.max(3, Math.round(rP * 2)); // 탐색 반경: 퍽 지름만큼
+    const x0 = Math.max(R2, Math.round(px - S)), x1 = Math.min(PW - 1 - R2, Math.round(px + S));
+    const y0 = Math.max(R2, Math.round(py - S)), y1 = Math.min(PH - 1 - R2, Math.round(py + S));
+    let best = null;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const dd = Math.hypot(x - px, y - py);
+      if (dd > S) continue;
+      const i = y * PW + x;
+      let inD = 0; for (const o of disc) if (puckMask[i + o]) inD++;
+      const dc = inD / disc.length;
+      if (dc < 0.7) continue;
+      let inR = 0; for (const o of ring) if (puckMask[i + o]) inR++;
+      const rc = inR / ring.length;
+      if (rc > 0.55) continue;
+      const score = dc - rc - 0.15 * dd / S;
+      if (score >= 0.4 && (!best || score > best.score)) best = { x, y, score };
+    }
+    if (!best) return null;
+    // 고른 자리 둘레(퍽 반지름 1.1배) 안의 퍽 색 픽셀로 중심·크기를 다시 잰다
+    const rr = rP * 1.1, RR = Math.ceil(rr);
+    let n = 0, sx = 0, sy = 0, minx = PW, maxx = 0, miny = PH, maxy = 0;
+    for (let y = Math.max(0, best.y - RR); y <= Math.min(PH - 1, best.y + RR); y++) for (let x = Math.max(0, best.x - RR); x <= Math.min(PW - 1, best.x + RR); x++) {
+      if ((x - best.x) ** 2 + (y - best.y) ** 2 > rr * rr || !puckMask[y * PW + x]) continue;
+      n++; sx += x; sy += y;
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+    }
+    if (!n) return null;
+    return { cx: sx / n, cy: sy / n, area: n, minx, maxx, miny, maxy, score: best.score * 0.6, split: true };
   }
 
   /**

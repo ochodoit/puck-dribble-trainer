@@ -6,6 +6,10 @@
 export const BRIDGE_NEAR = 0.15;      // 퍽과 블레이드가 이 거리(바닥 폭 기준) 안이면 '붙어 있음'
 export const BRIDGE_RECENT_MS = 250;  // 퍽이 사라지기 직전 이 시간 안에 붙어 있었어야 블레이드로 잇는다 (멀리서 사라진 퍽은 잇지 않음)
 export const BRIDGE_MAX_MS = 1500;    // 가장 오래 잇는 시간 (그 뒤로는 추적기의 예측·놓침 처리)
+// 블레이드에 붙어 있던(또는 블레이드 밑에 가려진) 퍽: '블레이드 + 간격' 자리에서 이만큼 넘게 떨어진 애매한 조각
+// (Vision 의 doubtful: 가늘고 긴 조각·작은 조각·떼어 낸 조각)은 퍽이 아니라 퍽과 같은 색 스틱 샤프트로 본다.
+// 퍽 색과 스틱 테이프 색만 따라간다 (샤프트 색이 퍽과 같아도 샤프트 윗부분을 퍽으로 잡지 않게)
+export const BRIDGE_TRUST = 0.05;
 
 export class StickBridge {
   constructor() { this.reset(); }
@@ -19,10 +23,15 @@ export class StickBridge {
   }
 
   /**
-   * 한 프레임. puck, stick: {u, v} | null (이번 프레임 측정). now: ms
+   * 한 프레임. puck: {u, v, doubtful?} | null, stick: {u, v} | null (이번 프레임 측정). now: ms
    * 반환: 추적기에 넣을 측정값 — 퍽이 보이면 퍽 그대로, 가려졌으면 {u, v, bridged: true}, 둘 다 아니면 null
    */
   step(puck, stick, now) {
+    // 블레이드에 붙어 있던(가려진) 퍽인데 이번 측정이 애매한 조각이고 블레이드 + 간격 자리에서 멀면: 샤프트로 보고 버린다
+    if (puck?.doubtful && stick && this.offset && (this.active || now - this.nearAt <= BRIDGE_RECENT_MS)) {
+      const eu = stick.u + this.offset.u, ev = stick.v + this.offset.v;
+      if (Math.hypot(puck.u - eu, puck.v - ev) > BRIDGE_TRUST) puck = null;
+    }
     if (puck) {
       this.lostAt = null; this.armed = false; this.active = false;
       if (stick) {

@@ -202,6 +202,13 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
   font-size: 0.62em; letter-spacing: 0; transform: rotate(-7deg); white-space: nowrap; }
 .hero-art { display: block; width: min(360px, 74%); height: auto; max-height: 26vh; object-fit: contain; margin: clamp(10px, 2.4vh, 28px) auto clamp(6px, 1.6vh, 14px); }
 .lead { display: inline-block; border: var(--line) solid var(--ink); border-radius: 28px; padding: 9px 24px; font-size: clamp(13px, 2.2vw, 15.5px); margin: 0 0 18px; max-width: 100%; text-wrap: balance; }
+/* 카메라 시작: 문구(알약) 바로 옆이 아니라 그 아래 가운데에 한 줄로 (넓은 화면에서 알약 옆에 붙어 보이지 않게) */
+.splash .btn-big { display: block; margin: 0 auto; min-width: min(280px, 100%); }
+/* 휴대폰 카메라 (QR 연결): 카메라 시작 아래, 보조 버튼 + 같은 Wi-Fi 안내 */
+.remote-start { margin: 12px auto 0; }
+.splash .btn.btn-remote { display: block; margin: 0 auto; font-size: 15px; min-height: 48px; padding: 12px 28px; background: var(--paper); color: var(--ink); border: var(--line) solid var(--ink); }
+.splash .btn.btn-remote:hover { background: var(--ink); color: var(--paper); }
+.remote-start-note { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 .howto { text-align: left; margin: 18px auto 0; max-width: 620px; border-top: 1px solid var(--ink); }
 .copyright { margin: 14px auto 0; font-size: 11px; color: var(--ink-soft); letter-spacing: .02em; }
 /* 공식 주소가 아닐 때 (src/guard.js) */
@@ -892,6 +899,8 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .remote-status.ok { color: #2E9E5B; }
 .remote-status.bad { color: var(--red); }
 .remote-note { margin-top: 10px; }
+.remote-wifi { margin: 10px 0 4px; padding: 10px 14px; border: var(--line) solid var(--red); border-radius: 12px; font-size: 14px; line-height: 1.55; }
+.remote-wifi b { color: var(--red); }
 .remote-badge { position: absolute; right: calc(var(--safe-right) + 14px); top: calc(var(--safe-top) + 136px); z-index: 4; pointer-events: none;
   font: 600 12px/1 var(--sans); padding: 6px 9px; border-radius: 999px; border: var(--line) solid var(--ink); background: rgba(244, 241, 234, 0.92); color: var(--ink); white-space: nowrap; }
 .remote-badge.slow { border-color: var(--red); color: var(--red); }

@@ -1,4 +1,4 @@
-// 휴대폰 카메라 연결 E2E: 같은 브라우저 안의 두 탭(노트북 = 운영자 화면, 휴대폰 = /cam/)을 localSignal 로 잇는다.
+// 휴대폰 카메라 연결 E2E: 같은 브라우저 안의 두 탭(노트북 = 로그인한 회원 화면, 휴대폰 = /cam/)을 localSignal 로 잇는다.
 // 사용: node test/remote-cam.mjs   (Firebase 없이 localSignal 로 돌므로 실제 데이터에 쓰지 않는다)
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
@@ -36,16 +36,20 @@ host.on('console', (m) => { if (m.type() === 'error') errors.push('host console:
 await host.goto(`${base}/index.html`);
 await host.waitForFunction(() => window.__puckTrainer?.account);
 
-// 게스트에게는 버튼이 없다
-const guestHidden = await host.isHidden('#btn-remote');
-check(guestHidden, 'remote button hidden for guests');
+// 게스트에게도 버튼과 같은 Wi-Fi 안내가 보이고, 누르면 창 대신 로그인 안내 (연결 문서는 로그인한 회원만 쓴다). 마우스 모드는 운영자만
+await host.waitForSelector('#remote-start:not(.hidden)', { timeout: 8000 });
+const guest = await host.evaluate(() => ({ wifi: document.querySelector('#remote-start').textContent.includes('같은 Wi-Fi'), mouse: document.querySelector('#btn-mouse').classList.contains('hidden') }));
+await host.click('#btn-remote');
+await host.waitForTimeout(300);
+const guestPanel = await host.isVisible('#panel-remote');
+check(guest.wifi && guest.mouse && !guestPanel, 'guests see the phone-camera button with the same-Wi-Fi note; clicking asks to log in (no panel); mouse mode stays operator-only', JSON.stringify({ ...guest, guestPanel }));
 
-// 운영자 가입 (기기 내 저장소: 별명 test123 = 운영자) 후 새로고침
-await host.evaluate(async () => { const a = window.__puckTrainer.account; a._putCode('BETA2026', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 7 * 864e5 }); await a.register({ loginId: 'opsadmin', password: 'ops12345', nick: 'test123', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026', stick: 'L' }); });
+// 일반 회원 가입 (운영자 아님) 후 새로고침 -> 바로 연결 창
+await host.evaluate(async () => { const a = window.__puckTrainer.account; a._putCode('BETA2026', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 7 * 864e5 }); await a.register({ loginId: 'camplayer', password: 'cam12345', nick: 'CamPlayer', country: 'KR', team: 'Cam', age: 12, code: 'BETA2026', stick: 'L' }); });
 await host.reload();
 await host.waitForFunction(() => window.__puckTrainer?.account?.current());
 await host.waitForSelector('#btn-remote:not(.hidden)', { timeout: 8000 });
-check(true, 'remote button visible for operator');
+check(await host.isHidden('#btn-mouse'), 'a regular member gets the phone camera, not the operator mouse mode');
 
 await host.click('#btn-remote');
 await host.waitForSelector('#panel-remote:not(.hidden)');

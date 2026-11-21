@@ -179,8 +179,12 @@
         </picture>
         <p class="lead">퍽을 읽는 스틱 핸들링 게임. 당신의 실력을 보여주세요</p>
         <button id="btn-camera" class="btn btn-primary btn-big">카메라 시작</button>
+        <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
+        <div id="remote-start" class="remote-start">
+          <button id="btn-remote" class="btn btn-remote">휴대폰 카메라로 시작 (QR 연결)</button>
+          <p class="remote-start-note">휴대폰과 이 기기가 같은 Wi-Fi에 연결되어 있어야 합니다</p>
+        </div>
         <button id="btn-mouse" class="btn btn-mouse hidden" title="테스트 관리자 전용">마우스로 시작 (카메라 없이)</button>
-        <button id="btn-remote" class="btn btn-mouse hidden" title="테스트 관리자 전용">휴대폰 카메라로 시작 (QR 연결)</button>
         <p id="splash-error" class="error hidden"></p>
         <div id="splash-diag" class="diag hidden">
           <label>카메라 선택 <select id="diag-camera"></select></label>
@@ -287,6 +291,7 @@
             </div>
           </div>
           <div class="head-actions">
+            <button type="button" id="btn-mode-calib" class="btn btn-ghost">퍽·스틱 등록</button>
             <button type="button" id="btn-mode-settings" class="btn btn-ghost">설정</button>
             <button class="btn btn-ghost btn-close" data-close="panel-mode">닫기</button>
           </div></header>
@@ -408,10 +413,11 @@
       </div>
     </div>
 
-    <!-- 휴대폰 카메라 연결 (운영자 테스트): 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
+    <!-- 휴대폰 카메라 연결 (로그인한 회원): 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
     <div id="panel-remote" class="panel modal hidden">
       <div class="modal-card remote-card">
         <header><h2>Phone camera</h2><button class="btn btn-ghost btn-close" data-close="panel-remote">닫기</button></header>
+        <p class="remote-wifi" role="note"><b>먼저 휴대폰과 이 기기를 같은 Wi-Fi에 연결하세요.</b> 휴대폰이 LTE·5G(데이터)이거나 다른 Wi-Fi에 있으면 연결되지 않을 수 있습니다.</p>
         <p class="muted">휴대폰 카메라로 QR을 찍으세요. 휴대폰은 촬영만 하고, 플레이는 이 화면을 보면서 합니다.</p>
         <div class="remote-grid">
           <canvas id="remote-qr" class="remote-qr" width="264" height="264" aria-label="휴대폰 연결 QR 코드"></canvas>
@@ -422,7 +428,7 @@
             <p id="remote-status" class="remote-status" role="status">연결 준비 중…</p>
           </div>
         </div>
-        <p class="muted remote-note">같은 Wi-Fi에서 가장 빠릅니다. 휴대폰은 1~1.5m 높이에서 바닥을 비스듬히 내려다보게, 이 화면 옆에 두세요. 운영자 테스트 기능입니다.</p>
+        <p class="muted remote-note">휴대폰은 1~1.5m 높이에서 바닥을 비스듬히 내려다보게, 이 화면 옆에 두세요. 연결되는 동안 휴대폰 화면을 켜 두세요.</p>
       </div>
     </div>
 

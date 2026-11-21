@@ -19,7 +19,8 @@ rules_version = '2';
 //     회원은 새 비밀번호를 정한 뒤 tempPw 를 지울 수만 있다 (스스로 만들거나 다른 칸과 섞어 바꿀 수 없음)
 //  10) 시각: 앱이 정하는 글·도전 기록·응원·랭킹의 시각(밀리초)은 서버 시각 + 2분을 넘을 수 없다 (미래 시각으로 맨 위 고정 금지)
 //  11) 랭킹 컬렉션: 게임에 있는 모드 키(scores_arcade@60, scores_figure8-inv …)에만 쓸 수 있다
-//  12) 휴대폰 카메라 연결(rtc): 연결 문서는 운영자만 만든다. 휴대폰(로그인 없음)은 코드를 알 때 그 문서 하나만 읽고,
+//  12) 휴대폰 카메라 연결(rtc): 연결 문서는 로그인한 회원(프로필 있음)·운영자만 만들고, 만든 사람만 고치거나 지운다.
+//      휴대폰(로그인 없음)은 코드를 알 때 그 문서 하나만 읽고,
 //      시간이 남아 있고 아직 답이 없을 때 답(answer) 칸만 한 번 쓸 수 있다. 목록 읽기는 막는다
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -372,9 +373,14 @@ service cloud.firestore {
       }
     }
 
-    // ---- 휴대폰 카메라 연결 (운영자 테스트, src/remote-cam.js): rtc/{코드 6자리} ----
-    // 운영자(노트북·아이패드)가 { host, gen(세대), offer(연결 제안), exp(만료) } 를 쓰고, 휴대폰이 answer {gen, sdp} 를 한 번 쓴다.
-    // 끊기면 운영자가 같은 문서를 새 세대로 덮어써(answer 지움) 휴대폰이 다시 답하게 한다
+    // ---- 휴대폰 카메라 연결 (로그인한 회원, src/remote-cam.js): rtc/{코드 6자리} ----
+    // 화면 기기(노트북·아이패드, 로그인한 회원)가 { host, gen(세대), offer(연결 제안), exp(만료) } 를 쓰고, 휴대폰이 answer {gen, sdp} 를 한 번 쓴다.
+    // 끊기면 화면 기기가 같은 문서를 새 세대로 덮어써(answer 지움) 휴대폰이 다시 답하게 한다.
+    // 만들 수 있는 계정: 프로필(users/{uid})이 있는 회원·운영자 — 로그인 없이 아무나 쓰게 열면 무료 쓰기 한도를 다른 사람이 써 버릴 수 있다
+    function rtcHostAcct() {
+      return request.auth != null
+        && (exists(/databases/$(database)/documents/users/$(request.auth.uid)) || isAdmin());
+    }
     function rtcHostOk(d) {
       return d.keys().hasOnly(['host', 'gen', 'offer', 'exp'])
         && d.host == request.auth.uid && d.gen is int && d.gen >= 1
@@ -383,14 +389,15 @@ service cloud.firestore {
     }
     match /rtc/{code} {
       allow get: if code.matches('[A-HJ-NP-Z2-9]{6}');
-      allow create: if isAdmin() && code.matches('[A-HJ-NP-Z2-9]{6}') && rtcHostOk(request.resource.data);
-      allow update: if (isAdmin() && resource.data.host == request.auth.uid && rtcHostOk(request.resource.data))
+      allow create: if rtcHostAcct() && code.matches('[A-HJ-NP-Z2-9]{6}') && rtcHostOk(request.resource.data);
+      // 화면 기기: 내 문서는 새 세대로 덮어쓰고, 시간이 지난 남의 문서(같은 코드가 우연히 다시 나옴)는 새로 차지한다
+      allow update: if (rtcHostAcct() && (resource.data.host == request.auth.uid || request.time > resource.data.exp) && rtcHostOk(request.resource.data))
         || (request.time < resource.data.exp && !('answer' in resource.data)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer'])
           && request.resource.data.answer is map && request.resource.data.answer.keys().hasOnly(['gen', 'sdp'])
           && request.resource.data.answer.gen == resource.data.gen
           && request.resource.data.answer.sdp is string && request.resource.data.answer.sdp.size() <= 30000);
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (request.auth != null && resource.data.host == request.auth.uid);
     }
 
     // ---- 랭킹: scores_{모드키}/{uid} 모드별 최고 기록 (모드키 예: arcade@60, arcade@60-inv, wide) ----

@@ -9,6 +9,9 @@ const MIN_FLOOR_SPAN = 0.25;   // 바닥 최소 크기(프레임 대비)
 const PUCK_DIAMETER_M = 0.076; // 하키 퍽 지름 (등록 전 퍽 크기 추정)
 const CIRCLE_PUCK_RATIO = 2;   // 가운데 원 지름 = 퍽 지름 × 2
 const SPLIT_MAX_FRAMES = 45;   // 같은 색 물체에 붙은 퍽을 떼어 내는 것만으로 이어 가는 최대 프레임 (~1.5초)
+// 이보다 가늘고 긴 조각(짧은 축/긴 축)은 '애매한 조각': 퍽과 같은 색 스틱 샤프트 토막일 수 있다.
+// 퍽은 비스듬히 봐도 옆면(두께)이 보여 0.5 아래로 잘 안 내려가고, 샤프트 토막은 보통 0.4 아래
+const THIN_ELONG = 0.4;
 
 export class Vision {
   constructor(procWidth = 240) {
@@ -289,7 +292,17 @@ export class Vision {
     }
     this.splitRun = split ? this.splitRun + 1 : best && bestScore >= 0.18 ? 0 : this.splitRun;
     if (best && bestScore >= 0.18) {
-      result.puck = { x: best.cx, y: best.cy, area: best.area, w: best.maxx - best.minx + 1, h: best.maxy - best.miny + 1, score: bestScore, split };
+      // 애매한 조각(doubtful): 떼어 낸 부분, 가려져 작아진 조각, 가늘고 긴 조각. 스틱 테이프를 지정했으면 StickBridge 가
+      // 블레이드 + 간격 자리에서 먼 애매한 조각은 퍽으로 보지 않는다 (퍽과 같은 색 샤프트를 퍽으로 따라가는 일 방지).
+      // 빠르게 움직여 번진 퍽은 길쭉한 방향이 움직이는 방향과 같으므로 가늘어도 애매하다고 하지 않는다
+      const shape = split ? null : blobShape(best);
+      let thin = false;
+      if (shape && shape.elong < THIN_ELONG) {
+        const blur = !!last && Math.hypot(last.vx, last.vy) > 0.02 * PW && Math.abs(Math.cos(shape.angle - Math.atan2(last.vy, last.vx))) > 0.9;
+        thin = !blur;
+      }
+      result.puck = { x: best.cx, y: best.cy, area: best.area, w: best.maxx - best.minx + 1, h: best.maxy - best.miny + 1, score: bestScore, split,
+        elong: shape ? shape.elong : 1, doubtful: split || best.area < minA || thin };
       // 가려져 작아진 조각·떼어 낸 부분은 퍽 크기 기억을 바꾸지 않는다 (다시 다 보일 때 '크기가 다르다'고 거부하지 않게)
       const partial = best.area < minA || split;
       if (last && last.missed === 0) {
@@ -379,11 +392,11 @@ export class Vision {
         let sp = 0;
         stack[sp++] = start;
         mask[start] = 2;
-        const c = { area: 0, sx: 0, sy: 0, minx: x, maxx: x, miny: y, maxy: y, bxsum: 0, bxn: 0 };
+        const c = { area: 0, sx: 0, sy: 0, sxx: 0, syy: 0, sxy: 0, minx: x, maxx: x, miny: y, maxy: y, bxsum: 0, bxn: 0 };
         while (sp > 0) {
           const i = stack[--sp];
           const px = i % PW, py = (i - px) / PW;
-          c.area++; c.sx += px; c.sy += py;
+          c.area++; c.sx += px; c.sy += py; c.sxx += px * px; c.syy += py * py; c.sxy += px * py;
           if (px < c.minx) c.minx = px; if (px > c.maxx) c.maxx = px;
           if (py < c.miny) c.miny = py;
           if (py > c.maxy) { c.maxy = py; c.bxsum = px; c.bxn = 1; } else if (py === c.maxy) { c.bxsum += px; c.bxn++; }
@@ -774,6 +787,20 @@ export function matchPixel(m, r, g, b) {
   return dr * dr + dg * dg <= m.tol2;
 }
 
+/**
+ * 덩어리 모양 (2차 모멘트): elong = 짧은 축 / 긴 축 (원·퍽 1에 가깝고, 가늘고 길수록 0), angle = 긴 축 방향(라디안).
+ * 모멘트가 없는 덩어리(떼어 낸 조각 등)는 null
+ */
+export function blobShape(c) {
+  if (!c || c.sxx === undefined || !(c.area > 0)) return null;
+  const n = c.area, mx = c.sx / n, my = c.sy / n;
+  // 픽셀 한 칸의 폭(분산 1/12)을 더해 1~2px 짜리 조각이 '무한히 가늘게' 잡히지 않게
+  const cxx = c.sxx / n - mx * mx + 1 / 12, cyy = c.syy / n - my * my + 1 / 12, cxy = c.sxy / n - mx * my;
+  const t = (cxx + cyy) / 2, d = Math.sqrt(((cxx - cyy) / 2) ** 2 + cxy * cxy);
+  const l1 = t + d, l2 = Math.max(1e-6, t - d);
+  return { elong: Math.sqrt(l2 / l1), angle: 0.5 * Math.atan2(2 * cxy, cxx - cyy) };
+}
+
 /** 반사광 등으로 조각난 덩어리 병합: bbox 간격이 gap 이하인 컴포넌트를 합침 */
 export function mergeClose(comps, gap) {
   if (comps.length < 2 || comps.length > 40) return comps;
@@ -785,6 +812,7 @@ export function mergeClose(comps, gap) {
         const a = comps[i], c = comps[j];
         if (a.minx > c.maxx + gap || c.minx > a.maxx + gap || a.miny > c.maxy + gap || c.miny > a.maxy + gap) continue;
         a.area += c.area; a.sx += c.sx; a.sy += c.sy;
+        if (a.sxx !== undefined && c.sxx !== undefined) { a.sxx += c.sxx; a.syy += c.syy; a.sxy += c.sxy; }
         a.minx = Math.min(a.minx, c.minx); a.maxx = Math.max(a.maxx, c.maxx);
         a.miny = Math.min(a.miny, c.miny);
         if (c.maxy > a.maxy) { a.maxy = c.maxy; a.bxsum = c.bxsum; a.bxn = c.bxn; }

@@ -1494,6 +1494,55 @@
       for (let i = 0; i < 5; i++) { sb4.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
       check('B4 no blade in view -> nothing to bridge with', sb4.step(null, null, t) === null);
     }
+    // B5) 퍽과 같은 색(검정) 스틱 샤프트: 블레이드(주황 테이프)가 퍽을 덮으면, 퍽처럼 보이는 샤프트 조각(반사광으로 끊긴 토막,
+    //     특히 바닥 먼 쪽의 굵은 윗부분)이 아니라 테이프(블레이드) + 간격으로 퍽을 잇는다. 블레이드가 비키면 다시 진짜 퍽
+    //     (Vision + StickBridge 를 main.js 처럼 묶어서. 고치기 전: 덮이는 순간 샤프트 맨 위 토막(y≈142)으로 튀어 계속 따라감)
+    {
+      const K = 0.375;
+      const drawShaft = (puck, bx, by) => {
+        drawScene({ puck: null });
+        // 샤프트: 블레이드 뒤꿈치(왼쪽 끝)에서 위로, 위로 갈수록(카메라에 가까워) 굵어지고 반사광 틈으로 토막 난다
+        const hx = bx - 24, hy = by - 4, dx = 0.35, dy = -0.94;
+        sctx.strokeStyle = '#111827'; sctx.lineCap = 'butt';
+        for (let s = 4; s < 200; s += 46) {
+          sctx.lineWidth = 9 + s * 0.03;
+          sctx.beginPath(); sctx.moveTo(hx + dx * s, hy + dy * s); sctx.lineTo(hx + dx * (s + 40), hy + dy * (s + 40)); sctx.stroke();
+        }
+        if (puck) { sctx.fillStyle = '#111827'; sctx.beginPath(); sctx.ellipse(puck.x, puck.y, 14, 9, 0, 0, Math.PI * 2); sctx.fill(); }
+        sctx.fillStyle = 'rgb(249,115,22)'; sctx.beginPath(); sctx.roundRect(bx - 25, by - 12, 50, 24, 6); sctx.fill(); // 블레이드 테이프 (퍽 위)
+      };
+      const vb = new Vision(240); vb.mirror = false; vb.setSourceSize(640, 480);
+      const sB = { ...settings, floorMode: 'auto', manualQuad: null, puckModel: { r: 17, g: 24, b: 39, area: 54 }, puckTol: 95, stickModel: { r: 249, g: 115, b: 22, area: 170 }, stickTol: 70 };
+      const sbB = new StickBridge(); let tB = 0;
+      const frame = (puck, bx, by) => {
+        drawShaft(puck, bx, by);
+        const r = vb.process(scene, sB), m = r.floor.mapping;
+        const uv = (o) => { if (!o || !m) return null; const [u, v] = m.toUV(o.x, o.y); return { u, v }; };
+        const pu = uv(r.puck); if (pu && r.puck.doubtful) pu.doubtful = true;
+        const meas = sbB.step(pu, uv(r.stick), tB); tB += 33;
+        if (meas?.bridged && m) { const [hx, hy] = m.toPx(meas.u, meas.v); vb.holdPuckAt(hx, hy); }
+        const at = meas && m ? m.toPx(meas.u, meas.v).map((z) => z / K) : null;
+        const raw = r.puck ? [r.puck.x / K, r.puck.y / K] : null;
+        return { at, raw, bridged: !!meas?.bridged };
+      };
+      const err = (f, x, y) => (f.at ? Math.hypot(f.at[0] - x, f.at[1] - y) : Infinity);
+      let bx = 300, px = 342;
+      for (let i = 0; i < 11; i++) { drawShaft({ x: px, y: 300 }, bx, 300); vb.process(scene, sB); }   // 바닥 잡기
+      vb.seedPuck(px * K, 300 * K, 54);                                                                  // 퍽 등록 자리 (앱과 같게)
+      for (let i = 0; i < 4; i++) frame({ x: px, y: 300 }, bx, 300);                                     // 퍽이 블레이드 앞쪽 옆에
+      let worst = 0, shaftPicks = 0, notBridged = 0, hidden = 0;
+      for (let i = 0; i < 8; i++) { bx += 8; px += 4; frame({ x: px, y: 300 }, bx, 300); }              // 블레이드가 따라와 퍽을 덮음
+      for (let i = 0; i < 12; i++) {                                                                     // 완전히 덮인 채로 함께 (퍽 360~388, 블레이드 339~389 부터)
+        bx += 4; px += 4; hidden++;
+        const f = frame({ x: px, y: 300 }, bx, 300);
+        worst = Math.max(worst, err(f, px, 300));
+        if (f.raw && f.raw[1] < 250) shaftPicks++;                                                       // 인식 단계가 샤프트 토막을 집은 프레임 (장면이 함정을 갖췄는지)
+        if (!f.bridged) notBridged++;
+      }
+      check('B5 puck hidden under the taped blade follows the tape, not the puck-colored shaft top', hidden === 12 && notBridged === 0 && worst < 30 && shaftPicks > 0, { worst: +worst.toFixed(1), shaftPicks, notBridged });
+      bx -= 70; const away = frame({ x: px, y: 300 }, bx, 330);                                         // 블레이드가 비킴 -> 진짜 퍽
+      check('B5 blade moved off -> the real puck again', !away.bridged && err(away, px, 300) < 4, { at: away.at, bridged: away.bridged });
+    }
     // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
     {
       const k1 = new Tracker(); let t = 0;

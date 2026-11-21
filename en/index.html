@@ -177,8 +177,12 @@
         </picture>
         <p class="lead">The stickhandling game that reads your puck. Show us your skills</p>
         <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
+        <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
+        <div id="remote-start" class="remote-start">
+          <button id="btn-remote" class="btn btn-remote">Start with phone camera (QR link)</button>
+          <p class="remote-start-note">Your phone and this device must be on the same Wi-Fi</p>
+        </div>
         <button id="btn-mouse" class="btn btn-mouse hidden" title="Test admin only">Start with mouse (no camera)</button>
-        <button id="btn-remote" class="btn btn-mouse hidden" title="Test admin only">Start with phone camera (QR link)</button>
         <p id="splash-error" class="error hidden"></p>
         <div id="splash-diag" class="diag hidden">
           <label>Choose camera <select id="diag-camera"></select></label>
@@ -285,6 +289,7 @@
             </div>
           </div>
           <div class="head-actions">
+            <button type="button" id="btn-mode-calib" class="btn btn-ghost">Puck &amp; stick</button>
             <button type="button" id="btn-mode-settings" class="btn btn-ghost">Settings</button>
             <button class="btn btn-ghost btn-close" data-close="panel-mode">Close</button>
           </div></header>
@@ -406,10 +411,11 @@
       </div>
     </div>
 
-    <!-- 휴대폰 카메라 연결 (운영자 테스트): 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
+    <!-- 휴대폰 카메라 연결 (로그인한 회원): 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
     <div id="panel-remote" class="panel modal hidden">
       <div class="modal-card remote-card">
         <header><h2>Phone camera</h2><button class="btn btn-ghost btn-close" data-close="panel-remote">Close</button></header>
+        <p class="remote-wifi" role="note"><b>First connect your phone and this device to the same Wi-Fi.</b> If the phone is on LTE/5G (mobile data) or a different Wi-Fi, it may not connect.</p>
         <p class="muted">Scan the QR code with your phone camera. The phone only films; you play watching this screen.</p>
         <div class="remote-grid">
           <canvas id="remote-qr" class="remote-qr" width="264" height="264" aria-label="QR code to connect a phone"></canvas>
@@ -420,7 +426,7 @@
             <p id="remote-status" class="remote-status" role="status">Preparing connection…</p>
           </div>
         </div>
-        <p class="muted remote-note">Fastest on the same Wi-Fi. Place the phone next to this screen, 1–1.5 m high, looking down at the floor at an angle. Operator test feature.</p>
+        <p class="muted remote-note">Place the phone next to this screen, 1–1.5 m high, looking down at the floor at an angle. Keep the phone screen on while connecting.</p>
       </div>
     </div>
 

@@ -1104,11 +1104,20 @@ export const EN = {
   '이용 기간이 연장된 정회원이에요. 의견은 언제든 고쳐서 다시 보낼 수 있어요.': 'Your membership has been extended. You can update and resend your feedback any time.',
   '회원을 누르면 그 회원의 기록 창이 열립니다. 왼쪽 칸을 체크하고 날짜를 고르면 이용 기간을 그날까지 늘립니다 (이미 더 긴 회원·유지 회원은 그대로). 출석률 = 출석한 날 / 가입한 날부터 지난 날 (최근 30일 기준).':
     "Tap a member to open their record. Tick the box on the left and pick a date to extend access until that day (members who already go longer, and kept members, stay as they are). Attendance = days attended / days since joining (last 30 days).",
-  // ---------- 휴대폰 카메라 연결 (운영자 테스트) ----------
+  // ---------- 모드 창: 퍽·스틱 등록 (보정 창을 모드 창 위에, 끝나면 모드 창으로) ----------
+  '퍽·스틱 등록': 'Puck & stick',
+  // ---------- 카메라 화면 방향이 바뀜 (휴대폰·아이패드 회전) ----------
+  '화면 방향이 바뀌었어요': 'The camera view turned',
+  '게임 영역을 다시 맞춰 주세요': 'Please set the game area again',
+  // ---------- 휴대폰 카메라 연결 (로그인한 회원, 같은 Wi-Fi) ----------
   '휴대폰 카메라로 시작 (QR 연결)': 'Start with phone camera (QR link)',
+  '휴대폰과 이 기기가 같은 Wi-Fi에 연결되어 있어야 합니다': 'Your phone and this device must be on the same Wi-Fi',
+  '먼저 휴대폰과 이 기기를 같은 Wi-Fi에 연결하세요.': 'First connect your phone and this device to the same Wi-Fi.',
+  '휴대폰이 LTE·5G(데이터)이거나 다른 Wi-Fi에 있으면 연결되지 않을 수 있습니다.': 'If the phone is on LTE/5G (mobile data) or a different Wi-Fi, it may not connect.',
+  '휴대폰 카메라 연결은 로그인한 뒤에 쓸 수 있습니다. 아래에서 로그인하세요': 'The phone camera link is available after you log in. Log in below',
   '휴대폰 카메라로 QR을 찍으세요. 휴대폰은 촬영만 하고, 플레이는 이 화면을 보면서 합니다.': 'Scan the QR code with your phone camera. The phone only films; you play watching this screen.',
   'QR이 안 되면 휴대폰에서 이 주소를 열고 코드 입력': "If the QR code doesn't work, open this address on the phone and enter the code",
-  '같은 Wi-Fi에서 가장 빠릅니다. 휴대폰은 1~1.5m 높이에서 바닥을 비스듬히 내려다보게, 이 화면 옆에 두세요. 운영자 테스트 기능입니다.': 'Fastest on the same Wi-Fi. Place the phone next to this screen, 1–1.5 m high, looking down at the floor at an angle. Operator test feature.',
+  '휴대폰은 1~1.5m 높이에서 바닥을 비스듬히 내려다보게, 이 화면 옆에 두세요. 연결되는 동안 휴대폰 화면을 켜 두세요.': 'Place the phone next to this screen, 1–1.5 m high, looking down at the floor at an angle. Keep the phone screen on while connecting.',
   '휴대폰 카메라 지연 (추정)': 'Phone camera delay (estimate)',
   '휴대폰 연결 QR 코드': 'QR code to connect a phone',
   '연결 준비 중…': 'Preparing connection…',
@@ -1117,8 +1126,9 @@ export const EN = {
   '휴대폰으로 QR을 찍어 연결하세요': 'Scan the QR code with your phone to connect',
   '휴대폰과 연결하는 중…': 'Connecting to the phone…',
   '연결됨 · 영상을 받는 중…': 'Connected · receiving video…',
-  '연결이 끊겼습니다. 다시 기다리는 중…': 'Disconnected. Waiting again…',
-  '연결 문서를 쓰지 못했습니다. Firebase 콘솔에 새 firestore.rules(rtc)를 게시했는지 확인하세요': "Couldn't write the connection document. Check that the new firestore.rules (rtc) is published in the Firebase console",
+  '연결되지 않았습니다. 휴대폰과 이 기기가 같은 Wi-Fi인지 확인하세요': "Couldn't connect. Check that your phone and this device are on the same Wi-Fi",
+  '다시 기다리는 중…': 'Waiting again…',
+  '연결을 준비할 권한이 없습니다. 로그인을 확인하고 창을 닫았다가 다시 여세요': "No permission to prepare the connection. Check that you're logged in, then close and reopen this window",
   '휴대폰 연결이 끊겼습니다. 휴대폰 화면을 켜 두면 자동으로 다시 연결됩니다': 'The phone disconnected. Keep the phone screen on and it reconnects automatically',
   '휴대폰 카메라가 다시 연결되었습니다': 'Phone camera reconnected',
   '휴대폰 영상을 받지 못했습니다': "Couldn't receive the phone video",

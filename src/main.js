@@ -69,6 +69,8 @@ const app = {
   paused: false,     // 옵션 창이 떠서 멈춘 상태
   cover: null,       // 퍽 투명도: 카메라 속 진짜 퍽을 덮는 자리 {x, y, r, rgb, alpha, at} (처리 픽셀 좌표)
   calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
+  calibFromMode: false, // 모드 창에서 시작한 보정이면 끝난 뒤 모드 창으로 돌아간다
+  areaReturnMode: false, // 화면 방향이 바뀌어 영역 편집을 열 때 모드 창이 열려 있었으면, 저장 뒤 모드 창으로
   choice: { side: null, hold: 0, tick: -1, armAt: 0 }, // 게임 종료 후 선택 (왼쪽 = 한 번 더, 오른쪽 = 모드 선택)
   challenge: null,    // 커뮤니티 코스 도전 중: { id, title, sig, holder: {uid, nick, avg, best}|null }
   scoreChallenge: null, // 기록 자랑 글의 '나도 연습하기' 중: { id, title, key, score, nick, author, limit }
@@ -824,6 +826,8 @@ function bindUI() {
   els.btnSettings.addEventListener('click', () => { refreshAuthUI(); refreshVisualLocks(); open(els.panelSettings); requestAnimationFrame(() => drawTransparencyPreview(app.lastVision)); }); // 계정 줄·운영자 버튼은 열 때 새로. 카메라 전에도 미리보기
   // 모드 창의 '설정': 모드 창 위에 설정 창을 연다 (닫으면 모드 창으로 돌아옴)
   $('#btn-mode-settings').addEventListener('click', () => els.btnSettings.click());
+  // 모드 창의 '퍽·스틱 등록': 모드 창 위에 보정 창을 열고, 등록(또는 취소)이 끝나면 모드 창으로 돌아온다 (backToModeAfterCalib)
+  $('#btn-mode-calib').addEventListener('click', () => els.btnCalib.click());
   els.btnCalib.addEventListener('click', () => { refreshCalibUI(); open(els.panelCalib); });
   els.btnFloorLock.addEventListener('click', toggleAreaEdit);
   $('#area-done').addEventListener('click', () => endAreaEdit());
@@ -981,10 +985,11 @@ function toggleFullscreen() {
 }
 
 // =============== 테스트 관리자: 마우스 모드 (카메라 없이) ===============
+// 첫 화면 보조 버튼: 휴대폰 카메라(QR 연결)는 모두에게 보이고(누르면 로그인 확인), 마우스 모드는 운영자만
 function refreshMouseButton() {
-  const show = isAdmin(app.account?.current()) && !els.btnCamera.classList.contains('hidden') && !app.started;
-  $('#btn-mouse').classList.toggle('hidden', !show);
-  $('#btn-remote').classList.toggle('hidden', !show);
+  const onSplash = !els.btnCamera.classList.contains('hidden') && !app.started;
+  $('#btn-mouse').classList.toggle('hidden', !(onSplash && isAdmin(app.account?.current())));
+  $('#remote-start').classList.toggle('hidden', !onSplash);
 }
 
 function startMouse() {
@@ -1008,9 +1013,11 @@ function startMouse() {
   openModeAfterStart();
 }
 
-// =============== 테스트 관리자: 휴대폰 카메라 (QR 연결) ===============
+// =============== 휴대폰 카메라 (QR 연결, 로그인한 회원) ===============
 // 휴대폰은 촬영만 하고 영상을 WebRTC 로 이 기기에 보낸다. 받은 영상을 내 카메라 자리(els.video)에 넣으므로
-// 영역·퍽 등록·인식·게임은 카메라 모드와 똑같다. 연결 중개는 Firestore rtc/{코드} (src/remote-cam.js)
+// 영역·퍽 등록·인식·게임은 카메라 모드와 똑같다. 연결 중개는 Firestore rtc/{코드} (src/remote-cam.js).
+// 연결 문서를 쓰려면 로그인해야 한다 (규칙: 프로필이 있는 계정만 만든다 — 아무나 쓰게 열면 무료 쓰기 한도를 다른 사람이 써 버릴 수 있음).
+// 중계(TURN) 서버가 없으므로 휴대폰과 이 기기가 같은 Wi-Fi 여야 잘 이어진다 (화면에 안내)
 let remote = null; // { host, code, mod }
 
 function setRemoteStatus(text, tone = '') {
@@ -1020,7 +1027,12 @@ function setRemoteStatus(text, tone = '') {
 }
 
 async function openRemote() {
-  if (!isAdmin(app.account?.current())) { toast('관리자 계정으로 로그인해야 합니다'); return; }
+  if (!app.account?.current()) {
+    toast('휴대폰 카메라 연결은 로그인한 뒤에 쓸 수 있습니다. 아래에서 로그인하세요', 4500);
+    const card = $('#auth-card');
+    if (card && !card.classList.contains('hidden')) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#auth-id')?.focus({ preventScroll: true }); }
+    return;
+  }
   if (!window.RTCPeerConnection) { toast('이 브라우저는 휴대폰 카메라 연결을 지원하지 않습니다'); return; }
   sfx.unlock();
   sfx.enabled = settings.sound;
@@ -1078,11 +1090,13 @@ function onRemoteState(s, err) {
       waiting: ['휴대폰으로 QR을 찍어 연결하세요'],
       connecting: ['휴대폰과 연결하는 중…'],
       connected: ['연결됨 · 영상을 받는 중…', 'ok'],
-      lost: ['연결이 끊겼습니다. 다시 기다리는 중…', 'bad'],
+      // 휴대폰이 답했는데 영상 길이 안 열리면(다른 Wi-Fi·LTE) 끊김으로 온다
+      lost: ['연결되지 않았습니다. 휴대폰과 이 기기가 같은 Wi-Fi인지 확인하세요 · 다시 기다리는 중…', 'bad'],
     }[s];
     if (s === 'error') {
+      // 권한 오류 = 로그인이 풀렸거나 규칙이 아직 게시되지 않음 (자세한 내용은 콘솔)
       const denied = /permission/i.test(String(err?.code || err?.message));
-      setRemoteStatus(denied ? '연결 문서를 쓰지 못했습니다. Firebase 콘솔에 새 firestore.rules(rtc)를 게시했는지 확인하세요' : `연결 오류: ${err?.message || err}`, 'bad');
+      setRemoteStatus(denied ? '연결을 준비할 권한이 없습니다. 로그인을 확인하고 창을 닫았다가 다시 여세요' : `연결 오류: ${err?.message || err}`, 'bad');
     } else if (msg) setRemoteStatus(msg[0], msg[1]);
     return;
   }
@@ -1133,6 +1147,34 @@ function onRemoteStats(s) {
   badge.title = `지연 추정: 네트워크 ${Math.round((s.rtt || 0) / 2)} + 버퍼 ${Math.round(s.buffer || 0)} + 해독 ${Math.round(s.decode || 0)} + 촬영·압축 약 30 (ms)`;
   badge.classList.toggle('slow', ms > 150);
   badge.classList.remove('hidden');
+}
+
+/**
+ * 카메라 화면이 가로 <-> 세로로 바뀜 (휴대폰·아이패드를 돌림). 영상 크기·비율은 loop 가 이미 맞췄다. 여기서는
+ *  - 등록한 퍽·스틱 크기(처리 화면 픽셀 면적)를 새 방향으로 환산한다: 처리 화면 폭은 그대로(예: 240)인데 영상 폭이 짧은 변의
+ *    1배(세로) <-> 16/9배(가로)로 바뀌므로, 같은 퍽이 가로에서는 약 1/3 면적으로 보인다 -> 다시 등록하지 않아도 된다
+ *  - 게임 영역(네 모서리)은 화면 비율 기준이라 돌리기 전 자리에 남으므로, 게임을 멈추고 영역 편집만 바로 연다
+ *    (퍽 등록·움직여 보기는 다시 하지 않음. 영역을 저장하면 하던 화면으로)
+ */
+function onOrientationFlip(oldAr, newAr) {
+  const widthPerShort = (ar) => (ar >= 1 ? ar : 1);
+  const k2 = (widthPerShort(oldAr) / widthPerShort(newAr)) ** 2;
+  if (settings.puckModel.area > 0) settings.puckModel.area = Math.max(4, Math.round(settings.puckModel.area * k2));
+  if (settings.stickModel?.area > 0) settings.stickModel.area = Math.max(4, Math.round(settings.stickModel.area * k2));
+  vision.lastPuck = null; vision.lastStick = null; tracker.reset(); stickBridge.reset();
+  persist();
+  if (app.mouseMode || !app.started) return;
+  if (game.running) game.stop('manual');
+  if (app.setup) {
+    // 시작 준비 중: 영역 단계가 아니면 영역부터 다시 (퍽 등록 원은 새 크기로 알아서 맞춰진다)
+    if (app.setup !== 'area' && app.setup !== 'area-wait') beginAreaSetup();
+    toast('화면 방향이 바뀌었어요 · 게임 영역을 다시 맞춰 주세요', 5000);
+    return;
+  }
+  if (settings.floorMode !== 'manual') { toast('화면 방향이 바뀌었어요', 3000); return; }
+  app.areaReturnMode = modeIsOpen();
+  if (!app.areaEditing) toggleAreaEdit();
+  toast('화면 방향이 바뀌었어요 · 게임 영역을 다시 맞춰 주세요', 5000);
 }
 
 function onRemoteMessage(m) {
@@ -1414,10 +1456,13 @@ function loop(raw) {
   else if (video.readyState < 2) return;
 
   if (video.videoWidth && (video.videoWidth !== vision.srcW || video.videoHeight !== vision.srcH)) {
-    // 휴대폰 회전 등으로 영상 크기가 바뀜
+    // 휴대폰 회전 등으로 영상 크기가 바뀜 (휴대폰 카메라는 연결 속도에 따라 해상도만 바뀌기도 한다 — 그때는 비율이 그대로)
+    const oldAr = vision.srcW && vision.srcH ? vision.srcW / vision.srcH : null;
     vision.setSourceSize(video.videoWidth, video.videoHeight);
     els.view.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
     layout();
+    const ar = video.videoWidth / video.videoHeight;
+    if (oldAr && (oldAr > 1) !== (ar > 1)) onOrientationFlip(oldAr, ar);
   }
 
   let result = app.lastVision;
@@ -1440,8 +1485,11 @@ function loop(raw) {
     let meas;
     if (settings.controller === 'stick') meas = toUV(result.stick);
     else if (settings.stickModel) {
-      // 스틱이 지정돼 있으면: 블레이드 바로 옆에서 퍽이 사라졌을 때(스틱에 가림) 잠시 블레이드 자리로 퍽을 잇는다
-      meas = stickBridge.step(toUV(result.puck), toUV(result.stick), now);
+      // 스틱이 지정돼 있으면: 블레이드 바로 옆에서 퍽이 사라졌을 때(스틱에 가림) 잠시 블레이드 자리로 퍽을 잇는다.
+      // 애매한 조각(가늘고 긴 샤프트 토막 등)이 블레이드 + 간격 자리에서 멀면 퍽으로 보지 않는다 (occlusion.js BRIDGE_TRUST)
+      const pu = toUV(result.puck);
+      if (pu && result.puck.doubtful) pu.doubtful = true;
+      meas = stickBridge.step(pu, toUV(result.stick), now);
       if (meas?.bridged && m) { const [bx, by] = m.toPx(meas.u, meas.v); vision.holdPuckAt(bx, by); }
     } else meas = toUV(result.puck);
     tracker.update(meas, now);
@@ -1826,6 +1874,7 @@ function commitLearnedModel(target, done, refresh = false) {
   persist(); refreshCalibUI();
   sfx.target();
   if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); return; }
+  if (app.calibFromMode) { backToModeAfterCalib(); toast(target === 'puck' ? '퍽 등록 완료' : '스틱 등록 완료', 3000); return; }
   if (refresh) toast('등록된 퍽을 다시 인식했어요 · 원에 3초 더 두면 시작', 3500);
   else if (boosted) toast('퍽 등록 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요', 4000);
   else toast(target === 'puck' ? '퍽 등록 완료 · 원에 3초 더 두면 시작' : '스틱 등록 완료', 3500);
@@ -2314,6 +2363,8 @@ function endAreaEdit(announce = true) {
   els.btnFloorLock.classList.remove('active');
   persist();
   if (app.setup === 'area') { beginPuckSetup(); return; } // 시작 준비 중: 다음 단계 (퍽 등록)
+  // 화면 방향이 바뀌어 연 영역 편집: 그때 모드 창이 열려 있었으면 다시 연다
+  if (app.areaReturnMode) { app.areaReturnMode = false; if (!game.running) { renderModeList(); open(els.panelMode); } }
   if (announce) toast('영역 저장됨');
 }
 
@@ -2356,6 +2407,7 @@ function bindFloorHandles() {
 /** 보정 패널의 '원 안에 3초(자동)' 버튼: 지정 대상을 정해 명시적으로 학습 (스틱 포함) */
 function beginAutoCalibration(target) {
   if (game.running) game.stop('manual');
+  app.calibFromMode = modeIsOpen();
   closeAllPanels();
   autoCal.reset();
   app.calib = { active: true, manual: true, target, hold: 0, status: 'none', sample: null, circle: vision.calibCircle(1, target) };
@@ -2372,7 +2424,18 @@ function cancelAutoCalibration(msg) {
     if (settings.puckModel.area > 0) { beginTestSetup(); return; } // 등록된 퍽을 그대로 쓰고 3/3 움직여 보기
     finishSetup(); toast('퍽 등록을 건너뛰었어요 · 게임을 고른 뒤 원에 퍽을 3초', 4000); return;
   }
+  backToModeAfterCalib();
   if (msg) toast(msg);
+}
+
+const modeIsOpen = () => !els.panelMode.classList.contains('hidden');
+/** 모드 창에서 시작한 보정(원 안에 3초·터치로 지정)이 끝나면 — 등록했든 취소했든 — 모드 창을 다시 연다.
+ *  (예전: 모드 창을 닫고 보정한 뒤 모드 창을 또 열어야 했다). 안내(토스트)는 이 뒤에 띄운다: 창을 열면 떠 있던 안내가 치워진다 */
+function backToModeAfterCalib() {
+  if (!app.calibFromMode) return;
+  app.calibFromMode = false;
+  if (app.setup || game.running || app.calibTarget || app.calib.manual) return;
+  renderModeList(); open(els.panelMode);
 }
 
 function updateAutoCalibration(dt) {
@@ -2392,8 +2455,10 @@ function beginCalibration(target) {
   if (app.calib.manual) cancelAutoCalibration();
   // 게임 중이면 멈춘다: 지정하는 동안은 게임 화면(흰 배경) 대신 카메라 영상을 보여 주고, 날아오는 퍽·시간도 멈춰야 한다
   if (game.running) game.stop('manual');
+  app.calibFromMode = modeIsOpen();
   app.calibTarget = target;
   close(els.panelCalib);
+  if (app.calibFromMode) close(els.panelMode); // 화면(영상)을 터치해야 하므로 모드 창도 잠시 치운다 (끝나면 다시 엶)
   $('#btn-replace-puck').classList.add('hidden');
   els.tapHint.textContent = target === 'puck' ? '화면에서 퍽을 터치하세요' : '화면에서 스틱 블레이드(테이프)를 터치하세요';
   els.tapHint.classList.remove('hidden');
@@ -2405,6 +2470,7 @@ function endPick() {
   app.calibTarget = null;
   els.tapHint.classList.add('hidden');
   els.view.classList.remove('calibrating');
+  backToModeAfterCalib(); // 결과 안내(토스트)는 부르는 쪽이 이 뒤에 띄운다
 }
 
 /** 퍽이 처리 해상도에서 이 면적(px)보다 작게 보이면 인식 해상도를 올린다 (멀리 둔 노트북 웹캠·작은 공) */

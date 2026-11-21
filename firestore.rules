@@ -1,5 +1,6 @@
 rules_version = '2';
-// 온라인 랭킹·정회원용 Firestore 보안 규칙 (Firebase 콘솔 > Firestore > 규칙에 붙여넣기)
+// 온라인 랭킹·정회원용 Firestore 보안 규칙. main 에 푸시하면 GitHub Actions 가 headsuppuck 에 게시한다
+// (.github/workflows/pages.yml 의 rules 작업). 콘솔에서 직접 고치지 말 것: 다음 배포 때 이 파일 내용으로 덮어써진다
 // 지키는 것
 //  1) 칸 제한: 문서마다 정해진 칸만 쓸 수 있다 (정회원 유지·공식 글 같은 칸을 몰래 넣을 수 없음)
 //  2) 사칭 금지: 랭킹·글·기록·의견의 별명·팀·나이대·등번호는 내 프로필과 같아야 한다. 별명은 가입할 때 한 번만 정하고,

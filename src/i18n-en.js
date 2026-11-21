@@ -1109,6 +1109,9 @@ export const EN = {
   // ---------- 카메라 화면 방향이 바뀜 (휴대폰·아이패드 회전) ----------
   '화면 방향이 바뀌었어요': 'The camera view turned',
   '게임 영역을 다시 맞춰 주세요': 'Please set the game area again',
+  // ---------- 등록한 퍽·스틱 색이 거의 같음 ----------
+  '퍽과 스틱 색이 거의 같아 서로 헷갈릴 수 있어요': 'The puck and stick colors are almost the same, so they can get mixed up',
+  '스틱 날에 주황·노랑처럼 퍽·바닥과 다른 색 테이프를 감아 보세요': 'Try taping the blade in a color unlike the puck and floor, such as orange or yellow',
   // ---------- 휴대폰 카메라 연결 (로그인한 회원, 같은 Wi-Fi) ----------
   '휴대폰 카메라로 시작 (QR 연결)': 'Start with phone camera (QR link)',
   '휴대폰과 이 기기가 같은 Wi-Fi에 연결되어 있어야 합니다': 'Your phone and this device must be on the same Wi-Fi',

@@ -1,7 +1,7 @@
 // 앱 오케스트레이션: 카메라 -> 영상처리 -> 추적 -> 게임 -> 렌더/HUD
 import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨터가 아니면 여기서 멈춤 (복제 사이트·iframe 막기)
 import { Camera, describeCameraError } from './camera.js';
-import { Vision, AutoCalibrator } from './vision.js';
+import { Vision, AutoCalibrator, colorsTooClose } from './vision.js';
 import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
 import { placementCheck } from './placement.js';
@@ -1854,6 +1854,17 @@ function updateIdleCircle(dt) {
   $('#btn-replace-puck').classList.toggle('hidden', !(decision === 'mismatch' && c.mismatchFor > 0.7));
 }
 
+/**
+ * 등록한 퍽·스틱 색이 거의 같으면(검정 퍽 + 검정 테이프, 아주 진한 녹색 + 검정 등) 인식이 둘을 나눌 수 없다.
+ * 등록을 마칠 때 알려 준다. 반환: 알렸는지
+ */
+function warnColorClash() {
+  const pm = settings.puckModel;
+  if (!(pm?.area > 0) || !colorsTooClose(pm, settings.stickModel)) return false;
+  toast('퍽과 스틱 색이 거의 같아 서로 헷갈릴 수 있어요 · 스틱 날에 주황·노랑처럼 퍽·바닥과 다른 색 테이프를 감아 보세요', 7000);
+  return true;
+}
+
 function commitLearnedModel(target, done, refresh = false) {
   const model = { r: done.r, g: done.g, b: done.b, area: done.area };
   $('#btn-replace-puck').classList.add('hidden');
@@ -1873,8 +1884,9 @@ function commitLearnedModel(target, done, refresh = false) {
   autoCal.reset();
   persist(); refreshCalibUI();
   sfx.target();
-  if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); return; }
-  if (app.calibFromMode) { backToModeAfterCalib(); toast(target === 'puck' ? '퍽 등록 완료' : '스틱 등록 완료', 3000); return; }
+  if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); warnColorClash(); return; }
+  if (app.calibFromMode) { backToModeAfterCalib(); if (!warnColorClash()) toast(target === 'puck' ? '퍽 등록 완료' : '스틱 등록 완료', 3000); return; }
+  if (warnColorClash()) return;
   if (refresh) toast('등록된 퍽을 다시 인식했어요 · 원에 3초 더 두면 시작', 3500);
   else if (boosted) toast('퍽 등록 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요', 4000);
   else toast(target === 'puck' ? '퍽 등록 완료 · 원에 3초 더 두면 시작' : '스틱 등록 완료', 3500);
@@ -2514,6 +2526,7 @@ function onViewTap(e) {
     settings[key] = sample.tol; $(`#set-${key}`).value = sample.tol; $(`#out-${key}`).value = sample.tol;
   }
   persist(); refreshCalibUI();
+  if (warnColorClash()) return;
   toast(boosted ? '퍽 색 지정 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요' : `${target === 'puck' ? '퍽' : '스틱'} 색 지정 완료`, boosted ? 3500 : undefined);
 }
 

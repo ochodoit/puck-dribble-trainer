@@ -49,6 +49,23 @@ export class Camera {
     return { width: this.video.videoWidth, height: this.video.videoHeight, facing: this.facing };
   }
 
+  /**
+   * 다른 곳에서 받은 영상(휴대폰 카메라 연결의 WebRTC 스트림)을 이 카메라 자리에 넣는다.
+   * 인식·화면은 내 카메라와 똑같이 이 video 요소를 읽는다.
+   */
+  async attach(stream, timeoutMs = 15000) {
+    this.stop();
+    this.stream = stream;
+    this.deviceId = '';
+    this.video.srcObject = stream;
+    await withTimeout(new Promise((resolve) => {
+      if (this.video.readyState >= 2 && this.video.videoWidth) return resolve();
+      this.video.onloadedmetadata = () => resolve();
+    }), timeoutMs);
+    try { await this.video.play(); } catch { /* muted+playsinline */ }
+    return { width: this.video.videoWidth, height: this.video.videoHeight };
+  }
+
   stop() {
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());

@@ -18,6 +18,8 @@ rules_version = '2';
 //     회원은 새 비밀번호를 정한 뒤 tempPw 를 지울 수만 있다 (스스로 만들거나 다른 칸과 섞어 바꿀 수 없음)
 //  10) 시각: 앱이 정하는 글·도전 기록·응원·랭킹의 시각(밀리초)은 서버 시각 + 2분을 넘을 수 없다 (미래 시각으로 맨 위 고정 금지)
 //  11) 랭킹 컬렉션: 게임에 있는 모드 키(scores_arcade@60, scores_figure8-inv …)에만 쓸 수 있다
+//  12) 휴대폰 카메라 연결(rtc): 연결 문서는 운영자만 만든다. 휴대폰(로그인 없음)은 코드를 알 때 그 문서 하나만 읽고,
+//      시간이 남아 있고 아직 답이 없을 때 답(answer) 칸만 한 번 쓸 수 있다. 목록 읽기는 막는다
 service cloud.firestore {
   match /databases/{database}/documents {
     // 운영자: admins/{uid} 문서가 있는 계정 (콘솔에서 직접 만든다)
@@ -367,6 +369,27 @@ service cloud.firestore {
           && (id.matches('starter-[a-z0-9-]+') || exists(/databases/$(database)/documents/posts/$(id)));
         allow delete: if request.auth != null && (request.auth.uid == uid || isAdmin());
       }
+    }
+
+    // ---- 휴대폰 카메라 연결 (운영자 테스트, src/remote-cam.js): rtc/{코드 6자리} ----
+    // 운영자(노트북·아이패드)가 { host, gen(세대), offer(연결 제안), exp(만료) } 를 쓰고, 휴대폰이 answer {gen, sdp} 를 한 번 쓴다.
+    // 끊기면 운영자가 같은 문서를 새 세대로 덮어써(answer 지움) 휴대폰이 다시 답하게 한다
+    function rtcHostOk(d) {
+      return d.keys().hasOnly(['host', 'gen', 'offer', 'exp'])
+        && d.host == request.auth.uid && d.gen is int && d.gen >= 1
+        && d.offer is string && d.offer.size() <= 30000
+        && d.exp is timestamp && d.exp > request.time && d.exp <= request.time + duration.value(3, 'h');
+    }
+    match /rtc/{code} {
+      allow get: if code.matches('[A-HJ-NP-Z2-9]{6}');
+      allow create: if isAdmin() && code.matches('[A-HJ-NP-Z2-9]{6}') && rtcHostOk(request.resource.data);
+      allow update: if (isAdmin() && resource.data.host == request.auth.uid && rtcHostOk(request.resource.data))
+        || (request.time < resource.data.exp && !('answer' in resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer'])
+          && request.resource.data.answer is map && request.resource.data.answer.keys().hasOnly(['gen', 'sdp'])
+          && request.resource.data.answer.gen == resource.data.gen
+          && request.resource.data.answer.sdp is string && request.resource.data.answer.sdp.size() <= 30000);
+      allow delete: if isAdmin();
     }
 
     // ---- 랭킹: scores_{모드키}/{uid} 모드별 최고 기록 (모드키 예: arcade@60, arcade@60-inv, wide) ----

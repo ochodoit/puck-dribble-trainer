@@ -817,6 +817,8 @@ async function renderAdmin() {
 function bindUI() {
   els.btnCamera.addEventListener('click', startCamera);
   $('#btn-mouse').addEventListener('click', startMouse);
+  $('#btn-remote').addEventListener('click', openRemote);
+  $('[data-close="panel-remote"]').addEventListener('click', cancelRemote);
   els.btnStart.addEventListener('click', toggleRun);
   els.btnMode.addEventListener('click', () => { renderModeList(); open(els.panelMode); });
   els.btnSettings.addEventListener('click', () => { refreshAuthUI(); refreshVisualLocks(); open(els.panelSettings); requestAnimationFrame(() => drawTransparencyPreview(app.lastVision)); }); // 계정 줄·운영자 버튼은 열 때 새로. 카메라 전에도 미리보기
@@ -900,6 +902,7 @@ function bindUI() {
     if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
   });
   els.selCamera.addEventListener('change', async () => {
+    if (app.remoteMode) { toast('휴대폰 카메라를 쓰는 중입니다'); return; }
     settings.cameraId = els.selCamera.value; persist();
     try { await startStream(); } catch (err) { toast(describeCameraError(err)); }
   });
@@ -981,6 +984,7 @@ function toggleFullscreen() {
 function refreshMouseButton() {
   const show = isAdmin(app.account?.current()) && !els.btnCamera.classList.contains('hidden') && !app.started;
   $('#btn-mouse').classList.toggle('hidden', !show);
+  $('#btn-remote').classList.toggle('hidden', !show);
 }
 
 function startMouse() {
@@ -1003,6 +1007,140 @@ function startMouse() {
   requestAnimationFrame(loop);
   openModeAfterStart();
 }
+
+// =============== 테스트 관리자: 휴대폰 카메라 (QR 연결) ===============
+// 휴대폰은 촬영만 하고 영상을 WebRTC 로 이 기기에 보낸다. 받은 영상을 내 카메라 자리(els.video)에 넣으므로
+// 영역·퍽 등록·인식·게임은 카메라 모드와 똑같다. 연결 중개는 Firestore rtc/{코드} (src/remote-cam.js)
+let remote = null; // { host, code, mod }
+
+function setRemoteStatus(text, tone = '') {
+  const el = $('#remote-status');
+  el.textContent = text;
+  el.className = `remote-status ${tone}`;
+}
+
+async function openRemote() {
+  if (!isAdmin(app.account?.current())) { toast('관리자 계정으로 로그인해야 합니다'); return; }
+  if (!window.RTCPeerConnection) { toast('이 브라우저는 휴대폰 카메라 연결을 지원하지 않습니다'); return; }
+  sfx.unlock();
+  sfx.enabled = settings.sound;
+  open($('#panel-remote'));
+  if (remote) return; // 이미 열어 둔 연결 (창만 다시 보여 준다)
+  setRemoteStatus('연결 준비 중…');
+  try {
+    const [mod, { default: qrcode }] = await Promise.all([import('./remote-cam.js'), import('./vendor/qrcode.mjs')]);
+    const code = mod.makeCode();
+    const fb = app.account?.kind === 'firebase';
+    const signal = fb ? mod.firestoreSignal(app.account.F, app.account.db, code, app.account.auth.currentUser?.uid) : mod.localSignal(code);
+    const host = new mod.RemoteHost(signal, {
+      rtcConfig: fb ? mod.RTC_CONFIG : { iceServers: [] },
+      onState: onRemoteState, onStream: onRemoteStream, onStats: onRemoteStats, onMessage: onRemoteMessage,
+    });
+    remote = { host, code, mod };
+    const camUrl = new URL('../cam/', import.meta.url);
+    drawQR(qrcode, `${camUrl.href}#${code}`);
+    $('#remote-url').textContent = `${camUrl.host}${camUrl.pathname}`;
+    $('#remote-code').textContent = code;
+    await host.start();
+  } catch (err) {
+    console.error(err);
+    setRemoteStatus(`연결을 준비하지 못했습니다: ${err?.message || err}`, 'bad');
+  }
+}
+
+/** QR 그리기: 흰 바탕 + 검정 칸, 둘레 여백 4칸 */
+function drawQR(qrcode, text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  const n = qr.getModuleCount(), cv = $('#remote-qr'), quiet = 4;
+  const cell = Math.max(2, Math.floor(264 / (n + quiet * 2)));
+  const size = cell * (n + quiet * 2);
+  cv.width = size; cv.height = size;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, size, size);
+  g.fillStyle = '#161616';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect((c + quiet) * cell, (r + quiet) * cell, cell, cell);
+}
+
+/** 창을 닫으면: 아직 게임을 시작하지 않았으면 연결을 끝낸다 (시작한 뒤에는 연결을 그대로 둔다) */
+function cancelRemote() {
+  if (!remote || app.started) return;
+  remote.host.close();
+  remote = null;
+}
+
+function onRemoteState(s, err) {
+  if (err) console.error(err);
+  if (!app.started) {
+    const msg = {
+      preparing: ['연결 준비 중…'],
+      waiting: ['휴대폰으로 QR을 찍어 연결하세요'],
+      connecting: ['휴대폰과 연결하는 중…'],
+      connected: ['연결됨 · 영상을 받는 중…', 'ok'],
+      lost: ['연결이 끊겼습니다. 다시 기다리는 중…', 'bad'],
+    }[s];
+    if (s === 'error') {
+      const denied = /permission/i.test(String(err?.code || err?.message));
+      setRemoteStatus(denied ? '연결 문서를 쓰지 못했습니다. Firebase 콘솔에 새 firestore.rules(rtc)를 게시했는지 확인하세요' : `연결 오류: ${err?.message || err}`, 'bad');
+    } else if (msg) setRemoteStatus(msg[0], msg[1]);
+    return;
+  }
+  if (s === 'lost') {
+    app.cameraLost = true; // 영상 멈춤 경고 대신 이 안내를 쓴다
+    $('#remote-badge').classList.add('hidden');
+    if (game.running) game.stop('manual');
+    toast('휴대폰 연결이 끊겼습니다. 휴대폰 화면을 켜 두면 자동으로 다시 연결됩니다', 6000);
+  }
+}
+
+async function onRemoteStream(stream) {
+  try {
+    const { width, height } = await camera.attach(stream);
+    app.remoteMode = true;
+    app.cameraLost = false;
+    app.lastFrameAt = clockNow();
+    vision.setSourceSize(width, height);
+    els.view.style.aspectRatio = `${width} / ${height}`;
+    if (!app.started) {
+      // 휴대폰이 플레이어를 바라보고 놓이므로 거울처럼 보이게 (설정에서 끌 수 있음)
+      settings.mirror = true;
+      $('#set-mirror').checked = true;
+    }
+    applyMirror();
+    layout();
+    if (app.started) { toast('휴대폰 카메라가 다시 연결되었습니다'); return; }
+    close($('#panel-remote'));
+    els.splash.classList.add('hidden');
+    $('#splash-diag').classList.add('hidden');
+    app.started = true;
+    app.startedAt = clockNow();
+    requestWakeLock();
+    requestAnimationFrame(loop);
+    setSetup('area-wait'); // 카메라 모드와 같이 1/3 영역 설정부터
+  } catch (err) {
+    console.error(err);
+    if (!app.started) setRemoteStatus(`영상을 받지 못했습니다: ${err?.message || err}`, 'bad');
+    else toast('휴대폰 영상을 받지 못했습니다');
+  }
+}
+
+function onRemoteStats(s) {
+  const ms = remote?.mod.estimateDelay(s);
+  const badge = $('#remote-badge');
+  if (ms == null || !app.started) return;
+  badge.textContent = `📱 ${ms}ms${s.fps ? ` · ${Math.round(s.fps)}fps` : ''}`;
+  badge.title = `지연 추정: 네트워크 ${Math.round((s.rtt || 0) / 2)} + 버퍼 ${Math.round(s.buffer || 0)} + 해독 ${Math.round(s.decode || 0)} + 촬영·압축 약 30 (ms)`;
+  badge.classList.toggle('slow', ms > 150);
+  badge.classList.remove('hidden');
+}
+
+function onRemoteMessage(m) {
+  // 휴대폰 카메라를 바꾸면 영상 크기가 바뀔 수 있다 (loop 가 알아서 맞춘다)
+  if (m.t === 'info') app.remoteFacing = m.facing;
+}
+
+window.addEventListener('pagehide', () => { if (remote) remote.host.close(); });
 
 // =============== 시작 준비: 1/3 영역 → 2/3 퍽 등록 → 3/3 움직여 보기 → 모드 선택 ===============
 // 준비 중에는 HUD·아래 버튼·인식 칩을 숨기고, 맨 위 한 줄 막대만 안내한다 (휴대폰에서 화면을 가리지 않게)
@@ -1183,6 +1321,7 @@ async function showCameraDiagnostics(err) {
 
 async function flipCamera() {
   if (app.mouseMode) { toast('마우스 모드에서는 카메라를 쓰지 않습니다'); return; }
+  if (app.remoteMode) { remote?.host.send({ t: 'flip' }); toast('휴대폰 카메라를 전환합니다'); return; }
   if (game.running) game.stop('manual');
   settings.facing = settings.facing === 'user' ? 'environment' : 'user';
   settings.cameraId = '';

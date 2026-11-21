@@ -879,3 +879,25 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .ab-note { margin: 6px 0 0; font-size: 12px; }
 @media (max-width: 480px) { .ab-table th:nth-child(2), .ab-table td:nth-child(2) { display: none; } .ab-card { padding: 12px; } }
 @media (max-width: 600px) { .me-table td.num, .me-table th.num { width: 44px; } }
+
+/* 휴대폰 카메라 연결 (운영자 테스트): QR 창과 지연 표시 */
+.remote-card { width: min(640px, 100%); }
+.remote-grid { display: flex; gap: 22px; align-items: center; margin: 14px 0 6px; }
+.remote-qr { flex: none; width: 220px; height: 220px; border: var(--line) solid var(--ink); border-radius: 14px; background: #fff; image-rendering: pixelated; }
+.remote-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.remote-label { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+.remote-url { font-size: 15px; word-break: break-all; }
+.remote-code { font: 700 40px/1.1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .18em; }
+.remote-status { margin: 6px 0 0; font-weight: 600; line-height: 1.5; }
+.remote-status.ok { color: #2E9E5B; }
+.remote-status.bad { color: var(--red); }
+.remote-note { margin-top: 10px; }
+.remote-badge { position: absolute; right: calc(var(--safe-right) + 14px); top: calc(var(--safe-top) + 136px); z-index: 4; pointer-events: none;
+  font: 600 12px/1 var(--sans); padding: 6px 9px; border-radius: 999px; border: var(--line) solid var(--ink); background: rgba(244, 241, 234, 0.92); color: var(--ink); white-space: nowrap; }
+.remote-badge.slow { border-color: var(--red); color: var(--red); }
+#app.setting-up .remote-badge, #app.area-editing .remote-badge { display: none; }
+@media (max-width: 560px) {
+  .remote-grid { flex-direction: column; align-items: stretch; text-align: center; }
+  .remote-qr { align-self: center; width: 200px; height: 200px; }
+  .remote-code { font-size: 32px; }
+}

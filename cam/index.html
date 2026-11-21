@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <!-- 휴대폰 카메라 페이지 (운영자 테스트): 촬영만 하고 영상은 노트북·아이패드로 보낸다 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' https://*.googleapis.com https://www.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#161616" />
+  <link rel="icon" href="../favicon.ico" sizes="48x48" />
+  <title>휴대폰 카메라 · 퍽 드리블 트레이너</title>
+  <link rel="stylesheet" href="cam.css" />
+</head>
+<body>
+  <video id="preview" autoplay muted playsinline></video>
+  <div id="grid" class="grid hidden" aria-hidden="true"></div>
+
+  <!-- 처음: 코드 확인 + 카메라 켜기 (휴대폰은 화면을 눌러야 카메라·화면 켜짐 유지를 쓸 수 있다) -->
+  <main id="start" class="sheet">
+    <p class="kicker">Puck Dribble Trainer</p>
+    <h1>휴대폰 카메라</h1>
+    <p class="lead">이 휴대폰은 촬영만 합니다. 플레이는 노트북·아이패드 화면을 보면서 하세요.</p>
+    <label class="code-label" for="code">노트북 화면의 코드 6자리</label>
+    <input id="code" class="code-input" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="7" placeholder="ABC234" />
+    <button id="btn-go" class="btn btn-primary" type="button">카메라 켜고 연결</button>
+    <p id="start-error" class="error hidden" role="alert"></p>
+    <p class="note">같은 Wi-Fi에 연결하면 가장 빠릅니다. 연결되는 동안 이 화면을 켜 두세요.</p>
+  </main>
+
+  <!-- 연결 뒤: 영상 위의 상태 막대와 버튼 -->
+  <header id="bar" class="bar hidden">
+    <span id="dot" class="dot"></span>
+    <span id="status" class="status" role="status">연결 준비 중…</span>
+    <span id="code-chip" class="code-chip"></span>
+  </header>
+  <p id="rotate" class="rotate hidden">휴대폰을 가로로 두면 바닥이 더 넓게 찍혀요</p>
+  <nav id="tools" class="tools hidden">
+    <button id="btn-flip" class="btn" type="button">카메라 전환</button>
+    <button id="btn-grid" class="btn" type="button">격자</button>
+    <button id="btn-dim" class="btn" type="button">화면 어둡게</button>
+  </nav>
+  <!-- 화면 어둡게: 영상은 계속 보내고 휴대폰 화면만 가린다 (누르면 다시 보임) -->
+  <div id="dim" class="dim hidden"><p>영상은 계속 보내는 중 · 누르면 다시 보여요</p></div>
+
+  <script type="module" src="phone.js"></script>
+</body>
+</html>

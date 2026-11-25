@@ -1279,21 +1279,21 @@ function beginTestSetup() {
   quietCalibReset();
   setSetup('test');
   // meas: 카메라 위치 점검용 — 표적에 닿았을 때 퍽 크기(먼 쪽·가까운 쪽), 먼 쪽 절반에 있는 동안 놓친 영상 수
-  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, doneAt: 0, advice: null, lastV: null, frameAt: -1,
+  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, lastV: null, frameAt: -1,
     meas: { far: [], near: [], farFrames: 0, farMissed: 0 } };
   $('#test-hint').textContent = '퍽을 네 모서리 표적에';
   paintTest();
 }
 
 /**
- * 카메라 위치 점검 결과 -> 안내 글 (짧게: 3/3 막대, 길게: 모드 창 위 안내).
+ * 카메라 위치 점검 결과 -> 안내 글 (모드 창 위 안내).
  * 높이세요 / 지금이 최소(더 낮추지 말 것) / 좋아요 / 여유 있음(화면을 가리면 조금 낮춰도 됨)
  */
 const PLACEMENT_ADVICE = {
-  raise: ['먼 쪽이 작게 보여요 · 카메라를 더 높이', '준비 완료 · 먼 쪽 바닥에서 퍽이 작게 보여요. 카메라를 더 높이(1~1.5m) 두고 영역을 다시 맞추면 더 정확해요'],
-  minimum: ['잘 잡혀요 · 지금 높이가 최소예요', '준비 완료 · 전체가 잡혀요. 지금 높이가 최소라 더 낮추지 마세요 (높일수록 더 정확해요)'],
-  good: ['잘 잡혀요 · 카메라 위치 좋아요', '준비 완료 · 카메라 위치 좋아요. 게임을 고르세요'],
-  room: ['아주 잘 잡혀요 · 높이 여유 있음', '준비 완료 · 아주 잘 보여요. 카메라가 화면(TV)을 가리면 조금 낮춰도 돼요'],
+  raise: '준비 완료 · 먼 쪽 바닥에서 퍽이 작게 보여요. 카메라를 더 높이(1~1.5m) 두고 영역을 다시 맞추면 더 정확해요',
+  minimum: '준비 완료 · 전체가 잡혀요. 지금 높이가 최소라 더 낮추지 마세요 (높일수록 더 정확해요)',
+  good: '준비 완료 · 카메라 위치 좋아요. 게임을 고르세요',
+  room: '준비 완료 · 아주 잘 보여요. 카메라가 화면(TV)을 가리면 조금 낮춰도 돼요',
 };
 
 /** 지금 영역·등록된 퍽으로 카메라 위치 점검 (measured: 3/3 에서 잰 값, 없으면 어림만). 마우스 모드·미등록이면 null */
@@ -1313,10 +1313,6 @@ function paintTest() {
 function updateSetupTest(dt, now) {
   const t = app.test; if (!t) return;
   app.calib.active = false; app.idleHold = 0;
-  if (t.doneAt) {
-    if (now >= t.doneAt) { finishSetup(); toast(t.advice ? t.advice[1] : '준비 완료 · 게임을 고르세요', t.advice ? 6000 : 2500); }
-    return;
-  }
   const seen = tracker.state === 'tracked' && !!tracker.pos;
   t.lostFor = seen ? 0 : t.lostFor + dt;
   if (seen) t.lastV = tracker.pos.y;
@@ -1336,11 +1332,12 @@ function updateSetupTest(dt, now) {
     }
   }
   if (t.targets.every((g) => g.hit)) {
-    // 네 모서리 모두 잡힘 -> 카메라 높이 점검 결과를 잠깐 보여 주고 모드 창으로
+    // 네 모서리 모두 잡힘 -> 바로 모드 창 (카메라 높이 점검 결과는 모드 창 위 안내로)
     const pc = checkPlacement(t.meas);
-    t.advice = pc ? PLACEMENT_ADVICE[pc.verdict] : null;
-    t.doneAt = now + (t.advice ? 1800 : 900); sfx.target();
-    $('#test-hint').textContent = t.advice ? t.advice[0] : '잘 잡혀요!';
+    const advice = pc ? PLACEMENT_ADVICE[pc.verdict] : null;
+    sfx.target();
+    finishSetup();
+    toast(advice || '준비 완료 · 게임을 고르세요', advice ? 6000 : 2500);
     return;
   }
   const farLost = t.meas.farFrames > 40 && t.meas.farMissed / t.meas.farFrames > 0.35 && t.lastV != null && t.lastV < 0.35;
@@ -1354,9 +1351,14 @@ function finishSetup() {
   openModeAfterStart();
 }
 
-/** 시작 준비가 끝나면: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다 */
+/**
+ * 시작 준비가 끝나면: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다.
+ * 이때 퍽은 마지막 표적(바닥 모서리) 자리에 있어 커서가 모서리 카드(아케이드 등) 위에 놓이므로,
+ * 퍽으로 고르기는 가운데 칸(puck)에 한 번 둔 뒤에야 켠다 (modeNeedCenter) — 아케이드가 저절로 골라져 시작되지 않게
+ */
 function openModeAfterStart() {
   app.afterStart = true;
+  app.modeNeedCenter = true;
   renderModeList();
   open(els.panelMode);
 }
@@ -1625,6 +1627,7 @@ function loop(raw) {
   updateCourseUI();
   const modeOpen = !els.panelMode.classList.contains('hidden');
   if (!modeOpen && app.modePick) { app.modePick = null; $('#mode-cursor').classList.add('hidden'); }
+  if (!modeOpen) app.modeNeedCenter = false; // 시작 준비 직후의 '가운데 칸 먼저'는 그 모드 창에서만
   if (app.calib.manual) updateAutoCalibration(dt);
   else if (app.setup === 'test') updateSetupTest(dt, now);
   else if (!els.panelCommunity.classList.contains('hidden')) pauseIdle(); // 글을 읽고 쓰는 동안은 핸즈프리 시작을 멈춘다
@@ -1741,13 +1744,20 @@ function updateResultChoice(dt) {
  * 모드 선택 화면을 퍽으로 고르기: 퍽의 (좌우, 앞뒤) 위치를 카드 목록 위의 빨간 커서로 옮기고,
  * 카드 안쪽에 2초 머물면 그 모드를 선택한다(테두리 근처는 어느 카드도 아님). 창이 열릴 때 커서가 올라가 있던 카드는 한 번 벗어났다가 다시 와야 한다
  * (결과 화면에서 퍽을 오른쪽에 둔 채 넘어왔을 때 엉뚱한 카드가 바로 선택되는 것을 방지).
+ * 시작 준비 직후(modeNeedCenter)에는 퍽을 가운데 칸(puck)에 한 번 둔 뒤에야 고른다 (가운데 칸이 빨갛게 표시되고 안내가 바뀜)
  */
+const PICK_HINT = '퍽을 카드 가운데에 2초 두면 선택';
+const PICK_HINT_CENTER = '퍽을 가운데(puck) 칸에 두었다가 카드에 2초';
 function updateModeChoice(dt) {
   const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
   $('#btn-replace-puck').classList.add('hidden');
   const cursor = $('#mode-cursor');
   const enabled = settings.autoStart;
-  $('#mode-pick-hint').classList.toggle('hidden', !enabled);
+  const hintEl = $('#mode-pick-hint'), waitCell = $('#mode-list .mode-wait');
+  hintEl.classList.toggle('hidden', !enabled);
+  const hintKey = app.modeNeedCenter ? 'center' : 'card';
+  if (hintEl.dataset.k !== hintKey) { hintEl.dataset.k = hintKey; hintEl.textContent = app.modeNeedCenter ? PICK_HINT_CENTER : PICK_HINT; }
+  waitCell?.classList.toggle('need', enabled && !!app.modeNeedCenter);
   if (!app.modePick) app.modePick = { key: null, hold: 0, tick: -1, armAt: performance.now() + 800, blocked: undefined };
   const mp = app.modePick;
   const cards = $$('#mode-list .mode-card');
@@ -1763,8 +1773,9 @@ function updateModeChoice(dt) {
     idx = hit >= 0 ? hit : null;
     if (mp.blocked === undefined) mp.blocked = idx;               // 열릴 때 올라가 있던 카드
     else if (mp.blocked !== null && idx !== mp.blocked) mp.blocked = null; // 한 번 벗어나면 해제
+    if (app.modeNeedCenter && waitCell && inCardCore(waitCell.getBoundingClientRect(), cx, cy)) app.modeNeedCenter = false; // 가운데 칸에 왔으면 이제 고를 수 있음
   } else cursor.classList.add('hidden');
-  const armed = performance.now() >= mp.armAt;
+  const armed = performance.now() >= mp.armAt && !app.modeNeedCenter;
   const key = tracked && armed && idx !== null && idx !== mp.blocked ? idx : null;
   const fire = stepDwell(mp, key, dt, CHOICE_HOLD_S);
   const pct = Math.min(100, (mp.hold / CHOICE_HOLD_S) * 100);
@@ -2070,7 +2081,7 @@ function updateHud(force) {
   }
   els.hudScore.textContent = String(game.score);
   els.hudLives.textContent = game.running && game.mode.timed && game.hits > 0 ? `충돌 ${game.hits}` : '';
-  if (game.mode.stages) els.hudLives.textContent = `훈련 ${game.stage + 1}/${game.mode.stages}`;
+  if (game.mode.stages) els.hudLives.textContent = game.mode.id === 'quick' ? `세트 ${(game.running ? game.quickSet : 0) + 1}/${game.mode.stages}` : `훈련 ${game.stage + 1}/${game.mode.stages}`;
   // 자유 연습 코스: 사이클 진행(완료/목표)과 평균·가장 빠른 사이클 시간
   const courseOn = game.mode.id === 'free' && game.course.points.length > 0;
   $('.hud-right .hud-label').textContent = courseOn ? 'Cycle' : 'Score';
@@ -2835,7 +2846,8 @@ function drawPeek(now) {
 /**
  * 게임마다 배경·퍽 투명도 규칙 (bg·puck: 실제로 쓰는 투명도 %, bgLock·puckLock: 이 게임에서 설정을 못 바꾸는지)
  *  - 아케이드·퍽 피하기·8자 드리블: 배경 0 고정 (흰 화면), 퍽만 조절
- *  - 와이드 드리블: 배경 0 이면 퍽 0~100, 배경을 1 이상 주면 흰 칠 없이 카메라 그대로 + 퍽 투명도 0 고정
+ *  - 와이드 드리블: 배경 0~100 그대로 (슬라이더대로 카메라가 비침 — 끄는 동안 실제 화면에서 바로 보임).
+ *    배경 0 이면 퍽 0~100, 배경을 1 이상 주면 퍽 투명도 0 고정 (영상 속 진짜 퍽이 보이므로)
  *  - 퀵 핸즈: 배경만 조절, 퍽 투명도 0 고정
  *  - 반응 타겟·자유 연습 (퀵 핸즈처럼 영역 안에서 배경을 보며): 둘 다 조절
  */
@@ -2845,7 +2857,7 @@ function visualRules(modeId = game.mode.id) {
     case 'arcade': case 'obstacle': case 'figure8':
       return { bg: 0, puck: puckSet, bgLock: true, puckLock: false };
     case 'wide':
-      return bgSet > 0 ? { bg: 100, puck: 0, bgLock: false, puckLock: true } : { bg: 0, puck: puckSet, bgLock: false, puckLock: false };
+      return bgSet > 0 ? { bg: bgSet, puck: 0, bgLock: false, puckLock: true } : { bg: 0, puck: puckSet, bgLock: false, puckLock: false };
     case 'quick':
       return { bg: bgSet, puck: 0, bgLock: false, puckLock: true };
     default:
@@ -2875,20 +2887,22 @@ function refreshVisualLocks() {
   const note = $('#visual-note');
   const msg = v.bgLock ? `${name}: 배경 투명도 0 고정 (흰 화면) · 퍽 투명도만 조절`
     : game.mode.id === 'quick' ? `${name}: 배경 투명도만 조절 · 퍽 투명도 0 고정`
-      : game.mode.id === 'wide' ? (v.puckLock ? `${name}: 배경 투명도를 주면 카메라 그대로 · 퍽 투명도 0 고정` : `${name}: 배경 투명도 0 일 때만 퍽 투명도 조절`)
+      : game.mode.id === 'wide' ? (v.puckLock ? `${name}: 배경 투명도를 주면 퍽 투명도 0 고정` : `${name}: 배경 투명도 0 일 때만 퍽 투명도 조절`)
         : '';
   note.textContent = msg; note.classList.toggle('hidden', !msg);
 }
 
 /**
  * 게임마다 앞뒤(위아래) 방향: true = 판정 평면의 위아래를 카메라 영상과 반대로 (퍽을 카메라 쪽으로 밀면 화면 위로).
- *  - 아케이드·퍽 피하기·8자 드리블 (흰 화면): false — 카메라 쪽으로 밀면 아래로 (영상 속 퍽과 같은 방향)
- *  - 퀵 핸즈·반응 타겟·자유 연습 (영역 안, 배경이 보임): true — 화면(영상)은 그대로 두고 내 퍽만 위아래 반대로 (카메라 쪽으로 밀면 위로)
+ *  - 아케이드 (아래쪽 플레이 존): 카메라 쪽으로 밀면 위로 (퍽들이 내려오는 쪽)
+ *  - 퍽 피하기·8자 드리블 (흰 화면): 카메라 쪽으로 밀면 위로 (판 위쪽 = 카메라쪽, 아래쪽 = 몸쪽)
+ *  - 퀵 핸즈·반응 타겟·자유 연습 (영역 안, 배경이 보임): 화면(영상)은 그대로 두고 내 퍽만 위아래 반대로 — 카메라 쪽으로 밀면 위로
  *  - 와이드 드리블: 영상 속 진짜 퍽 자리 그대로 (렌더러가 평면의 뒤집기를 되돌려 그리므로 이 값과 상관없음)
  * 설정 '위아래 반대로'(reverseDepth)를 켜면 와이드 드리블을 뺀 모든 게임이 반대로 바뀐다
  */
 function depthFlip(modeId = game.mode.id) {
-  const base = FLOOR_FLIP_MODES.has(modeId);
+  // init() 중에도 불리므로 모듈 상수(const) 대신 여기서 바로 정한다 (선언 전에 쓰면 앱이 시작하지 않음)
+  const base = modeId !== 'wide'; // 와이드 드리블을 뺀 모든 게임: 카메라 쪽으로 밀면 위로
   return settings.reverseDepth ? !base : base;
 }
 

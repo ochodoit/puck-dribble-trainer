@@ -11,7 +11,7 @@ export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비�
 export const PUCK_R = 0.01125;       // 내 퍽 반지름 (화면 폭 단위) = 퍽 피하기의 내 퍽 (경기장 폭 0.9 × 0.0125)
 // 점수: 더하기만 한다 (배율·보너스 없음). coin을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
 //       가만히 있으면 점수가 나지 않는다. 나를 겨냥한 퍽을 피한 것 자체에는 점수가 없다(피한 수는 기록만).
-export const HIT_PENALTY = 10;       // 충돌 감점
+export const HIT_PENALTY = 3;        // 충돌 감점 (예전 10: 터치 +1 로 모은 점수가 충돌 몇 번에 다 깎여 점수가 쌓이지 않았다)
 export const TOUCH_POINTS = 1;       // 터치 1번
 export const COIN_POINTS = 10;       // coin 1개
 export const TOUCH_MIN_TRAVEL = 0.08; // 직전 터치에서 경기장 폭의 8% 이상 움직여야 터치로 인정 (제자리 흔들기 방지)

@@ -428,10 +428,11 @@ service cloud.firestore {
             && (d.score > old.data.score || (d.score == old.data.score && d.at == old.data.at))
             && request.time > old.data.get('t', timestamp.date(2000, 1, 1)) + duration.value(2, 's')));
     }
-    // 쓸 수 있는 랭킹 컬렉션 = 게임에 있는 모드 키만 (game.js rankKey): 시간제 모드(아케이드·퍽 피하기·와이드)는 @60·@180·@300,
-    // 투명 모드 -inv, 난이도(아케이드·퍽 피하기만) -easy·-hard. 읽기·지우기는 예전 키도 되게 넓은 모양 그대로
+    // 쓸 수 있는 랭킹 컬렉션 = 게임에 있는 모드 키만 (game.js rankKey): 시간제 모드(아케이드·퍽 피하기·와이드·퀵 핸즈)는 @60·@180·@300,
+    // 투명 모드 -inv, 난이도(아케이드·퍽 피하기만) -easy·-hard. 퀵 핸즈는 예전(20초, 시간 없는) 키 scores_quick 도 그대로 받는다.
+    // 읽기·지우기는 예전 키도 되게 넓은 모양 그대로
     function scoreCol(col) {
-      return col.matches('scores_((arcade|obstacle)(@(60|180|300))?(-inv)?(-(easy|hard))?|wide(@(60|180|300))?(-inv)?|(figure8|quick|reaction)(-inv)?)');
+      return col.matches('scores_((arcade|obstacle)(@(60|180|300))?(-inv)?(-(easy|hard))?|(wide|quick)(@(60|180|300))?(-inv)?|(figure8|reaction)(-inv)?)');
     }
     match /{col}/{uid} {
       allow read: if col.matches('scores_[A-Za-z0-9@_-]{1,40}');

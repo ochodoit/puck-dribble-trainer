@@ -1,5 +1,5 @@
 // 오버레이 캔버스 렌더링 — 영상 위에 얇은 잉크 선(종이색 헤일로)과 알약 라벨, 포인트 레드
-import { PUCK_R, FLYER_R, WIDE_DRILLS, WIDE_BAND, WIDE_END, WIDE_HOLD_R, GATE_DRAW_R, F8_HOLD_R, F8_HOLD_SEC } from './game.js';
+import { PUCK_R, FLYER_R, WIDE_DRILLS, WIDE_BAND, WIDE_END, WIDE_HOLD_R, GATE_DRAW_R, F8_HOLD_R, F8_HOLD_SEC, QUICK_SETS } from './game.js';
 import { C, F, rgba, inkStroke, text, pill, sparks, alphaLayer } from './theme.js';
 
 /** 퍽 피하기의 평면 경기장 사각형 (캔버스 px). topInset: 상단 HUD가 가리는 높이 비율 */
@@ -277,7 +277,7 @@ export class Renderer {
     const pxPerX = (x, y) => { const a = P(x - 0.01, y), b = P(x + 0.01, y); return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.02; };
     const cs = [P(0, 0), P(1, 0), P(1, A), P(0, A)], xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
     const f = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
-    // 배경 투명도 (와이드 = 0 이면 흰 화면, 아니면 칠하지 않음 · 퀵 핸즈·반응 타겟·자유 연습 = 설정대로): 카메라 영상 위에 종이색. 바닥 틀은 그 위에 다시 그린다
+    // 배경 투명도 (설정대로 0 = 흰 화면 ~ 100 = 카메라 그대로): 카메라 영상 위에 종이색. 바닥 틀은 그 위에 다시 그린다
     if (this.wash > 0.001) {
       ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(0, 0, W, H);
       path([[0, 0], [1, 0], [1, A], [0, A]]); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.25 + 0.5 * this.wash); ctx.stroke();
@@ -466,13 +466,16 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** 퀵 핸즈 평면: 가운데 박스. 박스 안 = 옅은 빨강 맥박, 밖으로 나가면 빨강 점선 경고, 시작 전은 잉크 점선 */
+  /** 퀵 핸즈 (바닥 위): 지금 세트의 박스(3시 → 12시 → 9시). 박스 안 = 옅은 빨강 맥박, 밖으로 나가면 빨강 점선 경고, 시작 전은 잉크 점선(첫 세트 자리) */
   _drawQuick(ctx, W, H, game, puck, now, uvToC) {
     ctx.save();
     const K = this._floorField(ctx, W, H, game, uvToC);
     const { f, hair, fs } = K;
     const unit = Math.min(W, H);
     const pulse = 0.5 + 0.5 * Math.sin(now / 250);
+    // 세트 번호 (3시 → 12시 → 9시): 바닥 영역 왼쪽 위 (위쪽 점수판에 가리지 않게)
+    const set = game.running ? game.quickSet : 0;
+    text(ctx, `SET ${set + 1}/${QUICK_SETS.length}`, f.x, Math.max(f.y - fs * 0.9, this.topInset * H + fs * 0.9), fs * 0.7, { weight: 700, color: C.ink, align: 'left', halo: true });
     for (const z of game.zones) {
       K.rect(z); // 실제 바닥 위의 박스 (원근대로)
       if (game.running && z.warn) { ctx.fillStyle = rgba(C.red, 0.24); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); ctx.lineWidth = hair * 2; ctx.strokeStyle = C.red; ctx.stroke(); ctx.setLineDash([]); }

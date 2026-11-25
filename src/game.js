@@ -13,8 +13,8 @@ export const MODES = [
     desc: '좌우 끝까지 넓게, 3가지 훈련을 이어서.' },
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
     desc: '두 콘 사이를 8자로 돌며 게이트 통과.' },
-  { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 20,
-    desc: '가운데 박스 안에서 빠르게 좌우로.' },
+  { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 0, timed: true, stages: 3,
+    desc: '3시·12시·9시 방향 박스에서 차례로 빠르게 좌우로.' },
   { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
     desc: '나타나는 타겟으로 최대한 빨리 이동.' },
   { id: 'free', name: '자유 연습', en: 'Free · course', duration: 0,
@@ -70,8 +70,17 @@ export const GATE_DRAW_R = 0.01875; // 8자 게이트 원 반지름 (예전의 �
 export const F8_HOLD_R = 0.055;     // 8자 시작 대기 원 반지름 (가운데). 판정은 1.25배
 export const F8_HOLD_SEC = 3;       // 가운데 원에 퍽을 둔 채로 3초(3·2·1을 세며 원이 차오름) -> 시작. 그동안 게임 시계는 멈춤
 const F8_CONES = [0.3, 0.7];       // 두 콘의 가로 위치 (세로는 가운데)
-/** 퀵 핸즈 박스 (경기장 가로·세로 대비. 가운데). 예전(0.34 × 0.5)의 80% */
-export const QUICK_BOX = { w: 0.272, h: 0.4 };
+/** 퀵 핸즈 박스 (경기장 가로·세로 대비). 예전 가운데 박스(0.272 × 0.4)의 2/3 — 세 방향으로 옮겨 다니도록 작게 */
+export const QUICK_BOX = { w: 0.272 * (2 / 3), h: 0.4 * (2 / 3) };
+/**
+ * 퀵 핸즈 3세트: 고른 시간(1·3·5분)씩 3시 → 12시 → 9시 방향 박스에서 (= 한 사이클). x = 경기장 가로, y = 세로(A배) 비율.
+ * 12시 = 화면 위쪽 (카메라 쪽으로 밀면 위로 가므로 몸 앞쪽), 3시 = 오른쪽, 9시 = 왼쪽
+ */
+export const QUICK_SETS = [
+  { label: '3시 방향', x: 0.75, y: 0.5 },
+  { label: '12시 방향', x: 0.5, y: 0.25 },
+  { label: '9시 방향', x: 0.25, y: 0.5 },
+];
 
 /**
  * 목표 통과 판정: 내 퍽(원)과 목표(원·사각형)가 겹친 넓이가 둘 중 작은 쪽 넓이의 이만큼 이상이면 통과.
@@ -232,9 +241,10 @@ export class Game {
     this._f8Prev = null;
     this._prevMe = null;
     this.f8Hold = null; // 8자 시작 대기 {t: 가운데 원에 퍽을 둔 시간(초)}. null 이면 진행 중
+    this.quickSet = 0;  // 퀵 핸즈: 지금 세트 (0 = 3시, 1 = 12시, 2 = 9시)
     this._A = this.plane.A; // 경기장 세로 비율이 바뀌면(화면 회전 등) 코스·목표를 다시 맞춘다
     if (this.mode?.id === 'figure8') this._figure8Course(); // 시작 전에도 코스와 첫 방향(점선)을 미리 보여 준다
-    if (this.mode?.id === 'quick') this.zones = [{ ...this._quickZone(), active: false }]; // 시작 전 박스 미리보기
+    if (this.mode?.id === 'quick') this.zones = [{ ...this._quickZone(0), active: false }]; // 시작 전 첫 세트(3시) 박스 미리보기
   }
 
   /** 8자 코스 (평면 좌표: 가로 1 × 세로 A). 게이트·콘 자리는 경기장 비율로 정하고 세로만 A배 */
@@ -245,10 +255,21 @@ export class Game {
     this.wpIndex = 0;
   }
 
-  /** 퀵 핸즈 박스 (평면 좌표, 가운데) */
-  _quickZone() {
-    const A = this.plane.A;
-    return { id: 'C', x: 0.5, y: 0.5 * A, w: QUICK_BOX.w, h: QUICK_BOX.h * A, active: true, warn: false };
+  /** 퀵 핸즈 박스 (평면 좌표): set 번째 세트의 방향 자리 */
+  _quickZone(set = 0) {
+    const A = this.plane.A, s = QUICK_SETS[set] || QUICK_SETS[0];
+    return { id: 'C', x: s.x, y: s.y * A, w: QUICK_BOX.w, h: QUICK_BOX.h * A, active: true, warn: false };
+  }
+
+  /** 퀵 핸즈: i번째 세트 시작 (고른 시간이 지나면 다음 방향 박스로). 처음 세트는 알림 없이 */
+  _quickStage(i) {
+    const first = this.quickSet === i;
+    this.quickSet = i;
+    this.zones = [this._quickZone(i)];
+    if (first) return;
+    const s = QUICK_SETS[i];
+    this._pop(s.x, s.y * this.plane.A, s.label, C.red, 'script');
+    this.sfx?.target();
   }
 
   /** 경기장 세로 비율(A)이 바뀌었을 때: 코스·박스·타겟을 새 비율에 맞춘다 (진행 상황은 그대로) */
@@ -258,7 +279,7 @@ export class Game {
     if (!(old > 0) || old === A) return;
     const k = A / old;
     if (this.mode.id === 'figure8') { const i = this.wpIndex; this._figure8Course(); this.wpIndex = i; }
-    if (this.mode.id === 'quick' && this.zones.length) this.zones = [this._quickZone()];
+    if (this.mode.id === 'quick' && this.zones.length) this.zones = [this._quickZone(this.quickSet)];
     for (const t of this.targets) t.y *= k;
     if (this._prevMe) this._prevMe.y *= k;
     if (this._f8Prev) this._f8Prev.y *= k;
@@ -340,8 +361,8 @@ export class Game {
         this._f8HoldText();
         break;
       case 'quick':
-        this.zones = [this._quickZone()];
-        this.stats = { touches: 0, outside: 0 };
+        this._quickStage(0); // 첫 세트: 3시 방향
+        this.stats = { touches: 0, outside: 0, sets: QUICK_SETS.map(() => 0) };
         this._puckTouchesBase = puck?.touches || 0;
         this.instruction = '박스 안에서 빠르게 좌우로!';
         break;
@@ -514,11 +535,12 @@ export class Game {
         break;
       }
       case 'quick': {
+        if (this.stage !== this.quickSet) this._quickStage(this.stage); // 고른 시간이 지나면 다음 방향 박스로 (3시 → 12시 → 9시)
         const z = this.zones[0];
         if (me && tracked) {
           if (discInRect(me, PUCK_R, z)) {
             const touches = puck.touches - this._puckTouchesBase;
-            if (touches > this.stats.touches) { this.sfx?.rep(); }
+            if (touches > this.stats.touches) { this.sfx?.rep(); this.stats.sets[this.quickSet] += touches - this.stats.touches; }
             this.stats.touches = touches; this.score = touches;
             this.instruction = '좋아요, 계속!';
             z.warn = false;
@@ -732,7 +754,8 @@ export class Game {
         r.items = [['점수', this.score], ['완주 바퀴', s.laps], ['통과 게이트', s.gates], ['콘 충돌', s.hits]];
         break;
       case 'quick':
-        r.items = [['터치 수', s.touches], ['초당 터치', (s.touches / Math.max(1, this.elapsed)).toFixed(2)]];
+        r.items = [['터치 수', s.touches], ...QUICK_SETS.map((q, i) => [q.label, s.sets?.[i] ?? 0]),
+          ['초당 터치', (s.touches / Math.max(1, this.elapsed)).toFixed(2)], ['게임 시간', `${minutes} × ${this.mode.stages}`]];
         break;
       case 'reaction': {
         const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);

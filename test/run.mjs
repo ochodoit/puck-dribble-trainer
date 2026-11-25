@@ -1418,6 +1418,14 @@ const skipSetup = async (page, touch = false) => {
   await page.waitForSelector('#panel-mode:not(.hidden)', { timeout: 3000 });
   const done = await page.evaluate(() => ({ setup: window.__puckTrainer.app.setup, cls: document.querySelector('#app').classList.contains('setting-up'), bar: document.querySelector('#test-bar').classList.contains('hidden') }));
   ok(/퍽이 안 보여요/.test(lostHint) && counts.join(',') === '0 / 4,1 / 4,2 / 4,3 / 4,4 / 4' && done.setup === null && !done.cls && done.bar, 'test step: lost-puck hint, four corner targets count up, then the mode window opens', JSON.stringify({ lostHint, counts, done }));
+  // 시작 준비 직후 모드 창: 마지막 표적(왼쪽 앞) 자리 = 아케이드 카드 위. 가운데 칸(puck)에 한 번 두기 전에는 퍽으로 고르지 않는다
+  // (카드를 벗어났다 돌아와 2초 넘게 있어도 아케이드가 골라져 시작되지 않음). 가운데 칸에 오면 그때부터 고를 수 있다
+  const need0 = await page.evaluate(() => ({ need: document.querySelector('#mode-list .mode-wait').classList.contains('need'), flag: window.__puckTrainer.app.modeNeedCenter }));
+  await forceUV(0.3, 0.85); await tick(400); await forceUV(0.16, 0.85); await tick(2600);
+  const stay = await page.evaluate(() => ({ open: !document.querySelector('#panel-mode').classList.contains('hidden'), running: window.__puckTrainer.game.running, hold: window.__puckTrainer.app.modePick?.hold || 0 }));
+  await forceUV(0.5, 0.5); await tick(300);
+  const armed = await page.evaluate(() => ({ flag: window.__puckTrainer.app.modeNeedCenter, need: document.querySelector('#mode-list .mode-wait').classList.contains('need') }));
+  ok(need0.need && need0.flag && stay.open && !stay.running && stay.hold === 0 && !armed.flag && !armed.need, 'after setup the mode window waits: the puck picks no card until it visits the middle (puck) square', JSON.stringify({ need0, stay, armed }));
   // 난이도: 모드 창 제목 줄에서 고르면 HUD·결과·랭킹 키가 난이도별로 나뉜다 (아케이드·퍽 피하기만)
   await page.tap('#level-seg [data-level="hard"]');
   const lv = await page.evaluate(() => ({ set: window.__puckTrainer.settings.difficulty, game: window.__puckTrainer.game.difficulty, active: document.querySelector('#level-seg .active')?.dataset.level, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).difficulty }));

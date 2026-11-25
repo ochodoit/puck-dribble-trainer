@@ -9,11 +9,18 @@ import { clockNow } from './clock.js';
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
 export const PUCK_R = 0.01125;       // 내 퍽 반지름 (화면 폭 단위) = 퍽 피하기의 내 퍽 (경기장 폭 0.9 × 0.0125)
-// 점수: 더하기만 한다 (배율·보너스 없음). coin을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
+// 점수: 더하기만 한다 (연속 보너스 없음). coin을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
 //       가만히 있으면 점수가 나지 않는다. 나를 겨냥한 퍽을 피한 것 자체에는 점수가 없다(피한 수는 기록만).
+//       아래 세 값은 쉬움 기준이고, 난이도 배율(SCORE_MULT)을 모두 곱한다.
 export const HIT_PENALTY = 3;        // 충돌 감점 (예전 10: 터치 +1 로 모은 점수가 충돌 몇 번에 다 깎여 점수가 쌓이지 않았다)
 export const TOUCH_POINTS = 1;       // 터치 1번
 export const COIN_POINTS = 10;       // coin 1개
+/**
+ * 난이도별 점수 배율: 같은 플레이라도 어려울수록 크게 — 보통 1.5배, 어려움 2배 (터치·coin·충돌 감점 모두).
+ * 시간(1·3·5분) 동안 쌓이므로 대략 1분·쉬움 100점대 ~ 5분·어려움 1,000점 안팎까지 차등이 난다.
+ * 터치는 0.5 단위로 쌓고 점수는 반올림한 정수 (coin·충돌은 정수: 10·15·20 / 3·5·6)
+ */
+export const SCORE_MULT = { easy: 1, normal: 1.5, hard: 2 };
 export const TOUCH_MIN_TRAVEL = 0.08; // 직전 터치에서 경기장 폭의 8% 이상 움직여야 터치로 인정 (제자리 흔들기 방지)
 const TOUCH_TURN = 0.012;            // 이만큼 되돌아와야 방향 전환으로 본다 (추적 떨림 무시, 화면 폭 단위)
 export const STREAK_GAP_S = 1.2;     // 터치 사이 간격이 이 안이면 연속 터치 (기록용, 점수와 무관)
@@ -54,8 +61,16 @@ export class Arcade {
     this.puckAlpha = 1;    // 플레이 중 내 퍽 표시 농도 (1 = 또렷이, 0 = 안 보임: 화면이 아닌 감각으로 플레이)
     this.peek = false;     // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중 농도로 미리 보여 줌
     this.phase = 'idle';   // idle | countdown | play
+    this.mult = SCORE_MULT.normal; // 점수 배율 (start 에서 난이도대로)
     this.reset();
   }
+
+  /** 점수 = 쌓인 점수(points, 터치는 0.5 단위)를 반올림한 정수. 랭킹·화면에는 정수만 나간다 */
+  get score() { return Math.round(this.points || 0); }
+  set score(v) { this.points = v; }
+  /** 이 난이도의 coin 점수·충돌 감점 (쉬움 10·3 / 보통 15·5 / 어려움 20·6) */
+  get coinPoints() { return Math.round(COIN_POINTS * this.mult); }
+  get hitPenalty() { return Math.round(HIT_PENALTY * this.mult); }
 
   reset() {
     this.score = 0;
@@ -86,6 +101,7 @@ export class Arcade {
   start(puck, difficulty = 'normal', skipCountdown = false) {
     this.reset();
     this.diff = DIFF[difficulty] || DIFF.normal;
+    this.mult = SCORE_MULT[difficulty] || SCORE_MULT.normal;
     this.startDistance = puck?.distance || 0;
     if (skipCountdown) {
       // 핸즈프리 시작: 이미 원 안에 3초 정지했으므로 바로 GO
@@ -165,12 +181,12 @@ export class Arcade {
     }
     this.obstacles = this.obstacles.filter((o) => o.y - o.r < this.aspect + 0.05);
 
-    // coin: 먹으면 +10
+    // coin: 먹으면 +10 (난이도 배율: 보통 +15, 어려움 +20)
     for (const p of this.pickups) {
       p.y += p.vy * dt;
       if (a && tracked && !p.taken && Math.hypot(a.x - p.x, a.y - p.y) < p.r + PUCK_R) {
         p.taken = true; this.items++;
-        this._addScore(COIN_POINTS, p.x, p.y - PUCK_R * 2.5, `+${COIN_POINTS}`);
+        this._addScore(this.coinPoints, p.x, p.y - PUCK_R * 2.5, `+${this.coinPoints}`);
         this.sfx?.target?.();
       }
     }
@@ -247,7 +263,7 @@ export class Arcade {
     this.streak = this.lastTouchAt && now - this.lastTouchAt <= STREAK_GAP_S * 1000 ? this.streak + 1 : 1;
     this.maxStreak = Math.max(this.maxStreak, this.streak);
     this.lastTouchAt = now;
-    this._addScore(TOUCH_POINTS); // 터치는 글자 없이 점수판·연속 표시로만 (화면을 비워 둔다)
+    this._addScore(TOUCH_POINTS * this.mult); // 터치는 글자 없이 점수판·연속 표시로만 (화면을 비워 둔다). 보통 1.5 · 어려움 2
     this.effects.push({ type: 'tick', x: at, y: this.avatar.y, t0: now, dur: 260, age: 0 });
   }
 
@@ -262,16 +278,17 @@ export class Arcade {
     o.hit = true;
     this.hits++;
     this.streak = 0;
-    this.score = Math.max(0, this.score - HIT_PENALTY);
+    const pen = this.hitPenalty;
+    this.points = Math.max(0, (this.points || 0) - pen);
     this.invulnUntil = now + INVULN_MS;
     this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
-    this._pop(this.avatar.x, this.avatar.y - PUCK_R * 2.5, `충돌 −${HIT_PENALTY}`, C.red, 800, 'small');
+    this._pop(this.avatar.x, this.avatar.y - PUCK_R * 2.5, `충돌 −${pen}`, C.red, 800, 'small');
     this.sfx?.hit?.();
-    this.instruction = `충돌 −${HIT_PENALTY} · 1.5초 무적`;
+    this.instruction = `충돌 −${pen} · 1.5초 무적`;
   }
 
   _addScore(pts, x, y, label, color = C.inkSoft, style = 'small') {
-    this.score += pts;
+    this.points = (this.points || 0) + pts;
     if (label) this._pop(x, y, label, color, style === 'script' ? 1100 : 700, style);
   }
 

@@ -1,8 +1,14 @@
 // 검색엔진·AI 검색용 사이트 내용 (한국어 / English). tools/build-site.mjs 가 이 내용으로
-// 첫 화면의 <head> 검색 정보, 영어 첫 화면(/en/), 안내 페이지(가이드·게임·FAQ), sitemap.xml, robots.txt, llms.txt, 404.html 을 만든다.
+// 첫 화면의 <head> 검색 정보, 영어 첫 화면(/en/), 안내 페이지(가이드·게임·FAQ), sitemap.xml, rss.xml, robots.txt, llms.txt, 404.html 을 만든다.
 // 글 안의 표시: **굵게**, [글자](주소)
 
 export const SITE = 'https://puck-trainer.com';
+
+/**
+ * 페이지마다 내용을 마지막으로 크게 바꾼 날 (YYYY-MM-DD). sitemap.xml 의 <lastmod>, rss.xml 의 <pubDate> 로 나간다.
+ * 네이버·구글·Bing 이 바뀐 페이지를 먼저 다시 가져가게 하는 값이라, 페이지 내용을 바꾸면 이 날짜도 고친다. '' = 첫 화면
+ */
+export const UPDATED = { '': '2026-11-21', guide: '2026-11-20', games: '2026-11-19', faq: '2026-11-20' };
 
 /** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구·Daum 웹마스터도구·네이버 서치어드바이저에서 받은 값 */
 export const VERIFY = {

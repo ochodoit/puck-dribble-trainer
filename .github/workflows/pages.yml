@@ -60,7 +60,7 @@ jobs:
           mkdir -p _site
           cp -r index.html favicon.ico style.css manifest.webmanifest src icons cam _site/
           # 검색엔진·AI 검색용 (tools/build-site.mjs 로 만든 파일): 영어 첫 화면, 안내 페이지, 사이트맵 등
-          cp -r en guide games faq pages.css robots.txt sitemap.xml llms.txt 404.html google3d8a4c89a20c8fb9.html _site/
+          cp -r en guide games faq pages.css robots.txt sitemap.xml rss.xml llms.txt 404.html google3d8a4c89a20c8fb9.html _site/
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:

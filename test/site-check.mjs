@@ -9,7 +9,7 @@ const HANGUL = /[ㄱ-ㆎ가-힣]/;
 
 export async function checkSite() {
   const { staleFiles, translateHtml, pathOf } = await import('../tools/build-site.mjs');
-  const { SITE, PAGES, DEF, VERIFY } = await import('../tools/site-content.mjs');
+  const { SITE, PAGES, DEF, VERIFY, UPDATED } = await import('../tools/site-content.mjs');
   const logs = [];
   let ok = true;
   const check = (name, cond, detail) => { logs.push(`${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ' ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); if (!cond) ok = false; };
@@ -56,9 +56,23 @@ export async function checkSite() {
   check('SEO5 sitemap lists every page once with hreflang; robots allows all crawlers and points to the sitemap; llms.txt summarizes the site', locs.length === pages.length && pages.every((p) => locs.includes(p.url))
     && /User-agent: \*\nAllow: \/\n/.test(robots) && !/Disallow/.test(robots) && robots.includes(`Sitemap: ${SITE}/sitemap.xml`) && robots.trimEnd().endsWith(`#DaumWebMasterTool:${VERIFY.daum}`) && llms.startsWith('# Puck Dribble Trainer') && llms.includes(DEF.en) && llms.includes(DEF.ko), { locs: locs.length });
 
+  // 네이버 서치어드바이저용: 사이트맵 날짜(lastmod) + RSS 피드. 페이지마다 날짜가 있고, RSS 에 모든 페이지가 한 번씩, 모든 페이지 head 가 RSS 를 알린다
+  const lastmods = [...sm.matchAll(/<url>\s*<loc>([^<]+)<\/loc>\s*<lastmod>(\d{4}-\d{2}-\d{2})<\/lastmod>/g)].map((m) => m[1]);
+  const feed = await readFile(join(ROOT, 'rss.xml'), 'utf8');
+  const items = [...feed.matchAll(/<item>[\s\S]*?<link>([^<]+)<\/link>[\s\S]*?<pubDate>([^<]+)<\/pubDate>[\s\S]*?<\/item>/g)];
+  const dates = Object.values(UPDATED);
+  const rssLink = `<link rel="alternate" type="application/rss+xml" href="${SITE}/rss.xml" />`;
+  const noRssLink = [];
+  for (const p of pages) if (!(await readFile(join(ROOT, p.file), 'utf8')).includes(rssLink)) noRssLink.push(p.file);
+  check('SEO6 sitemap has a lastmod for every page; rss.xml (RSS 2.0) lists every page once with a valid date; every page links the feed', lastmods.length === pages.length
+    && dates.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)))
+    && feed.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"') && feed.includes(`<link>${SITE}/</link>`)
+    && items.length === pages.length && pages.every((p) => items.some((m) => m[1] === p.url)) && items.every((m) => !Number.isNaN(Date.parse(m[2])))
+    && noRssLink.length === 0, { lastmods: lastmods.length, items: items.length, noRssLink });
+
   const yml = await readFile(join(ROOT, '.github/workflows/pages.yml'), 'utf8');
-  const need = ['en', 'guide', 'games', 'faq', 'pages.css', 'robots.txt', 'sitemap.xml', 'llms.txt', '404.html', VERIFY.googleFile];
-  check('SEO6 deploy copies the generated files', need.every((f) => new RegExp(`cp -r [^\\n]*\\b${f.replace('.', '\\.')}\\b`).test(yml)), need.filter((f) => !yml.includes(f)));
+  const need = ['en', 'guide', 'games', 'faq', 'pages.css', 'robots.txt', 'sitemap.xml', 'rss.xml', 'llms.txt', '404.html', VERIFY.googleFile];
+  check('SEO7 deploy copies the generated files', need.every((f) => new RegExp(`cp -r [^\\n]*\\b${f.replace('.', '\\.')}\\b`).test(yml)), need.filter((f) => !yml.includes(f)));
   return { ok, logs };
 }
 

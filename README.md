@@ -60,7 +60,8 @@
 - **한 줄 정의**: 첫 화면 소개·안내 페이지·구조화 데이터·llms.txt 에 같은 문장(`DEF`)을 씁니다. AI 검색이 인용하기 쉽게.
 - **검색엔진 등록**: 구글 서치 콘솔(URL 접두어 `https://puck-trainer.com/`, HTML 태그 + 파일), Bing 웹마스터 도구(메타 태그) 소유 확인 · 사이트맵 제출. 네이버 서치어드바이저·다음 웹마스터도구는 각 계정 로그인 후 등록 (네이버는 `naver-site-verification` 태그를 `tools/site-content.mjs` 의 `VERIFY` 에 넣고 다시 만들면 됩니다).
   - **페이지 날짜**: 안내 페이지나 첫 화면 내용을 크게 바꾸면 `tools/site-content.mjs` 의 `UPDATED` 날짜도 고치고 다시 만드세요. 사이트맵 `<lastmod>`·RSS `<pubDate>` 로 나가서, 검색엔진이 바뀐 페이지를 먼저 다시 가져갑니다.
-  - **네이버**: 서치어드바이저에 사이트맵(`/sitemap.xml`)과 RSS(`/rss.xml`)를 둘 다 제출합니다. 새 사이트는 수집·노출까지 몇 주 걸릴 수 있습니다.
+  - **네이버**: 서치어드바이저에 사이트맵(`/sitemap.xml`)과 RSS(`/rss.xml`)를 둘 다 제출합니다. 새 사이트는 수집·노출까지 몇 주 걸릴 수 있습니다. 수집 주기는 '빠르게'로 설정해 두었습니다(설정 메뉴).
+  - **IndexNow**: main 에 푸시해 배포가 끝나면 GitHub Actions 의 `indexnow` 작업이 이번에 바뀐 페이지 주소를 네이버(`searchadvisor.naver.com/indexnow`)와 IndexNow 공용 주소(Bing 등에 전달)로 바로 알립니다(`tools/indexnow.mjs`). 키는 `site-content.mjs` 의 `VERIFY.indexnow`, 키 파일 `/<키>.txt` 는 `build-site.mjs` 가 만듭니다. 손으로 모든 페이지를 알리려면 `node tools/indexnow.mjs --all` (`--dry` 는 목록만).
 
 ## 아케이드 (메인 게임)
 

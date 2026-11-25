@@ -3,7 +3,7 @@
 //   - en/index.html : 영어 첫 화면. index.html 을 영어 사전(src/i18n-en.js)으로 미리 번역해 둔 것
 //     (자바스크립트를 돌리지 않는 검색·AI 크롤러도 영어 내용을 본다. 앱은 주소로 언어를 정한다)
 //   - guide/ games/ faq/ (+ en/…) 안내 페이지, sitemap.xml, rss.xml, robots.txt, llms.txt, 404.html, 구글 소유 확인 파일
-//     (rss.xml 은 네이버 서치어드바이저 '요청 > RSS 제출'용. 네이버는 사이트맵과 RSS 를 따로 받는다)
+//     (rss.xml 은 네이버 서치어드바이저 '요청 > RSS 제출'용. 네이버는 사이트맵과 RSS 를 따로 받는다), IndexNow 키 파일
 // 사용: node tools/build-site.mjs          파일 쓰기
 //       node tools/build-site.mjs --check  저장소의 파일이 최신인지 확인 (다르면 실패 — 테스트에서 씀)
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -397,6 +397,7 @@ export async function buildSite(root = ROOT) {
   files['llms.txt'] = llms();
   files['404.html'] = notFound();
   files[VERIFY.googleFile] = `google-site-verification: ${VERIFY.googleFile}`;
+  files[`${VERIFY.indexnow}.txt`] = VERIFY.indexnow; // IndexNow 키 파일 (tools/indexnow.mjs)
   return files;
 }
 

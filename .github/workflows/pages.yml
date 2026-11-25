@@ -60,10 +60,34 @@ jobs:
           mkdir -p _site
           cp -r index.html favicon.ico style.css manifest.webmanifest src icons cam _site/
           # 검색엔진·AI 검색용 (tools/build-site.mjs 로 만든 파일): 영어 첫 화면, 안내 페이지, 사이트맵 등
-          cp -r en guide games faq pages.css robots.txt sitemap.xml rss.xml llms.txt 404.html google3d8a4c89a20c8fb9.html _site/
+          cp -r en guide games faq pages.css robots.txt sitemap.xml rss.xml llms.txt 404.html google3d8a4c89a20c8fb9.html adc596214f1816d3cd9de83acad9a56b.txt _site/
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  # 3) IndexNow: 사이트 배포가 끝나면 이번에 바뀐 페이지(index.html, guide/index.html …) 주소를 네이버·Bing 에 바로 알린다
+  #    (tools/indexnow.mjs, 키 파일은 위에서 같이 배포). 손으로 돌리면(workflow_dispatch) 모든 페이지를 알린다.
+  #    알림이 실패해도 사이트는 이미 배포됐으므로 경고만 남긴다
+  indexnow:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Notify search engines (IndexNow)
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" != "push" ] || [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            node tools/indexnow.mjs --all
+          else
+            node tools/indexnow.mjs $(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          fi

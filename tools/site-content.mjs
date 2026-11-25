@@ -17,6 +17,9 @@ export const VERIFY = {
   bing: '5A21EE30137A77A9FB261F99EBCD09D8',
   daum: 'f5d13dd3f05e5ec61ca7aec976c7c0147c56bcc9cb1b9eb63c1c8269523507dd:LSr9wi71I6+MYd9iMzmuXg==', // robots.txt 맨 아래 #DaumWebMasterTool 줄
   naver: '0de5cc3fe08b89ef1da144a4243a24b07efd574f', // 네이버 서치어드바이저 (첫 화면 meta 태그)
+  // IndexNow 키 (공개되는 값, 우리가 만든 임의의 32자). 사이트 루트의 <키>.txt 로 소유를 증명하고,
+  // 배포 뒤 tools/indexnow.mjs 가 이 키로 바뀐 페이지를 네이버·Bing 에 알린다. 바꾸면 이전 키 파일은 더 이상 배포되지 않는다
+  indexnow: 'adc596214f1816d3cd9de83acad9a56b',
 };
 
 /** 공식 인스타그램 (운영자 화면의 게스트 안내에 설정된 계정) */

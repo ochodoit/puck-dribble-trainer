@@ -71,8 +71,21 @@ export async function checkSite() {
     && noRssLink.length === 0, { lastmods: lastmods.length, items: items.length, noRssLink });
 
   const yml = await readFile(join(ROOT, '.github/workflows/pages.yml'), 'utf8');
-  const need = ['en', 'guide', 'games', 'faq', 'pages.css', 'robots.txt', 'sitemap.xml', 'rss.xml', 'llms.txt', '404.html', VERIFY.googleFile];
+  const need = ['en', 'guide', 'games', 'faq', 'pages.css', 'robots.txt', 'sitemap.xml', 'rss.xml', 'llms.txt', '404.html', VERIFY.googleFile, `${VERIFY.indexnow}.txt`];
   check('SEO7 deploy copies the generated files', need.every((f) => new RegExp(`cp -r [^\\n]*\\b${f.replace('.', '\\.')}\\b`).test(yml)), need.filter((f) => !yml.includes(f)));
+
+  // IndexNow: 키 파일 = 키, 바뀐 파일 → 알릴 주소 고르기, 배포 뒤 알림 작업
+  const { urlsForFiles, payload, pageFiles } = await import('../tools/indexnow.mjs');
+  let keyFile = null; try { keyFile = await readFile(join(ROOT, `${VERIFY.indexnow}.txt`), 'utf8'); } catch { /* 없음 */ }
+  const picked = urlsForFiles(['guide/index.html', 'en/faq/index.html', 'src/app.js', 'sitemap.xml', 'index.html']);
+  const body = payload(picked);
+  check('SEO8 IndexNow: key file holds the key; changed page files map to their URLs (others ignored); every page has a URL; the deploy notifies after the site is live',
+    /^[0-9a-f]{32}$/.test(VERIFY.indexnow) && keyFile === VERIFY.indexnow
+    && picked.join() === [`${SITE}/`, `${SITE}/guide/`, `${SITE}/en/faq/`].join() && urlsForFiles(['src/app.js', 'README.md']).length === 0
+    && pageFiles().size === pages.length && pages.every((p) => pageFiles().get(p.file) === p.url)
+    && body.host === new URL(SITE).host && body.key === VERIFY.indexnow && body.keyLocation === `${SITE}/${VERIFY.indexnow}.txt`
+    && /\n {2}indexnow:\n {4}needs: deploy\n/.test(yml) && /node tools\/indexnow\.mjs --all/.test(yml) && /node tools\/indexnow\.mjs \$\(git diff --name-only/.test(yml),
+    { picked, keyFile });
   return { ok, logs };
 }
 

@@ -250,6 +250,7 @@
 
 `main` 브랜치에 푸시하면 `.github/workflows/pages.yml` 이 자동 배포하고, 공식 주소 **https://puck-trainer.com/** 으로 열립니다. GitHub 기본 주소 `https://ochodoit.github.io/puck-dribble-trainer/` 로 들어와도 새 주소로 넘어갑니다(예전 주소 `/semple/` 은 없어짐).
 
+- 배포 실패 `No artifacts named "github-pages"`: GitHub 쪽에서 올린 직후 아티팩트가 늦게 보여 가끔 생깁니다. 워크플로가 같은 작업 안에서 10초·30초·60초 기다렸다 다시 시도합니다. 그래도 실패하면 **Re-run 대신** Actions › Deploy to GitHub Pages › **Run workflow** 로 새로 돌리세요(Re-run 하면 아티팩트가 두 개라 또 실패).
 - 도메인 `puck-trainer.com`: Hosting.kr에서 구입(만료일 전에 연장), 저장소 **Settings > Pages > Custom domain** 에 연결, GitHub 계정 **Settings > Pages > Verified domains** 에서 소유 확인(남의 저장소가 이 도메인을 못 씀)
 - Hosting.kr DNS 레코드: `A @` 185.199.108.153 / 185.199.109.153 / 185.199.110.153 / 185.199.111.153, `CNAME www` → `ochodoit.github.io`, `TXT _github-pages-challenge-ochodoit` (소유 확인 값, 지우지 말 것) 워크플로가 Pages를 자동 활성화하지 못하면 저장소 **Settings > Pages > Source**를 `GitHub Actions`로 한 번만 바꿔 주세요. HTTPS라 휴대폰 카메라가 바로 허용되고 인증서 경고도 없습니다.
 

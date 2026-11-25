@@ -328,7 +328,7 @@ export const EN = {
   '인식 마스크 표시(디버그)': 'Show detection mask (debug)',
   '효과음': 'Sound effects',
   '핸즈프리 시작 (퍽을 원 안에 3초)': 'Hands-free start (puck in the circle for 3 s)',
-  '카메라 쪽으로 밀면 화면 위로 (와이드 드리블·퀵 핸즈 제외)': 'Push toward the camera = up on screen (all but Wide Dribble, Quick Hands)',
+  '카메라 쪽으로 밀면 화면 위로 (와이드 드리블 제외)': 'Push toward the camera = up on screen (all but Wide Dribble)',
   '일반': 'Normal',
   '투명 모드': 'Invisible mode',
   '투명': 'Invisible',

@@ -19,12 +19,12 @@ export const DEFAULT_SETTINGS = {
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
-  flipDepth: true,                            // 앞뒤 방향(아케이드·퍽 피하기·자유 연습 공통): true = 카메라 쪽으로 밀면 화면 위로
+  flipDepth: true,                            // 앞뒤 방향(와이드 드리블을 뺀 모든 게임 공통): true = 카메라 쪽으로 밀면 화면 위로
   puckTransparency: 0,                        // 플레이 중 내 퍽 투명도(%): 0 = 또렷이, 100 = 안 보임 (1 단위). 화면의 퍽 표시와 카메라 속 진짜 퍽 모두
   figure8Dir: 'L-up',                         // 8자 드리블 방향: L|R(어느 콘 먼저) - up|down(콘을 위·아래 어느 쪽부터)
   invisible: false,                           // 투명 모드: 플레이 중 내 퍽을 아예 숨김 (손의 감각으로만). 랭킹·자랑은 일반과 따로
   courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
-  course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (평면 경기장 비율)
+  course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (영역 = 평면 경기장 비율, 화면에서 왼쪽 위가 0,0)
   courseRecord: null,                         // 현재 코스로 세운 내 최고 기록: {sig, avg, best, at} (커뮤니티 공유용)
   bgTransparency: 12,                         // 게임 배경 투명도(%): 0 = 종이색으로 완전히 덮음, 100 = 카메라 영상 그대로
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭

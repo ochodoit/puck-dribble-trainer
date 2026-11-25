@@ -9,8 +9,14 @@ export function dodgeField(W, H, topInset = 0) {
   return { x: m, y: top, w: W - 2 * m, h: Math.max(10, H - top - m) };
 }
 
-/** 평면 판 대신 카메라 영상 위 실제 바닥에 원근대로 그리는 모드 */
-export const FLOOR_MODES = new Set(['wide', 'quick']);
+/** 평면 판(화면 전체) 대신 카메라 영상 위 실제 바닥(영역 안)에 원근대로 그리는 모드 — 배경(카메라)이 보이는 게임 */
+export const FLOOR_MODES = new Set(['wide', 'quick', 'reaction', 'free']);
+/**
+ * 바닥 위 게임 중 화면(카메라 영상 + 그림)을 위아래로 뒤집어 보이는 모드: 퀵 핸즈·반응 타겟·자유 연습.
+ * '카메라 쪽으로 밀면 화면 위로'가 켜져 있으면 영상째 상하만 뒤집어, 흰 화면 게임(아케이드·퍽 피하기·8자)과 같은 방향으로 움직이게 한다.
+ * 와이드 드리블은 카메라 화면 그대로 (뒤집지 않음)
+ */
+export const FLIP_VIEW_MODES = new Set(['quick', 'reaction', 'free']);
 
 export class Renderer {
   constructor(canvas) {
@@ -31,14 +37,15 @@ export class Renderer {
 
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
+   * flipV: 화면을 위아래로 뒤집어 보이는 중 (영상은 CSS 로 뒤집히므로, 카메라 좌표로 그리는 모든 것을 같이 뒤집는다)
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false, pick = null }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false, pick = null, flipV = false }) {
     const { ctx, canvas } = this;
     this.peek = peek; // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중처럼 (내 퍽 투명도 적용)
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
     const sx = W / procSize.PW, sy = H / procSize.PH;
-    const toC = (px, py) => [px * sx, py * sy];
+    const toC = flipV ? (px, py) => [px * sx, (procSize.PH - py) * sy] : (px, py) => [px * sx, py * sy];
     // 퍽 투명도: 카메라 영상 속 진짜 퍽을 둘레 바닥색으로 덮는다 (맨 아래 층 — 목표·영역 그림은 그 위에)
     if (cover && cover.alpha > 0.001) {
       const [cx, cy] = toC(cover.x, cover.y), rr = cover.r * sx * 2.4;
@@ -111,15 +118,13 @@ export class Renderer {
       return;
     }
 
-    // ---- 와이드 드리블·퀵 핸즈: 카메라 영상 위 실제 바닥에 원근대로 (내 퍽 = 영상 속 진짜 퍽 자리) ----
+    // ---- 와이드 드리블·퀵 핸즈·반응 타겟·자유 연습: 카메라 영상 위 실제 바닥(영역 안)에 원근대로 (내 퍽 = 영상 속 진짜 퍽 자리) ----
     if (view === 'floor') {
-      (game.mode.id === 'wide' ? this._drawWide : this._drawQuick).call(this, ctx, W, H, game, puck, now, uvToC);
+      const drawFloor = { wide: this._drawWide, quick: this._drawQuick, reaction: this._drawReaction, free: this._drawCourse }[game.mode.id];
+      drawFloor.call(this, ctx, W, H, game, puck, now, uvToC);
     } else {
-      // ---- 나머지 모드는 평면 경기장에서 (위에서 내려다본 판 = 영역 전체. 판정도 같은 평면 좌표) ----
-      const drawField = {
-        free: this._drawCourse, obstacle: this._drawDodge,
-        figure8: this._drawFigure8, reaction: this._drawReaction,
-      }[game.mode.id] || this._drawCourse;
+      // ---- 퍽 피하기·8자 드리블은 평면 경기장에서 (위에서 내려다본 흰 판 = 영역 전체. 판정도 같은 평면 좌표) ----
+      const drawField = { obstacle: this._drawDodge, figure8: this._drawFigure8 }[game.mode.id] || this._drawDodge;
       drawField.call(this, ctx, W, H, game, puck, now, { calib, idleHold });
     }
 
@@ -128,7 +133,7 @@ export class Renderer {
       for (const c of vision.puckCandidates) {
         const [x0, y0] = toC(c.minx, c.miny), [x1, y1] = toC(c.maxx + 1, c.maxy + 1);
         ctx.strokeStyle = C.red; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-        text(ctx, `${c.area} · ${c.score.toFixed(2)}`, x0, y0 - 3, fs * 0.6, { weight: 500, color: C.ink, align: 'left', baseline: 'bottom' });
+        text(ctx, `${c.area} · ${c.score.toFixed(2)}`, x0, Math.min(y0, y1) - 3, fs * 0.6, { weight: 500, color: C.ink, align: 'left', baseline: 'bottom' });
       }
     }
   }
@@ -160,13 +165,12 @@ export class Renderer {
   }
 
   /**
-   * 나: 잉크 정원(반지름 PUCK_R = 목표 판정에 쓰는 크기 그대로. 바깥 고리 없음), 궤적은 헤어라인.
-   * 플레이 중에는 설정한 농도로 (퍽 투명도). before(ctx, me): 같은 농도로 먼저 그릴 것 (자유 연습의 목표까지 선)
+   * 나 (평면 경기장): 잉크 정원(반지름 PUCK_R = 목표 판정에 쓰는 크기 그대로. 바깥 고리 없음), 궤적은 헤어라인.
+   * 플레이 중에는 설정한 농도로 (퍽 투명도)
    */
-  _drawMe(ctx, game, puck, now, { P, S, hair }, before = null) {
+  _drawMe(ctx, game, puck, now, { P, S, hair }) {
     const me = puck.pos ? game.toPlane(puck.pos.x, puck.pos.y) : null;
     alphaLayer(ctx, game.running || this.peek ? this.puckAlpha : 1, (ctx) => {
-      if (before) before(ctx, me);
       if (puck.trail.length > 1) {
         ctx.lineWidth = hair;
         for (let i = 1; i < puck.trail.length; i++) {
@@ -216,12 +220,14 @@ export class Renderer {
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
   }
 
-  /** 자유 연습 코스 평면: 번호 포인트(DOM)가 놓인 경기장에 경로선·다음 목표·내 퍽을 그린다 */
-  _drawCourse(ctx, W, H, game, puck, now) {
+  /**
+   * 자유 연습 코스 (바닥 위, 영역 안): 번호 포인트(DOM)가 실제 바닥 위 자리에 놓이고, 경로선·다음 목표·내 퍽을 원근대로 그린다.
+   * 다음 목표 고리는 그 자리의 바닥 축척(pxPerX)으로 둥글게 — 판정 반경 그대로
+   */
+  _drawCourse(ctx, W, H, game, puck, now, uvToC) {
     ctx.save();
-    // 위쪽 방향 안내는 대기 중 번호 띠가 덮으므로 플레이 중에만
-    const K = this._field(ctx, W, H, game, { topHint: game.running });
-    const { f, S, A, P, hair, fs } = K;
+    const K = this._floorField(ctx, W, H, game, uvToC);
+    const { f, A, P, hair, fs, pxPerX } = K;
     const pts = game.course.points;
     // 경로: 번호 순서대로 잇는 헤어라인 (마지막에서 처음으로 돌아가는 선은 더 옅게)
     if (pts.length > 1) {
@@ -233,14 +239,14 @@ export class Renderer {
     if (game.running && pts.length) {
       const tg = pts[game.courseIdx % pts.length];
       const [tx, ty] = P(tg.x, tg.y * A);
-      const rr = game.course.reach * S * (1.05 + 0.12 * Math.sin(now / 160));
+      const rr = game.course.reach * pxPerX(tg.x, tg.y * A) * (1.05 + 0.12 * Math.sin(now / 160));
       ctx.beginPath(); ctx.arc(tx, ty, rr, 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = C.red; ctx.stroke();
     }
-    // 내 퍽에서 목표까지의 선 + 궤적 + 내 퍽
-    this._drawMe(ctx, game, puck, now, K, (ctx, me) => {
-      if (!me || !game.running || !pts.length) return;
+    // 내 퍽에서 목표까지의 선 + 궤적 + 내 퍽 (영상 속 진짜 퍽 자리)
+    this._drawMeFloor(ctx, game, puck, now, K, uvToC, (ctx, mx, my) => {
+      if (!game.running || !pts.length) return;
       const tg = pts[game.courseIdx % pts.length];
-      const [tx, ty] = P(tg.x, tg.y * A), [mx, my] = P(me.x, me.y);
+      const [tx, ty] = P(tg.x, tg.y * A);
       ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(tx, ty); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.red, 0.45); ctx.stroke();
     });
     // 안내
@@ -253,8 +259,9 @@ export class Renderer {
   }
 
   /**
-   * 바닥 위 경기장 (와이드 드리블·퀵 핸즈): 카메라 영상은 그대로 두고, 구역을 실제 바닥에 원근대로 그린다.
+   * 바닥 위 경기장 (와이드 드리블·퀵 핸즈·반응 타겟·자유 연습): 카메라 영상은 그대로 두고, 구역·목표를 실제 바닥(영역 안)에 원근대로 그린다.
    * 평면 좌표(가로 1 × 세로 A) → 바닥 uv → 화면. 판정과 같은 좌표라 그린 사각 구역이 곧 판정 범위.
+   * 화면을 위아래로 뒤집어 보이는 중(퀵 핸즈·반응 타겟·자유 연습)이면 uvToC 가 이미 뒤집어 준다 (영상과 함께).
    * 동그라미(대기 원·내 퍽)는 세로 비율 A가 실제 바닥 비율과 달라 찌그러지므로, 그 자리의 가로 축척(pxPerX)으로 둥글게 그린다.
    * f: 바닥 영역을 감싸는 화면 사각형 (안내 글자 자리)
    */
@@ -267,7 +274,7 @@ export class Renderer {
     const pxPerX = (x, y) => { const a = P(x - 0.01, y), b = P(x + 0.01, y); return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.02; };
     const cs = [P(0, 0), P(1, 0), P(1, A), P(0, A)], xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
     const f = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
-    // 배경 투명도 (와이드 = 0 이면 흰 화면, 아니면 칠하지 않음 · 퀵 핸즈 = 설정대로): 카메라 영상 위에 종이색. 바닥 틀은 그 위에 다시 그린다
+    // 배경 투명도 (와이드 = 0 이면 흰 화면, 아니면 칠하지 않음 · 퀵 핸즈·반응 타겟·자유 연습 = 설정대로): 카메라 영상 위에 종이색. 바닥 틀은 그 위에 다시 그린다
     if (this.wash > 0.001) {
       ctx.fillStyle = rgba(C.paper, this.wash); ctx.fillRect(0, 0, W, H);
       path([[0, 0], [1, 0], [1, A], [0, A]]); ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.ink, 0.25 + 0.5 * this.wash); ctx.stroke();
@@ -275,10 +282,14 @@ export class Renderer {
     return { f, S: this._floorPx(uvToC), A, P, hair, fs, dpr, path, rect, pxPerX };
   }
 
-  /** 바닥 위 경기장의 내 퍽: 카메라 속 진짜 퍽 자리에 잉크 정원 (그 자리의 바닥 축척대로 — 먼 쪽은 작게). 궤적은 헤어라인 */
-  _drawMeFloor(ctx, game, puck, now, { hair }, uvToC) {
+  /**
+   * 바닥 위 경기장의 내 퍽: 카메라 속 진짜 퍽 자리에 잉크 정원 (그 자리의 바닥 축척대로 — 먼 쪽은 작게). 궤적은 헤어라인.
+   * before(ctx, cx, cy): 같은 농도로 먼저 그릴 것 (자유 연습의 목표까지 선). cx·cy = 내 퍽의 화면 자리
+   */
+  _drawMeFloor(ctx, game, puck, now, { hair }, uvToC, before = null) {
     if (!puck.pos) return;
     alphaLayer(ctx, game.running || this.peek ? this.puckAlpha : 1, (ctx) => {
+      if (before) { const [mx, my] = uvToC(puck.pos.x, puck.pos.y); before(ctx, mx, my); }
       if (puck.trail.length > 1) {
         ctx.lineWidth = hair;
         for (let i = 1; i < puck.trail.length; i++) {
@@ -469,22 +480,25 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** 반응 타겟 평면: 진한 잉크 정원 하나. 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다 */
-  _drawReaction(ctx, W, H, game, puck, now) {
+  /**
+   * 반응 타겟 (바닥 위, 영역 안): 진한 빨간 정원 하나 (그 자리의 바닥 축척대로 — 먼 쪽은 작게).
+   * 영상 속 검정 퍽과 헷갈리지 않게 빨강. 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다
+   */
+  _drawReaction(ctx, W, H, game, puck, now, uvToC) {
     ctx.save();
-    const K = this._field(ctx, W, H, game);
-    const { f, S, P, hair, fs } = K;
+    const K = this._floorField(ctx, W, H, game, uvToC);
+    const { f, P, hair, fs, pxPerX } = K;
     const pulse = 0.5 + 0.5 * Math.sin(now / 180);
     for (const t of game.targets) {
-      const [cx, cy] = P(t.x, t.y), r = t.r * S;
+      const [cx, cy] = P(t.x, t.y), r = t.r * pxPerX(t.x, t.y);
       const age = (now - t.born) / 1000;
       if (age >= 0 && age < 0.3) {
         const k = 1 - age / 0.3;
-        ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 2.2 * k), 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.ink, 0.15 + 0.7 * k); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, r * (1 + 2.2 * k), 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = rgba(C.red, 0.15 + 0.7 * k); ctx.stroke();
       }
-      this._nextDot(ctx, cx, cy, r, pulse, hair, C.ink);
+      this._nextDot(ctx, cx, cy, r, pulse, hair, C.red);
     }
-    this._drawMe(ctx, game, puck, now, K);
+    this._drawMeFloor(ctx, game, puck, now, K, uvToC);
     if (!game.running) text(ctx, game.mode.desc, f.x + f.w / 2, f.y + f.h / 2, fs, { weight: 600, color: C.inkSoft, halo: true });
     this._fieldEffects(ctx, game, K, W, 0.05);
     ctx.restore();

@@ -1,4 +1,8 @@
 // 카메라 제어 (getUserMedia)
+
+/** 카메라에 바라는 화질: 1280×720, 초당 fps 프레임 (모두 'ideal' — 못 맞추면 가장 가까운 것으로) */
+export const cameraConstraints = (fps = 60) => ({ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: fps } });
+
 export class Camera {
   constructor(videoEl) {
     this.video = videoEl;
@@ -12,11 +16,13 @@ export class Camera {
 
   /**
    * facing: 'user'(전면, 화면을 보며 플레이) | 'environment'(후면)
+   * fps: 바라는 초당 프레임 (기본 60: 빠른 드리블도 덜 끊기게). 'ideal' 이라 카메라가 못 내면 되는 만큼(보통 30)으로 열린다
    * 지정 장치 -> 방향 기준 -> 아무 카메라 순으로 재시도하고, 각 시도는 15초 안에 응답이 없으면 실패로 처리.
    */
-  async start(deviceId = '', facing = 'user') {
+  async start(deviceId = '', facing = 'user', fps = 60) {
     this.stop();
-    const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    this.attached = false;
+    const base = cameraConstraints(fps);
     const attempts = [];
     if (deviceId) attempts.push({ ...base, deviceId: { exact: deviceId } });
     attempts.push({ ...base, facingMode: { ideal: facing } });
@@ -55,6 +61,7 @@ export class Camera {
    */
   async attach(stream, timeoutMs = 15000) {
     this.stop();
+    this.attached = true;
     this.stream = stream;
     this.deviceId = '';
     this.video.srcObject = stream;
@@ -64,6 +71,20 @@ export class Camera {
     }), timeoutMs);
     try { await this.video.play(); } catch { /* muted+playsinline */ }
     return { width: this.video.videoWidth, height: this.video.videoHeight };
+  }
+
+  /** 카메라가 실제로 보내는 초당 프레임 (모르면 0) */
+  frameRate() {
+    const t = this.stream?.getVideoTracks?.()[0];
+    const f = t?.getSettings?.().frameRate;
+    return Number.isFinite(f) && f > 0 ? f : 0;
+  }
+
+  /** 켜진 카메라의 초당 프레임만 바꾼다 (다시 켜지 않고). 휴대폰 카메라 연결(받은 영상)은 그쪽에서 정하므로 그대로 */
+  async setFrameRate(fps) {
+    const t = this.stream?.getVideoTracks?.()[0];
+    if (this.attached || !t?.applyConstraints) return false;
+    try { await t.applyConstraints(cameraConstraints(fps)); return true; } catch { return false; }
   }
 
   stop() {

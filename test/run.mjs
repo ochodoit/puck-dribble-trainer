@@ -158,6 +158,11 @@ const skipSetup = async (page, touch = false) => {
   const fpsNum = parseInt(fps, 10);
   console.log(`${fpsNum > 0 ? 'PASS' : 'FAIL'} app processing frames (${fps.trim()})`);
   if (!(fpsNum > 0)) failed = true;
+  // 화면 칩: 초당 인식 프레임 + 프레임당 인식 시간. 카메라에는 60fps 를 바란다 (가짜 카메라는 되는 만큼)
+  const cam = await page.evaluate(() => { const t = document.querySelector('#video').srcObject?.getVideoTracks()[0]; const c = t?.getConstraints().frameRate; return { want: typeof c === 'number' ? c : c?.ideal, got: t?.getSettings().frameRate }; });
+  const chipOk = /^\d+ fps · \d+(\.\d)?ms$/.test(fps.trim()) && cam.want === 60 && cam.got > 0;
+  console.log(`${chipOk ? 'PASS' : 'FAIL'} fps chip shows processing time, camera asked for 60fps (${fps.trim()}, ${JSON.stringify(cam)})`);
+  if (!chipOk) failed = true;
   await page.click('#btn-mode');
   // 게임 시간 3분 선택 -> 타이머 3:00, 다시 1분
   await page.click('#time-seg button[data-min="3"]');
@@ -397,10 +402,17 @@ const skipSetup = async (page, touch = false) => {
   await page.waitForTimeout(300);
   // 인식 미리보기: 설정 창 안에서 인식 해상도 그대로 그려지고, 쓰이지 않는 바닥 밝기·채도 칸과 화면 마스크 스위치는 없다
   const adv = await page.evaluate(() => { const c = document.querySelector('#mask-preview'), d = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data; return { w: c.width, pw: window.__puckTrainer.vision.PW, drawn: d[3] === 255, gone: !document.querySelector('#set-whiteV') && !document.querySelector('#set-whiteC') && !document.querySelector('#set-debug'), hints: document.querySelectorAll('.settings-adv .hint').length }; });
-  const advOk = adv.w === adv.pw && adv.drawn && adv.gone && adv.hints === 3;
+  const advOk = adv.w === adv.pw && adv.drawn && adv.gone && adv.hints === 6;
   console.log(`${advOk ? 'PASS' : 'FAIL'} detection fine-tuning: live preview inside settings, hint per control, unused floor sliders removed (${JSON.stringify(adv)})`);
   if (!advOk) failed = true;
+  // 인식 세부 조정에 지금 인식 상태(fps·ms·영역을 읽는 해상도)가 바로 보인다
+  const live = (await page.textContent('#proc-live')).trim();
+  const liveOk = /^인식 \d+ fps, 프레임당 [\d.]+ms( · 카메라 \d+ fps)? · 영역 \d+×\d+px로 읽음 \(×\d\.\d\d\)$/.test(live);
+  console.log(`${liveOk ? 'PASS' : 'FAIL'} settings show live detection speed and area read size (${live})`);
+  if (!liveOk) failed = true;
   await page.selectOption('#set-procWidth', '320');
+  await page.selectOption('#set-camFps', '30');
+  const fps30 = await page.evaluate(async () => { await new Promise((r) => setTimeout(r, 200)); const c = document.querySelector('#video').srcObject?.getVideoTracks()[0].getConstraints().frameRate; return typeof c === 'number' ? c : c?.ideal; });
   await page.selectOption('#set-controller', 'stick');
   await page.click('[data-close="panel-settings"]');
   await page.waitForTimeout(400);
@@ -420,7 +432,8 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#btn-start');
   await page.click('[data-close="panel-result"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
-  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
+  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 && saved.camFps === 30 && fps30 === 30 ? 'PASS' : 'FAIL'} webcam settings persisted (camera fps ${fps30})`);
+  if (!(saved.floorMode === 'manual' && saved.procWidth === 320 && saved.camFps === 30 && fps30 === 30)) failed = true;
   // 기록 등록 + 랭킹 패널: 게임이 끝까지 진행된 결과를 흉내내어 onEnd 호출
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 17]] }); });
   await page.waitForSelector('#result-rank:not(.hidden)');

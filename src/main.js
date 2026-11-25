@@ -59,7 +59,7 @@ const app = {
   lastResult: null,
   calibTarget: null,      // 'puck' | 'stick' | null
   versus: null,           // { names:[a,b], scores:[], current:0 }
-  fps: 0, frames: 0, fpsAt: 0,
+  fps: 0, frames: 0, fpsAt: 0, procMs: 0, // 초당 인식 프레임, 프레임당 인식 시간(ms)
   lastVideoTime: -1,
   hudAt: 0,
   account: null,      // 계정 저장소 (local | firebase)
@@ -901,6 +901,7 @@ function bindUI() {
     }
   }
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
+  $('#set-camFps').addEventListener('change', (e) => { settings.camFps = Number(e.target.value); camera.setFrameRate(settings.camFps); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
     settings.controller = e.target.value; persist(); tracker.reset();
     if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
@@ -1387,7 +1388,7 @@ async function requestWakeLock() {
 }
 
 async function startStream() {
-  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing);
+  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing, settings.camFps);
   if (facing === 'user' || facing === 'environment') settings.facing = facing;
   const track = camera.stream.getVideoTracks()[0];
   track.addEventListener('ended', () => { app.cameraLost = true; toast('카메라 연결이 끊겼습니다. 설정에서 카메라를 다시 선택하세요.', 6000); if (game.running) game.stop('manual'); });
@@ -1439,6 +1440,41 @@ function applyMirror() {
   els.view.classList.toggle('mirror', settings.mirror);
 }
 
+/** 들어온 카메라 프레임 하나 인식: 걸린 시간(ms, 부드럽게 평균)과 초당 처리 프레임(fps)을 화면 칩에 보이려고 잰다 */
+function processFrame(video) {
+  const t0 = performance.now();
+  const r = vision.process(video, settings);
+  const ms = performance.now() - t0;
+  app.procMs = app.procMs ? app.procMs + (ms - app.procMs) * 0.1 : ms;
+  countFrame();
+  return r;
+}
+
+/** 초당 처리 프레임 수: 1초마다 그동안 처리한 프레임 수 (게임 시계가 아닌 실제 시간으로 — 설정 창이 열려 멈춘 동안에도) */
+function countFrame() {
+  const t = performance.now();
+  app.frames++;
+  if (t - app.fpsAt >= 1000) {
+    app.fps = t - app.fpsAt < 2000 ? Math.round((app.frames * 1000) / (t - app.fpsAt)) : app.frames;
+    app.frames = 0; app.fpsAt = t;
+  }
+}
+
+/** 화면 칩: '58 fps · 3.1ms' + 마우스를 올리면 카메라가 보내는 fps, 영역을 읽는 해상도 */
+function fpsChipText() {
+  if (app.frozenWarned || app.cameraLost) return '영상 없음';
+  if (app.mouseMode || !(app.procMs > 0)) return `${app.fps} fps`;
+  return `${app.fps} fps · ${app.procMs < 10 ? app.procMs.toFixed(1) : Math.round(app.procMs)}ms`;
+}
+
+function fpsChipTitle() {
+  const r = vision.roi, cam = camera.frameRate();
+  const parts = [`인식 ${app.fps} fps, 프레임당 ${app.procMs ? app.procMs.toFixed(1) : '-'}ms`];
+  if (cam) parts.push(`카메라 ${Math.round(cam)} fps`);
+  if (r) parts.push(`영역 ${r.W}×${r.H}px로 읽음 (×${r.sx.toFixed(2)})`);
+  return parts.join(' · ');
+}
+
 // =============== 메인 루프 ===============
 function loop(raw) {
   if (!app.started) return;
@@ -1470,10 +1506,8 @@ function loop(raw) {
     app.lastVideoTime = video.currentTime;
     app.lastFrameAt = now;
     if (app.frozenWarned) { app.frozenWarned = false; toast('카메라 영상이 다시 들어옵니다'); }
-    result = vision.process(video, settings);
+    result = processFrame(video);
     app.lastVision = result;
-    app.frames++;
-    if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
 
     // 조작 대상(퍽 또는 스틱 블레이드) 측정값 -> 정규화 바닥 좌표
     const m = result.floor.mapping;
@@ -1552,8 +1586,7 @@ function stepMouse(now) {
   app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas, floorMap);
   vision.useArea(app.lastVision.floor.mapping, { area: 0, widthM: settings.floorWidthM }); // 마우스: 등록된 퍽 크기 대신 영역 폭으로
   app.lastFrameAt = now;
-  app.frames++;
-  if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
+  countFrame();
   // 마우스는 튀지 않으므로 이상치 게이트를 거치지 않게 매 프레임 새로 획득한 것처럼 넣는다
   if (meas && tracker.pos) {
     const dt = tracker.lastTime ? Math.max(1e-3, Math.min(0.1, (now - tracker.lastTime) / 1000)) : 1 / 60;
@@ -1936,13 +1969,14 @@ function updateChips(result) {
   if (app.mouseMode) {
     setChip(els.chipPuck, mouse.has ? 'ok' : 'warn', '마우스(조작)');
     setChip(els.chipStick, '', '스틱(마우스 모드)');
-    els.chipFps.textContent = `${app.fps} fps`;
+    els.chipFps.textContent = fpsChipText();
     return;
   }
   setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && (tracker.state === 'predicted' || stickBridge.active)) ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
   if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', stickCtl ? '스틱(조작)' : '스틱');
   else setChip(els.chipStick, '', '스틱(미지정)');
-  els.chipFps.textContent = app.frozenWarned || app.cameraLost ? '영상 없음' : `${app.fps} fps`;
+  els.chipFps.textContent = fpsChipText();
+  els.chipFps.title = fpsChipTitle();
 }
 
 function setChip(el, state, label) {
@@ -2550,6 +2584,7 @@ function applySettingsToUI() {
   applyWash();
   game.arcade.floorWidthM = settings.floorWidthM;
   $('#set-procWidth').value = String(settings.procWidth);
+  $('#set-camFps').value = String(settings.camFps);
   $('#set-controller').value = settings.controller;
   els.p1.value = settings.p1; els.p2.value = settings.p2;
   refreshCalibUI();
@@ -2608,10 +2643,11 @@ function previewWhilePaused(now) {
   const video = els.video;
   if (!app.mouseMode && video.readyState >= 2 && video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
-    app.lastVision = vision.process(video, settings);
+    app.lastVision = processFrame(video);
   }
   drawTransparencyPreview(app.lastVision);
   drawMaskPreview(app.lastVision);
+  if ($('.settings-adv')?.open) $('#proc-live').textContent = app.mouseMode ? '' : fpsChipTitle();
   if (app.tpPeek) drawPeek(now);
 }
 
@@ -2624,18 +2660,11 @@ let maskImg = null;
 function drawMaskPreview(result) {
   const cv = $('#mask-preview'), adv = $('.settings-adv');
   if (!cv || !adv?.open || els.panelSettings.classList.contains('hidden')) return;
-  const { PW, PH } = vision, f = vision.frame;
+  const { PW, PH } = vision;
   if (cv.width !== PW || cv.height !== PH) { cv.width = PW; cv.height = PH; }
   const ctx = cv.getContext('2d');
-  if (app.mouseMode || !f || f.width !== PW || f.height !== PH) { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, PW, PH); return; }
   if (!maskImg || maskImg.width !== PW || maskImg.height !== PH) maskImg = new ImageData(PW, PH);
-  const s = f.data, o = maskImg.data, pm = vision.puckMask, sm = settings.stickModel ? vision.stickMask : null;
-  for (let i = 0, p = 0; i < PW * PH; i++, p += 4) {
-    if (pm[i]) { o[p] = 232; o[p + 1] = 38; o[p + 2] = 38; }
-    else if (sm && sm[i]) { o[p] = 24; o[p + 1] = 196; o[p + 2] = 72; }
-    else { o[p] = 140 + s[p] * 0.42; o[p + 1] = 140 + s[p + 1] * 0.42; o[p + 2] = 140 + s[p + 2] * 0.42; } // 바탕은 흐리게
-    o[p + 3] = 255;
-  }
+  if (app.mouseMode || !vision.paintMaskPreview(maskImg, !!settings.stickModel)) { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, PW, PH); return; }
   ctx.putImageData(maskImg, 0, 0);
   const q = result?.floor?.quad;
   if (q) { ctx.beginPath(); q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(22,22,22,0.7)'; ctx.stroke(); }

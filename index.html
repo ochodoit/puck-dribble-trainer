@@ -369,6 +369,15 @@
                 <option value="400">최고 (400px, 퍽이 작게 보일 때)</option>
               </select>
               <small class="hint">퍽이 작거나 멀리 보이면 높이세요 (처리가 조금 무거워짐). 아주 작은 퍽은 등록할 때 자동으로 400이 됩니다</small>
+              <small class="hint">게임 영역이 화면보다 작으면 영역만 잘라 그만큼 더 촘촘히 읽어요 (최대 3배)</small>
+              <small class="hint" id="proc-live"></small>
+            </label>
+            <label>카메라 프레임
+              <select id="set-camFps">
+                <option value="60">60fps (빠른 드리블, 기본)</option>
+                <option value="30">30fps (어두운 곳)</option>
+              </select>
+              <small class="hint">카메라가 60을 못 내면 알아서 30으로 찍어요. 화면이 어둡거나 자글거리면 30으로 내리세요</small>
             </label>
           </div>
         </details>

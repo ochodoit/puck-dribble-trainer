@@ -6,7 +6,7 @@
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
 <script type="module">
-  import { Vision, AutoCalibrator } from '../src/vision.js';
+  import { Vision, AutoCalibrator, liftComp } from '../src/vision.js';
   import { Tracker } from '../src/tracker.js';
   import { StickBridge } from '../src/occlusion.js';
   import { placementCheck } from '../src/placement.js';
@@ -1454,6 +1454,66 @@
       const plc = [plcRun(0.5), plcRun(0.8), plcRun(1.2), plcRun(2.0), plcRun(1.2, 1.0), plcRun(0.5, 1.0)];
       check('PLC camera placement check: 50 cm -> raise, 80 cm -> minimum (do not go lower), 1.2 m -> good, 2 m on the TV -> room to lower; beside the TV (1 m to the side) 1.2 m -> good, 50 cm -> raise',
         plc.map((x) => x.verdict).join() === 'raise,minimum,good,room,good,raise', plc);
+    }
+    // ROI) 영역만 잘라 읽기: 게임 영역이 화면보다 작으면 그 영역만 카메라 영상에서 잘라 더 촘촘히 읽는다 (읽는 픽셀 수는 예전 화면 전체만큼).
+    //      좌표·면적은 예전처럼 처리 해상도 단위. 흰 바닥 검사와 화면 전체 읽기는 매 프레임 하지 않는다 (보정·미리보기에서 필요할 때만)
+    {
+      const big = document.createElement('canvas'); big.width = 1280; big.height = 720;
+      const bctx = big.getContext('2d');
+      const k = 240 / 1280; // 처리 px / 카메라 px (세로도 135/720 = 같은 비율)
+      const drawBig = (px, py, r) => {
+        bctx.fillStyle = '#5b6170'; bctx.fillRect(0, 0, 1280, 720);
+        bctx.fillStyle = '#eceae4'; bctx.fillRect(384, 216, 512, 288); // 가운데 흰 판 = 게임 영역 (화면의 40%×40%)
+        if (px != null) { bctx.fillStyle = '#111827'; bctx.beginPath(); bctx.arc(px, py, r, 0, Math.PI * 2); bctx.fill(); }
+      };
+      const at = (cam) => cam * k - 0.5; // 카메라 px 자리 -> 처리 좌표 (픽셀 번호 기준: 가운데가 +0.5)
+      const quad = [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]];
+      const sR = { ...settings, floorMode: 'manual', manualQuad: quad, puckModel: { r: 17, g: 24, b: 39, area: Math.PI * (12 * k) ** 2 }, stickModel: null };
+      const vr = new Vision(240); vr.mirror = false; vr.setSourceSize(1280, 720);
+      drawBig(640, 360, 12);
+      let rr = vr.process(big, sR);
+      const roi = vr.roi;
+      check('ROI1 small area read at ~2x within the old pixel budget; no white-floor pass, no full-frame read',
+        roi && roi.sx >= 2 && roi.sx <= 3 && roi.W * roi.H <= 240 * 135 && roi.x0 <= 72 && roi.x1 >= 168 && !vr._whiteValid && vr._frame === null,
+        roi && { W: roi.W, H: roi.H, sx: roi.sx, x0: roi.x0, x1: roi.x1, white: vr._whiteValid, full: !!vr._frame });
+      check('ROI2 puck position and size still in processing units (sub-pixel)', rr.puck && Math.abs(rr.puck.x - at(640)) < 0.2 && Math.abs(rr.puck.y - at(360)) < 0.2 && Math.abs(rr.puck.area / (Math.PI * (12 * k) ** 2) - 1) < 0.25, rr.puck);
+      // 작은 퍽(처리 해상도에서 지름 약 2px)을 1 카메라 px 씩 옮기며: 매번 잡고, 평균 오차가 화면 전체를 240px 로 읽을 때보다 작다
+      const sweep = (v, s) => { let n = 0, e = 0; for (let i = 0; i < 24; i++) { const x = 560 + i * 7.3, y = 330 + i * 2.1; drawBig(x, y, 6); const p = v.process(big, s).puck; if (p && Math.hypot(p.x - at(x), p.y - at(y)) < 3) { n++; e += Math.hypot(p.x - at(x), p.y - at(y)); } } return { n, e: e / Math.max(1, n) }; };
+      const sTiny = { ...sR, puckModel: { r: 17, g: 24, b: 39, area: Math.PI * (6 * k) ** 2 } };
+      const vFull = new Vision(240); vFull.mirror = false; vFull.setSourceSize(1280, 720);
+      const vTiny = new Vision(240); vTiny.mirror = false; vTiny.setSourceSize(1280, 720);
+      const roiRun = sweep(vTiny, sTiny), fullRun = sweep(vFull, { ...sTiny, manualQuad: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+      check('ROI3 tiny puck tracked at every step, smaller error than reading the whole screen', roiRun.n === 24 && roiRun.e < 0.15 && roiRun.e < fullRun.e * 0.7, { roi: roiRun, full: fullRun, fullScale: vFull.roi?.sx });
+      // 거울 모드: 잘라 읽는 자리도 좌우가 뒤집힌다
+      const vm = new Vision(240); vm.mirror = true; vm.setSourceSize(1280, 720);
+      drawBig(520, 400, 12);
+      rr = vm.process(big, sR);
+      check('ROI4 mirrored camera: area cut from the mirrored side', rr.puck && Math.abs(rr.puck.x - at(1280 - 520)) < 0.25 && Math.abs(rr.puck.y - at(400)) < 0.25, rr.puck);
+      // 화면 전체가 영역이면 예전과 똑같이 240×135 로 한 번만 읽고, 그것을 보정용 화면 전체로도 쓴다
+      const vw = new Vision(240); vw.mirror = false; vw.setSourceSize(1280, 720);
+      vw.process(big, { ...sR, manualQuad: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+      check('ROI5 whole-screen area: read once at the processing size (x1), reused as the full frame', vw.roi.sx === 1 && vw.roi.W === 240 && vw.roi.H === 135 && vw._frame && vw._frame.width === 240, { sx: vw.roi.sx, W: vw.roi.W, H: vw.roi.H });
+      // 게임 중 진짜 퍽 덮기(바닥색): 화면 전체를 다시 그리지 않고 읽은 영역에서
+      drawBig(640, 360, 12); rr = vr.process(big, sR);
+      const ring = vr.ringColor(rr.puck.x, rr.puck.y, 2.25 * 2.2, 2.25 * 3.4);
+      check('ROI6 floor colour around the puck comes from the area read (no full-frame draw)', ring && ring.r > 225 && ring.g > 225 && vr._frame === null, { ring, full: !!vr._frame });
+      // 보정(가운데 원)·설정 미리보기는 필요할 때 화면 전체를 처리 해상도로 그려 쓴다
+      const cs = vr.autoCalibSample();
+      check('ROI7 calibration draws the full frame on demand and still finds the puck', cs.status === 'ok' && Math.abs(cs.cx - at(640)) < 1 && Math.abs(cs.cy - at(360)) < 1 && vr._frame && vr._frame.width === 240 && vr._frame.height === 135, { status: cs.status, cx: cs.cx, cy: cs.cy });
+      const img = new ImageData(240, 135);
+      const painted = vr.paintMaskPreview(img, false);
+      const pi = (Math.round(at(360)) * 240 + Math.round(at(640))) * 4, ci = (10 * 240 + 10) * 4;
+      check('ROI8 settings preview: puck pixels red, outside the area greyed camera image', painted && img.data[pi] === 232 && img.data[pi + 1] === 38 && img.data[ci] !== 232 && img.data[ci + 3] === 255, { painted, puck: [...img.data.slice(pi, pi + 4)], corner: [...img.data.slice(ci, ci + 4)] });
+      // 흰 바닥 자동 모드(예전 설정)는 예전처럼 화면 전체를 읽고 흰 바닥 검사를 한다
+      const va = new Vision(240); va.mirror = false; va.setSourceSize(1280, 720);
+      va.process(big, { ...sR, floorMode: 'auto', manualQuad: null });
+      check('ROI9 auto white-floor mode still scans the whole frame', va._whiteValid && va.roi.sx === 1 && va.roi.W === 240, { white: va._whiteValid, sx: va.roi.sx });
+      // 덩어리 좌표 환산: 배율 2, 영역 왼쪽 위 (10,20)에서 가로 4~5·세로 6~7 의 2×2 픽셀 = 처리 1 px (12, 23), 배율 1은 그대로
+      const c2 = liftComp({ area: 4, sx: 4 * 4.5, sy: 4 * 6.5, sxx: 2 * (16 + 25), syy: 2 * (36 + 49), sxy: 4.5 * 6.5 * 4, minx: 4, maxx: 5, miny: 6, maxy: 7, bxsum: 9, bxn: 2 }, { ax: 10 + 0.25 - 0.5, ay: 20 + 0.25 - 0.5, ex: 10, ey: 20, ix: 0.5, iy: 0.5, a2: 0.25 });
+      const c1 = liftComp({ area: 3, sx: 3 * 5, sy: 3 * 7, sxx: 75 + 2, syy: 147, sxy: 105, minx: 4, maxx: 6, miny: 7, maxy: 7, bxsum: 15, bxn: 3 }, { ax: 10, ay: 20, ex: 10, ey: 20, ix: 1, iy: 1, a2: 1 });
+      check('ROI10 blob coordinates lifted to processing units (x2) and unchanged at x1',
+        Math.abs(c2.area - 1) < 1e-9 && Math.abs(c2.cx - 12) < 1e-9 && Math.abs(c2.cy - 23) < 1e-9 && c2.maxx - c2.minx + 1 === 1 && Math.abs(c2.bxsum / c2.bxn - 12) < 1e-9 &&
+        c1.area === 3 && c1.cx === 15 && c1.cy === 27 && c1.minx === 14 && c1.maxx === 16 && c1.maxy === 27 && c1.bxsum === 45, { c2, c1 });
     }
     // SEC) 규칙 파일(firestore.rules)과 앱이 같은 약속을 쓰는지: 게임이 만드는 모든 랭킹 키가 규칙의 쓰기 허용 모양에 맞고(어긋나면
     //      그 모드 기록이 거절됨) 이상한 키는 안 맞는다. 규칙의 '나이대 → 가장 많은 나이' 표가 화면(community.js)과 같다

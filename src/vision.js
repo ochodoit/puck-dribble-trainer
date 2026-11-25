@@ -12,15 +12,24 @@ const SPLIT_MAX_FRAMES = 45;   // 같은 색 물체에 붙은 퍽을 떼어 내�
 // 이보다 가늘고 긴 조각(짧은 축/긴 축)은 '애매한 조각': 퍽과 같은 색 스틱 샤프트 토막일 수 있다.
 // 퍽은 비스듬히 봐도 옆면(두께)이 보여 0.5 아래로 잘 안 내려가고, 샤프트 토막은 보통 0.4 아래
 const THIN_ELONG = 0.4;
+// 영역만 잘라 읽기: 게임 영역(+여유 ROI_MARGIN px)만 카메라 영상에서 잘라, 예전에 화면 전체에 쓰던 픽셀 수(PW×PH)만큼의
+// 해상도로 읽는다. 영역이 화면의 1/4이면 가로·세로 2배로 읽는 셈 (작은 퍽이 더 많은 픽셀로 잡히고 위치가 더 정확해진다).
+// 좌표·면적은 예전처럼 처리 해상도(PW×PH) 단위로 돌려준다 (등록한 퍽 크기·추적 기준을 그대로 쓰게)
+const ROI_MARGIN = 2;          // 영역 둘레 여유 (처리 px)
+const ROI_MAX_SCALE = 3;       // 영역을 읽는 최대 배율 (카메라 원본 해상도보다 더 키우지는 않는다)
 
 export class Vision {
   constructor(procWidth = 240) {
     this.PW = procWidth;
     this.PH = Math.round(procWidth * 3 / 4);
-    this.canvas = document.createElement('canvas');
+    this.canvas = document.createElement('canvas');   // 영역(ROI)을 읽는 캔버스
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+    this.fullCanvas = null;     // 화면 전체(처리 해상도)를 읽는 캔버스: 보정·흰 바닥 자동·설정 미리보기에서만, 필요할 때
     this.mirror = true;
-    this.frame = null;          // 마지막 ImageData (보정용 샘플링)
+    this._frame = null;         // 화면 전체 ImageData (처리 해상도). frame 으로 읽으면 그때 그린다
+    this._video = null;         // 마지막으로 처리한 영상 (frame 을 나중에 그릴 때)
+    this.roi = null;            // 이번 프레임에 읽은 영역 {x0,y0,x1,y1 (처리 px), W,H (읽은 px), sx,sy (배율), data}
+    this._whiteValid = false;   // whiteMask 가 이번 프레임 것인지 (흰 바닥 자동 모드에서만 계산)
     this.floorAuto = null;      // EMA 적용된 자동 바닥 사다리꼴 {y0,y1,tl,tr,bl,br} (뒤쪽은 좁고 앞쪽은 넓은 원근)
     this.areaCenter = null;     // 게임 영역(바닥) 가운데 (처리 px). 퍽 등록·시작 원 자리
     this.floorLocked = false;
@@ -36,14 +45,78 @@ export class Vision {
 
   _alloc() {
     const n = this.PW * this.PH;
-    this.canvas.width = this.PW;
-    this.canvas.height = this.PH;
     this.whiteMask = new Uint8Array(n);
+    this.colCount = new Uint16Array(this.PW);
+    this.rowCount = new Uint16Array(this.PH);
+    this._ensureCap(n, true);
+    this._frame = null; this.roi = null; this._whiteValid = false;
+  }
+
+  /** 영역 버퍼(퍽·스틱 마스크, 라벨링 스택) 크기: 화면 전체(PW×PH)보다 작아지지 않게, 모자랄 때만 늘린다 */
+  _ensureCap(n, reset = false) {
+    n = Math.max(n, this.PW * this.PH);
+    if (!reset && this.puckMask && this.puckMask.length >= n) return;
     this.puckMask = new Uint8Array(n);
     this.stickMask = new Uint8Array(n);
     this.stack = new Int32Array(n);
-    this.colCount = new Uint16Array(this.PW);
-    this.rowCount = new Uint16Array(this.PH);
+  }
+
+  /** 화면 전체 ImageData (처리 해상도 PW×PH). 매 프레임 그리지 않고, 보정·미리보기에서 처음 읽을 때 그린다 */
+  get frame() {
+    if (!this._frame && this._video) this._frame = this._drawFull(this._video);
+    return this._frame;
+  }
+  set frame(v) { this._frame = v; }
+
+  _drawFull(video) {
+    const { PW, PH } = this;
+    if (!this.fullCanvas) {
+      this.fullCanvas = document.createElement('canvas');
+      this.fullCtx = this.fullCanvas.getContext('2d', { willReadFrequently: true });
+    }
+    const cv = this.fullCanvas, ctx = this.fullCtx;
+    if (cv.width !== PW || cv.height !== PH) { cv.width = PW; cv.height = PH; }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.mirror) ctx.setTransform(-1, 0, 0, 1, PW, 0);
+    ctx.drawImage(video, 0, 0, PW, PH);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return ctx.getImageData(0, 0, PW, PH);
+  }
+
+  /**
+   * 게임 영역 둘레(bounds, 처리 px)만 영상에서 잘라 읽는다. 배율은 읽는 픽셀 수가 화면 전체(PW×PH)를 넘지 않게
+   * (0.25 단위, 1 ~ ROI_MAX_SCALE, 카메라 원본 해상도까지). 영역이 화면 전체면 예전과 똑같이 PW×PH 로 읽는다
+   */
+  _readRoi(video, bounds) {
+    const { PW, PH } = this;
+    const vw = video.videoWidth || video.width || PW, vh = video.videoHeight || video.height || PH;
+    let x0 = Math.max(0, Math.floor(bounds.x0) - ROI_MARGIN), y0 = Math.max(0, Math.floor(bounds.y0) - ROI_MARGIN);
+    let x1 = Math.min(PW, Math.ceil(bounds.x1) + ROI_MARGIN), y1 = Math.min(PH, Math.ceil(bounds.y1) + ROI_MARGIN);
+    // 영역이 화면 밖으로 나간 경우에도 최소 2×2
+    x0 = Math.min(x0, PW - 2); y0 = Math.min(y0, PH - 2); x1 = Math.max(x1, x0 + 2); y1 = Math.max(y1, y0 + 2);
+    const rw = x1 - x0, rh = y1 - y0;
+    let s = Math.min(Math.sqrt((PW * PH) / (rw * rh)), ROI_MAX_SCALE, vw / PW, vh / PH);
+    s = Math.max(1, Math.floor(s * 4) / 4);
+    const W = Math.max(2, Math.round(rw * s)), H = Math.max(2, Math.round(rh * s));
+    const cv = this.canvas, ctx = this.ctx;
+    if (cv.width < W || cv.height < H) { cv.width = Math.max(cv.width, W); cv.height = Math.max(cv.height, H); }
+    const kx = vw / PW, ky = vh / PH;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
+    ctx.drawImage(video, (this.mirror ? PW - x1 : x0) * kx, y0 * ky, rw * kx, rh * ky, 0, 0, W, H);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const img = ctx.getImageData(0, 0, W, H);
+    // 영역이 곧 화면 전체(배율 1)면 보정용 화면 전체로도 쓴다 (다시 그리지 않게)
+    if (x0 === 0 && y0 === 0 && x1 === PW && y1 === PH && W === PW && H === PH) this._frame = img;
+    return { x0, y0, x1, y1, W, H, sx: W / rw, sy: H / rh, data: img.data };
+  }
+
+  /** 처리 좌표 (x,y) 픽셀이 읽은 영역 버퍼에서 몇 번째인지 (영역 밖이면 -1) */
+  _roiIndex(x, y) {
+    const r = this.roi;
+    if (!r) return -1;
+    const hx = Math.floor((x + 0.5 - r.x0) * r.sx), hy = Math.floor((y + 0.5 - r.y0) * r.sy);
+    return hx >= 0 && hx < r.W && hy >= 0 && hy < r.H ? hy * r.W + hx : -1;
   }
 
   setSourceSize(vw, vh) {
@@ -71,7 +144,7 @@ export class Vision {
     const p = this.lastPuck;
     if (p) { p.x *= kx; p.y *= ky; p.vx *= kx; p.vy *= ky; p.area *= kx * ky; }
     if (this.lastStick) { this.lastStick.x *= kx; this.lastStick.y *= ky; }
-    this.frame = null; this.scan = null; // 옛 해상도 영상은 다음 프레임에 새로
+    this.scan = null; // 옛 해상도 영상·영역은 다음 프레임에 새로 (화면 전체는 frame 을 읽을 때 새 해상도로 다시 그린다)
   }
 
   /** 화면(정규화 0-1) 좌표 -> 처리 픽셀 좌표 */
@@ -79,32 +152,11 @@ export class Vision {
 
   /** 매 프레임 호출. settings: {whiteV, whiteC, puckTol, stickTol, puckModel, stickModel, floorMode, manualQuad, debug} */
   process(video, settings) {
-    const { PW, PH, ctx } = this;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (this.mirror) ctx.setTransform(-1, 0, 0, 1, PW, 0);
-    ctx.drawImage(video, 0, 0, PW, PH);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const frame = ctx.getImageData(0, 0, PW, PH);
-    this.frame = frame;
-    const d = frame.data;
+    const { PW, PH } = this;
+    // 새 프레임: 화면 전체는 필요할 때(보정·흰 바닥 자동·미리보기) frame 으로 읽을 때 그린다
+    this._video = video; this._frame = null; this._whiteValid = false;
 
-    // ---- 1) 흰 바닥 마스크 + 행/열 히스토그램 ----
-    const white = this.whiteMask;
-    const colCount = this.colCount; colCount.fill(0);
-    const rowCount = this.rowCount; rowCount.fill(0);
-    const wv = settings.whiteV, wc = settings.whiteC;
-    for (let y = 0, i = 0, p = 0; y < PH; y++) {
-      let rc = 0;
-      for (let x = 0; x < PW; x++, i++, p += 4) {
-        const r = d[p], g = d[p + 1], b = d[p + 2];
-        const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
-        const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
-        if (mx >= wv && (mx - mn) <= wc) { white[i] = 1; colCount[x]++; rc++; } else white[i] = 0;
-      }
-      rowCount[y] = rc;
-    }
-
-    // ---- 2) 바닥 영역 결정 ----
+    // ---- 1) 바닥 영역 결정 (흰 바닥 검사는 '흰 바닥 자동' 모드에서만: 지금 앱은 늘 네 모서리 영역이라 건너뛴다) ----
     let floorDetected = false;
     let quad = null;
     if (settings.floorMode === 'full') {
@@ -118,6 +170,7 @@ export class Vision {
       floorDetected = true;
       this.floorPolygon = [];
     } else {
+      this._whitePass(this.frame.data, settings);
       const bbox = this._autoFloorBBox();
       if (bbox) {
         floorDetected = true;
@@ -158,31 +211,46 @@ export class Vision {
       puckCandidates: [],
     };
     if (!mapping) {
-      this.lastPuck = null;
+      this.lastPuck = null; this.roi = null;
       if (settings.debug) this._buildDebug(null);
       return result;
     }
 
-    // ---- 3) 바닥 내부에서 퍽/스틱 색 마스크 ----
+    // ---- 2) 게임 영역만 잘라 읽기 (흰 바닥 자동은 이미 읽은 화면 전체를 그대로) ----
     const bounds = quadBounds(quad);
-    const scan = this.scan;
+    const roi = this._whiteValid
+      ? { x0: 0, y0: 0, x1: PW, y1: PH, W: PW, H: PH, sx: 1, sy: 1, data: this.frame.data }
+      : this._readRoi(video, bounds);
+    this.roi = roi;
+    const { W, H, data: d } = roi;
+    this._ensureCap(W * H);
+    // 읽은 영역 픽셀 <-> 처리 좌표: x = ax + hx/sx (픽셀 가운데 기준), 면적 = 픽셀 수 / (sx·sy)
+    const lift = { ax: roi.x0 + 0.5 / roi.sx - 0.5, ay: roi.y0 + 0.5 / roi.sy - 0.5, ex: roi.x0, ey: roi.y0, ix: 1 / roi.sx, iy: 1 / roi.sy, a2: 1 / (roi.sx * roi.sy) };
+    const hiArea = roi.sx * roi.sy; // 처리 px² 하나가 읽은 영역에서 차지하는 픽셀 수
+
+    // ---- 3) 바닥 내부에서 퍽/스틱 색 마스크 (읽은 해상도로) ----
+    const quadH = quad.map(([x, y]) => [(x - roi.x0) * roi.sx, (y - roi.y0) * roi.sy]);
+    const scan = quadScanlines(quadH, H), bH = quadBounds(quadH);
     const pm = settings.puckModel, sm = settings.stickModel;
     const pMatch = makeMatcher(pm, settings.puckTol);
     const sMatch = sm ? makeMatcher(sm, settings.stickTol) : null;
     const puckMask = this.puckMask, stickMask = this.stickMask;
-    puckMask.fill(0);
-    if (sm) stickMask.fill(0);
-    const y0 = Math.max(0, Math.floor(bounds.y0)), y1 = Math.min(PH - 1, Math.ceil(bounds.y1));
+    puckMask.fill(0, 0, W * H);
+    if (sm) stickMask.fill(0, 0, W * H);
+    const y0 = Math.max(0, Math.floor(bH.y0)), y1 = Math.min(H - 1, Math.ceil(bH.y1));
     for (let y = y0; y <= y1; y++) {
       const xa = scan[y * 2], xb = scan[y * 2 + 1];
       if (xa < 0) continue;
-      const xEnd = Math.min(PW - 1, xb);
-      for (let x = xa, i = y * PW + xa, p = i * 4; x <= xEnd; x++, i++, p += 4) {
+      const xEnd = Math.min(W - 1, xb);
+      for (let x = xa, i = y * W + xa, p = i * 4; x <= xEnd; x++, i++, p += 4) {
         const r = d[p], g = d[p + 1], b = d[p + 2];
         if (matchPixel(pMatch, r, g, b)) puckMask[i] = 1;
         if (sMatch && matchPixel(sMatch, r, g, b)) stickMask[i] = 1;
       }
     }
+    // 덩어리 찾기는 읽은 해상도로, 결과(중심·면적·테두리·모양)는 처리 좌표로 바꿔 아래 고르기는 예전 기준 그대로
+    const hb = { x0: 0, y0: 0, x1: W - 1, y1: H - 1 };
+    const components = (mask, minArea) => this._components(mask, hb, Math.max(1, Math.floor(minArea * hiArea)), W, H).map((c) => liftComp(c, lift));
 
     const floorW = Math.max(10, bounds.x1 - bounds.x0);
 
@@ -190,7 +258,7 @@ export class Vision {
     if (sm) {
       const expS = sm.area > 0 ? sm.area : Math.max(20, 0.785 * Math.pow(floorW * 0.05, 2));
       const minS = Math.max(5, expS * 0.2);
-      const scomps = mergeClose(this._components(stickMask, bounds, Math.max(3, Math.floor(minS * 0.5))), 2);
+      const scomps = mergeClose(components(stickMask, Math.max(3, Math.floor(minS * 0.5))), 2);
       let sbest = null, sbestScore = 0;
       for (const c of scomps) {
         if (c.area < minS) continue;
@@ -227,7 +295,7 @@ export class Vision {
     const last = this.lastPuck;
     // 빠르게 움직이면 모션 블러로 덩어리가 길어지므로 면적 상한을 넓힘 (추적 끊김 -> 마커 튐 방지)
     if (last) { const sp = Math.hypot(last.vx, last.vy) / PW; maxA *= 1 + Math.min(1.5, sp / 0.02); }
-    const comps = mergeClose(this._components(puckMask, bounds, Math.max(2, Math.floor((last ? minNear : minA) * 0.6))), 2);
+    const comps = mergeClose(components(puckMask, Math.max(2, Math.floor((last ? minNear : minA) * 0.6))), 2);
 
     // 추적 게이트: 예측 위치 + 탐색 반경. 스틱이 퍽 근처면(타격 직후) 반경 확대
     let predX = 0, predY = 0, sigma = 0.12 * PW, reacquiring = false;
@@ -287,7 +355,8 @@ export class Vision {
     // 붙은 채로 너무 오래(1.5초) 이것만으로 이어지면 그만둔다 (퍽을 집어 갔는데 스케이트 앞코를 퍽으로 계속 잡는 일 방지)
     let split = false;
     if (bigNear && calibrated && this.splitRun < SPLIT_MAX_FRAMES && (!best || bestScore < 0.18 || Math.hypot(best.cx - predX, best.cy - predY) > sigma * 0.8)) {
-      const sp = this._splitFromBlob(predX, predY, last.area);
+      const spH = this._splitFromBlob((predX - lift.ax) * roi.sx, (predY - lift.ay) * roi.sy, last.area * hiArea, W, H);
+      const sp = spH && liftComp(spH, lift);
       if (sp) { best = sp; bestScore = Math.max(0.18, sp.score); split = true; result.puckCandidates.push(sp); }
     }
     this.splitRun = split ? this.splitRun + 1 : best && bestScore >= 0.18 ? 0 : this.splitRun;
@@ -320,6 +389,26 @@ export class Vision {
     if (settings.debug) this._buildDebug(sm);
     else this.debugImage = null;
     return result;
+  }
+
+  /** 흰 바닥 마스크 + 행/열 히스토그램 (화면 전체, 처리 해상도). '흰 바닥 자동' 모드에서만 */
+  _whitePass(d, settings) {
+    const { PW, PH } = this;
+    const white = this.whiteMask;
+    const colCount = this.colCount; colCount.fill(0);
+    const rowCount = this.rowCount; rowCount.fill(0);
+    const wv = settings.whiteV, wc = settings.whiteC;
+    for (let y = 0, i = 0, p = 0; y < PH; y++) {
+      let rc = 0;
+      for (let x = 0; x < PW; x++, i++, p += 4) {
+        const r = d[p], g = d[p + 1], b = d[p + 2];
+        const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        if (mx >= wv && (mx - mn) <= wc) { white[i] = 1; colCount[x]++; rc++; } else white[i] = 0;
+      }
+      rowCount[y] = rc;
+    }
+    this._whiteValid = true;
   }
 
   /** 흰 바닥 영역을 원근 사다리꼴로 추정: 위쪽 띠와 아래쪽 띠의 좌/우 끝(중앙값) */
@@ -379,9 +468,9 @@ export class Vision {
     return left.concat(right.reverse());
   }
 
-  /** 4-연결 컴포넌트 라벨링 (mask를 소비: 방문한 픽셀은 2로 표시) */
-  _components(mask, bounds, minArea) {
-    const { PW, PH, stack } = this;
+  /** 4-연결 컴포넌트 라벨링 (mask를 소비: 방문한 픽셀은 2로 표시). mask 는 PW×PH (기본) 또는 읽은 영역 W×H */
+  _components(mask, bounds, minArea, PW = this.PW, PH = this.PH) {
+    const { stack } = this;
     const comps = [];
     const bx0 = Math.max(0, Math.floor(bounds.x0)), bx1 = Math.min(PW - 1, Math.ceil(bounds.x1));
     const by0 = Math.max(0, Math.floor(bounds.y0)), by1 = Math.min(PH - 1, Math.ceil(bounds.y1));
@@ -414,10 +503,11 @@ export class Vision {
   /**
    * 같은 색 큰 물체에 붙은 퍽 떼어 내기: 예측 자리(px,py) 둘레에서 '퍽 크기 원은 퍽 색으로 꽉 차고, 바로 바깥 고리는 대부분 비어 있는' 곳을 찾는다.
    * 스케이트·신발 안쪽은 고리까지 꽉 차서, 덩어리 가장자리는 원이 반쯤 비어서 걸러진다. 같은 점수면 예측 자리에 가까운 쪽.
+   * 좌표·면적·반환값은 퍽 마스크(읽은 영역 W×H) 단위.
    * 반환: 퍽 후보 {cx, cy, area, minx..maxy, score, split:true} | null
    */
-  _splitFromBlob(px, py, area) {
-    const { PW, PH, puckMask } = this;
+  _splitFromBlob(px, py, area, PW = this.PW, PH = this.PH) {
+    const { puckMask } = this;
     const rP = Math.max(1.5, Math.sqrt(area / Math.PI));
     const rIn = rP * 0.85, r1 = rP * 1.35, r2 = rP * 1.9, R2 = Math.ceil(r2);
     const disc = [], ring = [];
@@ -452,7 +542,8 @@ export class Vision {
       if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
     }
     if (!n) return null;
-    return { cx: sx / n, cy: sy / n, area: n, minx, maxx, miny, maxy, score: best.score * 0.6, split: true };
+    // sx·sy 는 liftComp 가 처리 좌표로 바꾸는 합 (cx·cy 는 그 결과로 다시 잡는다)
+    return { cx: sx / n, cy: sy / n, sx, sy, area: n, minx, maxx, miny, maxy, score: best.score * 0.6, split: true };
   }
 
   /**
@@ -622,17 +713,24 @@ export class Vision {
 
   /** (x, y) 둘레 고리(r1~r2)의 바닥색. 퍽·스틱처럼 튀는 색은 두 번째 평균에서 뺀다 (진짜 퍽을 덮는 색) */
   ringColor(x, y, r1, r2) {
-    if (!this.frame) return null;
-    const { PW, PH } = this; const d = this.frame.data;
+    const { PW, PH } = this;
     const a = r1 * r1, b = r2 * r2;
     const x0 = Math.max(0, Math.floor(x - r2)), x1 = Math.min(PW - 1, Math.ceil(x + r2));
     const y0 = Math.max(0, Math.floor(y - r2)), y1 = Math.min(PH - 1, Math.ceil(y + r2));
-    const px = [];
-    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
-      const q = (xx - x) ** 2 + (yy - y) ** 2;
-      if (q < a || q > b) continue;
-      const p = (yy * PW + xx) * 4; px.push(d[p], d[p + 1], d[p + 2]);
-    }
+    // 게임 중에는 매 프레임 불리므로 화면 전체를 새로 그리지 않고 이번에 읽은 영역에서 (영역 안 고리가 너무 적을 때만 화면 전체)
+    const collect = (fromRoi) => {
+      const px = [], d = fromRoi ? this.roi.data : this.frame.data;
+      for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+        const q = (xx - x) ** 2 + (yy - y) ** 2;
+        if (q < a || q > b) continue;
+        const i = fromRoi ? this._roiIndex(xx, yy) : yy * PW + xx;
+        if (i < 0) continue;
+        const p = i * 4; px.push(d[p], d[p + 1], d[p + 2]);
+      }
+      return px;
+    };
+    let px = this.roi ? collect(true) : [];
+    if (px.length < 12 * 3 && this.frame) px = collect(false); // 영역 안 고리 픽셀이 12개 미만
     if (px.length < 9) return null;
     const mean = (keep) => { let r = 0, g = 0, bl = 0, n = 0; for (let i = 0; i < px.length; i += 3) if (keep(i)) { r += px[i]; g += px[i + 1]; bl += px[i + 2]; n++; } return n ? { r: r / n, g: g / n, b: bl / n, n } : null; };
     const m1 = mean(() => true);
@@ -736,19 +834,46 @@ export class Vision {
     return mx >= settings.whiteV - 15 && (mx - mn) <= settings.whiteC + 10;
   }
 
+  /** 처리 좌표 픽셀 (x,y) 에 이번 프레임 퍽(1)·스틱(2)으로 잡힌 자리인지 (읽은 영역 밖이면 0). 마스크는 읽은 해상도라 가운데 점으로 본다 */
+  _maskAt(x, y, withStick) {
+    const i = this._roiIndex(x, y);
+    if (i < 0) return 0;
+    return this.puckMask[i] ? 1 : withStick && this.stickMask[i] ? 2 : 0;
+  }
+
   _buildDebug(stickModel) {
     const { PW, PH } = this;
     if (!this.debugImage || this.debugImage.width !== PW || this.debugImage.height !== PH) {
       this.debugImage = new ImageData(PW, PH);
     }
-    const o = this.debugImage.data;
-    for (let i = 0, p = 0; i < PW * PH; i++, p += 4) {
+    const o = this.debugImage.data, white = this._whiteValid ? this.whiteMask : null;
+    for (let y = 0, i = 0, p = 0; y < PH; y++) for (let x = 0; x < PW; x++, i++, p += 4) {
       let r = 0, g = 0, b = 0, a = 0;
-      if (this.whiteMask[i]) { r = 40; g = 90; b = 160; a = 120; }
-      if (this.puckMask[i]) { r = 255; g = 60; b = 60; a = 230; }
-      if (stickModel && this.stickMask[i]) { r = 60; g = 255; b = 90; a = 230; }
+      if (white && white[i]) { r = 40; g = 90; b = 160; a = 120; }
+      const m = this.roi ? this._maskAt(x, y, !!stickModel) : 0;
+      if (m === 1) { r = 255; g = 60; b = 60; a = 230; }
+      else if (m === 2) { r = 60; g = 255; b = 90; a = 230; }
       o[p] = r; o[p + 1] = g; o[p + 2] = b; o[p + 3] = a;
     }
+  }
+
+  /**
+   * 설정 창 '인식 미리보기': out(PW×PH ImageData)에 화면 전체를 흐리게 깔고 퍽(빨강)·스틱(초록)으로 잡힌 자리를 칠한다.
+   * 화면 전체가 없으면(마우스 모드 등) false
+   */
+  paintMaskPreview(out, withStick) {
+    const f = this.frame;
+    const { PW, PH } = this;
+    if (!f || f.width !== PW || f.height !== PH || out.width !== PW || out.height !== PH) return false;
+    const s = f.data, o = out.data;
+    for (let y = 0, p = 0; y < PH; y++) for (let x = 0; x < PW; x++, p += 4) {
+      const m = this.roi ? this._maskAt(x, y, withStick) : 0;
+      if (m === 1) { o[p] = 232; o[p + 1] = 38; o[p + 2] = 38; }
+      else if (m === 2) { o[p] = 24; o[p + 1] = 196; o[p + 2] = 72; }
+      else { o[p] = 140 + s[p] * 0.42; o[p + 1] = 140 + s[p + 1] * 0.42; o[p + 2] = 140 + s[p + 2] * 0.42; } // 바탕은 흐리게
+      o[p + 3] = 255;
+    }
+    return true;
   }
 }
 
@@ -799,6 +924,29 @@ export function blobShape(c) {
   const t = (cxx + cyy) / 2, d = Math.sqrt(((cxx - cyy) / 2) ** 2 + cxy * cxy);
   const l1 = t + d, l2 = Math.max(1e-6, t - d);
   return { elong: Math.sqrt(l2 / l1), angle: 0.5 * Math.atan2(2 * cxy, cxx - cyy) };
+}
+
+/**
+ * 읽은 영역(배율 sx·sy)에서 찾은 덩어리를 처리 좌표 단위로 바꾼다 (제자리에서 고치고 돌려줌).
+ * f: { ax, ay: 영역 픽셀 0 의 가운데 처리 좌표, ex, ey: 영역 왼쪽·위 끝, ix, iy: 1/배율, a2: 1/(sx·sy) }.
+ * 합(sx, sxx, sxy …)은 '평균 × 처리 면적'으로 바꿔 두어 mergeClose·blobShape 가 예전처럼 c.sx / c.area 로 평균을 낸다.
+ * 테두리(minx..maxy)는 'maxx - minx + 1 = 처리 px 폭'이 되게. 배율 1이면 예전 값과 똑같다
+ */
+export function liftComp(c, f) {
+  const n = c.area, mx = c.sx / n, my = c.sy / n, area = n * f.a2;
+  const lx = f.ax + mx * f.ix, ly = f.ay + my * f.iy;
+  if (c.sxx !== undefined) {
+    const exx = f.ax * f.ax + 2 * f.ax * f.ix * mx + f.ix * f.ix * (c.sxx / n);
+    const eyy = f.ay * f.ay + 2 * f.ay * f.iy * my + f.iy * f.iy * (c.syy / n);
+    const exy = f.ax * f.ay + f.ax * f.iy * my + f.ay * f.ix * mx + f.ix * f.iy * (c.sxy / n);
+    c.sxx = exx * area; c.syy = eyy * area; c.sxy = exy * area;
+  }
+  if (c.bxn) c.bxsum = c.bxn * f.ax + c.bxsum * f.ix;
+  c.sx = lx * area; c.sy = ly * area; c.cx = lx; c.cy = ly;
+  c.maxx = f.ex + (c.maxx + 1) * f.ix - 1; c.minx = f.ex + c.minx * f.ix;
+  c.maxy = f.ey + (c.maxy + 1) * f.iy - 1; c.miny = f.ey + c.miny * f.iy;
+  c.area = area;
+  return c;
 }
 
 /** 반사광 등으로 조각난 덩어리 병합: bbox 간격이 gap 이하인 컴포넌트를 합침 */

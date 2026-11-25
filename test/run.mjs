@@ -211,14 +211,18 @@ const skipSetup = async (page, touch = false) => {
   const gridOk = grid.n === 9 && grid.mid === 'mode-wait' && /mode-community/.test(grid.last) && /커뮤니티/.test(grid.lastText) && grid.cards === 8 && grid.cols === 3;
   console.log(`${gridOk ? 'PASS' : 'FAIL'} mode grid 3x3 with empty center and community in cell 9 (${JSON.stringify(grid)})`);
   if (!gridOk) failed = true;
-  // 모드 창의 '설정'(닫기 왼쪽): 모드 창 위에 설정 창, 닫으면 모드 창으로
+  // 모드 창 머리의 '퍽·스틱 등록'·'설정'(닫기 왼쪽): 각각 모드 창 위에 보정 창·설정 창을 열고, 닫으면 모드 창으로
   const modeBtns = await page.evaluate(() => [...document.querySelectorAll('#panel-mode .head-actions .btn')].map((b) => b.textContent.trim()).join(','));
+  await page.click('#btn-mode-calib');
+  const calibOverMode = await page.evaluate(() => !document.querySelector('#panel-calib').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
+  await page.click('[data-close="panel-calib"]');
+  const calibBack = await page.evaluate(() => document.querySelector('#panel-calib').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
   await page.click('#btn-mode-settings');
   const overMode = await page.evaluate(() => !document.querySelector('#panel-settings').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
   await page.click('[data-close="panel-settings"]');
   const backMode = await page.evaluate(() => document.querySelector('#panel-settings').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
-  const modeSetOk = modeBtns === '설정,닫기' && overMode && backMode;
-  console.log(`${modeSetOk ? 'PASS' : 'FAIL'} mode window has Settings left of Close; settings opens over it and closing returns to the modes (${JSON.stringify({ modeBtns, overMode, backMode })})`);
+  const modeSetOk = modeBtns === '퍽·스틱 등록,설정,닫기' && calibOverMode && calibBack && overMode && backMode;
+  console.log(`${modeSetOk ? 'PASS' : 'FAIL'} mode window has Register puck/stick and Settings left of Close; each opens over it and closing returns to the modes (${JSON.stringify({ modeBtns, calibOverMode, calibBack, overMode, backMode })})`);
   if (!modeSetOk) failed = true;
   // 자유 연습(8번 칸) 선택 -> 코스 편집: 번호 3, 1을 끌어다 놓기 -> 저장, 번호 순서 정렬
   await page.click('#mode-list > :nth-child(8)');
@@ -570,8 +574,9 @@ const skipSetup = async (page, touch = false) => {
   const extBefore = await page.evaluate(() => {
     const ths = [...document.querySelectorAll('.mem-table thead th')];
     const cell = (nick, i) => document.querySelector(`#mem-rows tr[data-nick="${nick}"] td:nth-child(${i})`)?.textContent.trim();
+    const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return { head: ths.map((t) => t.textContent.trim()), align: ths.map((t) => getComputedStyle(t).textAlign).join(), bolt: cell('번개손', 7), admin: cell('test123', 7),
-      btn: document.querySelector('#mem-ext-go').disabled, date: document.querySelector('#mem-ext-date').value, sel: document.querySelector('#mem-sel').textContent };
+      btn: document.querySelector('#mem-ext-go').disabled, date: document.querySelector('#mem-ext-date').value, today, min: document.querySelector('#mem-ext-date').min, sel: document.querySelector('#mem-sel').textContent };
   });
   await page.click('#mem-rows tr[data-nick="번개손"] .mem-pick input');
   const pick1 = await page.evaluate(() => ({ closed: document.querySelector('#panel-member').classList.contains('hidden'), sel: document.querySelector('#mem-sel').textContent,
@@ -601,7 +606,8 @@ const skipSetup = async (page, touch = false) => {
   const md = extKey.slice(5).replace('-', '.');
   const extOk = extBefore.head.length === 11 && extBefore.head[6] === '남은 일수' && extBefore.head[10] === '총 훈련 시간'
     && extBefore.align === 'center,left,left,left,left,left,right,left,right,right,right' && /^\d+일 ~\d\d\.\d\d$/.test(extBefore.bolt) && /^\d+일 ~\d\d\.\d\d$/.test(extBefore.admin)
-    && extBefore.btn && extBefore.date > extKey.slice(0, 4) && extBefore.sel === '선택한 회원 없음'
+    // 달력 기본값은 오늘 뒤의 날(한 달 뒤), 오늘보다 앞은 못 고름. 예전엔 '연도 > 올해'처럼 비교해서 연말(40일 뒤가 다음 해)이면 틀렸다
+    && extBefore.btn && /^\d{4}-\d\d-\d\d$/.test(extBefore.date) && extBefore.date > extBefore.today && extBefore.min === extBefore.today && extBefore.sel === '선택한 회원 없음'
     && pick1.closed && pick1.sel === '1명 선택' && pick1.picked && pick1.all && !pick1.btn && sel2 === '2명 선택'
     && extAsk.includes(`1명의 이용 기간을 ${extKey.replace(/-/g, '.')}까지로 늘립니다.`) && extAsk.includes('이미 그 뒤까지인 1명은 그대로입니다.')
     && extAfter.ok && extAfter.coupon === 'ext' && extAfter.bolt === `40일 ~${md}` && extAfter.tag.includes(`연장 ~${md}`) && extAfter.admin === extBefore.admin

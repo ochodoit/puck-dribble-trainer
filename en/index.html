@@ -176,7 +176,7 @@
           <source srcset="icons/hero-art.webp" type="image/webp" />
           <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="Stick and puck illustration" decoding="async" />
         </picture>
-        <p class="lead">The stickhandling game that reads your puck. Show us your skills</p>
+        <p class="lead">Turn your hockey stick into a game controller. Free stickhandling practice at home, with your camera</p>
         <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
         <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
         <div id="remote-start" class="remote-start">
@@ -231,7 +231,7 @@
                 </div>
               </div>
             </div>
-            <p class="reg-only hidden auth-hint">Your ID is only for logging in and is never shown (4–20 characters, start with a lowercase letter; letters, numbers, _). Your nickname is public in the rankings, so use one instead of your real name and make it different from your ID. Passwords need 8+ characters with both letters and numbers.</p>
+            <p class="reg-only hidden auth-hint">ID: 4–20 characters, starts with a lowercase letter, never shown · Nickname: shown on leaderboards, so not your real name · Password: 8+ characters, letters and numbers</p>
             <p class="reg-only hidden auth-hint">Members join with a sign-up code. No code? Finish one game as a guest. The result screen shows how to join.</p>
             <p class="login-only auth-hint muted">Joined earlier with a nickname and a 6-digit password? Log in with those once and you will create an ID.</p>
             <div class="login-only auth-forgot">
@@ -259,11 +259,11 @@
         <details class="howto">
           <summary>First time? — How to play</summary>
           <ol class="tips">
-            <li><span><b>Set up</b> — Put your phone, iPad or laptop on a stand 1–1.5 m high, looking down at the floor at an angle. Too low (50 cm or less) and the puck gets lost on the far side.</span></li>
-            <li><span><b>Area</b> — Drag the four corners onto the floor. Next time the saved area is used as is.</span></li>
-            <li><span><b>Register puck</b> — A ball, lid or puck: hold it in the center circle for 3 s. The more its color differs from the floor, the more accurate the tracking.</span></li>
-            <li><span><b>Test move</b> — Take the puck to the four corner targets to check it is tracked everywhere, then pick a game.</span></li>
-            <li><span><b>Start</b> — Hold the registered puck in the circle for 3 s to start hands-free. You can also mirror your phone to a TV.</span></li>
+            <li><span><b>Set up</b> — Stand the device 1–1.5 m high, looking down at the floor at an angle.</span></li>
+            <li><span><b>Area</b> — Drag the four corners onto the floor.</span></li>
+            <li><span><b>Register puck</b> — Hold the puck (a ball or lid works too) in the center circle for 3 s.</span></li>
+            <li><span><b>Test move</b> — Take the puck to the four corner targets.</span></li>
+            <li><span><b>Start</b> — Pick a game and hold the puck in the circle for 3 s to start.</span></li>
           </ol>
         </details>
         <p class="about">Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.</p>
@@ -349,7 +349,7 @@
         <details class="settings-adv">
           <summary>Detection fine-tuning (only if the puck is not tracked well)</summary>
           <div class="settings-grid">
-            <p class="adv-intro">When you register the puck or stick in Calibrate, the tolerances are set automatically. In the preview, red is what is detected as the puck and green as the stick. If only the puck turns red, leave these alone.</p>
+            <p class="adv-intro">Registering the puck and stick in Calibrate sets these automatically. In the preview, red is the puck and green the stick. If only the puck is red, leave them.</p>
             <!-- 인식 미리보기: 인식에 쓰는 영상 위에 퍽·스틱으로 잡힌 픽셀을 칠한다 (설정 창 안에서만 — 게임 화면은 가리지 않음) -->
             <figure class="mask-preview"><canvas id="mask-preview" aria-hidden="true"></canvas><figcaption>Detection preview · red puck · green stick · circle = where the puck was found</figcaption></figure>
             <label>Puck color tolerance <output id="out-puckTol"></output>
@@ -376,7 +376,7 @@
                 <option value="60">Always 60fps</option>
                 <option value="30">Always 30fps (dim rooms)</option>
               </select>
-              <small class="hint">Auto: films at 60fps and drops to 30 if this device cannot keep up. The phone camera link switches between 60 and 30 based on the Wi-Fi. If the picture looks dark or grainy, fix it at 30</small>
+              <small class="hint">Auto: switches between 60 and 30fps to suit the device and the Wi-Fi. If the picture looks dark or grainy, fix it at 30</small>
             </label>
           </div>
         </details>
@@ -418,7 +418,7 @@
             </div>
           </div>
         </div>
-        <p class="muted">Tip: tracking works best when the puck differs in color from the floor, and the stick tape from both the puck and the floor (orange, blue). Put the camera 1–1.5 m high, looking down at an angle.</p>
+        <p class="muted">Tip: a puck that differs from the floor, and stick tape that differs from both (orange, blue), track best.</p>
       </div>
     </div>
 
@@ -437,7 +437,7 @@
             <p id="remote-status" class="remote-status" role="status">Preparing connection…</p>
           </div>
         </div>
-        <p class="muted remote-note">Place the phone next to this screen, 1–1.5 m high, looking down at the floor at an angle. Keep the phone screen on while connecting.</p>
+        <p class="muted remote-note">Put the phone next to this screen, 1–1.5 m high, and keep its screen on while connecting.</p>
       </div>
     </div>
 

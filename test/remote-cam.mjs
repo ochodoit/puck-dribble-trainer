@@ -38,20 +38,20 @@ host.on('console', (m) => { if (m.type() === 'error') errors.push('host console:
 await host.goto(`${base}/index.html`);
 await host.waitForFunction(() => window.__puckTrainer?.account);
 
-// 게스트에게도 버튼과 같은 Wi-Fi 안내가 보이고, 누르면 창 대신 로그인 안내 (연결 문서는 로그인한 회원만 쓴다). 마우스 모드는 운영자만
+// 게스트에게도 버튼과 같은 Wi-Fi 안내가 보이고, 누르면 창 대신 로그인 안내 (연결 문서는 로그인한 회원만 쓴다). 카메라 없이 체험은 누구나
 await host.waitForSelector('#remote-start:not(.hidden)', { timeout: 8000 });
-const guest = await host.evaluate(() => ({ wifi: document.querySelector('#remote-start').textContent.includes('같은 Wi-Fi'), mouse: document.querySelector('#btn-mouse').classList.contains('hidden') }));
+const guest = await host.evaluate(() => ({ wifi: document.querySelector('#remote-start').textContent.includes('같은 Wi-Fi'), trial: !document.querySelector('#trial-start').classList.contains('hidden') }));
 await host.click('#btn-remote');
 await host.waitForTimeout(300);
 const guestPanel = await host.isVisible('#panel-remote');
-check(guest.wifi && guest.mouse && !guestPanel, 'guests see the phone-camera button with the same-Wi-Fi note; clicking asks to log in (no panel); mouse mode stays operator-only', JSON.stringify({ ...guest, guestPanel }));
+check(guest.wifi && guest.trial && !guestPanel, 'guests see the phone-camera button with the same-Wi-Fi note; clicking asks to log in (no panel); the camera-free trial is open to everyone', JSON.stringify({ ...guest, guestPanel }));
 
 // 일반 회원 가입 (운영자 아님) 후 새로고침 -> 바로 연결 창
 await host.evaluate(async () => { const a = window.__puckTrainer.account; a._putCode('BETA2026', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 7 * 864e5 }); await a.register({ loginId: 'camplayer', password: 'cam12345', nick: 'CamStar', country: 'KR', team: 'Cam', age: 12, code: 'BETA2026', stick: 'L' }); });
 await host.reload();
 await host.waitForFunction(() => window.__puckTrainer?.account?.current());
 await host.waitForSelector('#btn-remote:not(.hidden)', { timeout: 8000 });
-check(await host.isHidden('#btn-mouse'), 'a regular member gets the phone camera, not the operator mouse mode');
+check(await host.isVisible('#btn-mouse'), 'a regular member gets the phone camera and the camera-free trial');
 
 await host.click('#btn-remote');
 await host.waitForSelector('#panel-remote:not(.hidden)');

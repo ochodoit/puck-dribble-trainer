@@ -178,12 +178,16 @@
         </picture>
         <p class="lead">Turn your hockey stick into a game controller. Free stickhandling practice at home, with your camera</p>
         <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
+        <!-- 카메라 없이 체험 (누구나): 마우스 포인터나 손가락이 곧 퍽. 기록·랭킹·출석에는 안 들어감 -->
+        <div id="trial-start" class="trial-start">
+          <button id="btn-mouse" class="btn btn-trial">Try it without a camera</button>
+          <p class="trial-start-note">Move the puck with your mouse or finger · scores are not saved</p>
+        </div>
         <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
         <div id="remote-start" class="remote-start">
           <button id="btn-remote" class="btn btn-remote">Start with phone camera (QR link)</button>
           <p class="remote-start-note">Your phone and this device must be on the same Wi-Fi</p>
         </div>
-        <button id="btn-mouse" class="btn btn-mouse hidden" title="Test admin only">Start with mouse (no camera)</button>
         <p id="splash-error" class="error hidden"></p>
         <div id="splash-diag" class="diag hidden">
           <label>Choose camera <select id="diag-camera"></select></label>

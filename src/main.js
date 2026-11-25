@@ -53,7 +53,7 @@ const stickBridge = new StickBridge(); // 스틱이 퍽을 가린 동안 블레�
 const sfx = new Sfx();
 const game = new Game(sfx);
 const renderer = new Renderer(els.overlay);
-const mouse = new MouseInput(); // 테스트 관리자: 카메라 없이 마우스로 플레이
+const mouse = new MouseInput(); // 카메라 없이 체험: 마우스 포인터나 손가락이 퍽 (누구나)
 
 const app = {
   started: false,
@@ -428,7 +428,7 @@ async function submitResult(result) {
   $('#result-guest').classList.add('hidden');
   const u = app.account?.current();
   if (result.mode.id === 'free' || result.reason === 'manual' || app.versus) return;
-  if (app.mouseMode) { els.resultRank.textContent = '마우스 모드 기록은 랭킹에 올라가지 않습니다'; els.resultRank.classList.remove('hidden'); return; }
+  if (app.mouseMode) { renderTrialNotice(); return; }
   if (!u) { renderGuestNotice(result); return; }
   if (lapsedNow()) { renderGuestNotice(result, true); return; }
   try {
@@ -526,7 +526,7 @@ function setupMe() {
 }
 function openMe() { if (meUI) meUI.open(); }
 
-/** 출석: 로그인한 채로 플레이 화면을 연 날 (하루 한 번만 기록. 마우스 테스트 모드는 제외) */
+/** 출석: 로그인한 채로 플레이 화면을 연 날 (하루 한 번만 기록. 카메라 없이 체험은 제외) */
 function noteAttendance() {
   const u = app.account?.current();
   if (!u || !app.started || app.mouseMode || app.attendedDay === `${u.id}:${dayKey()}`) return;
@@ -545,9 +545,16 @@ function recordPlay(result) {
   }).then(() => { app.attendedDay = `${u.id}:${dayKey()}`; }).catch(() => {});
 }
 
-/** 방문·플레이 통계(GA4)에 한 판: 게임 이름·회원/게스트·끝까지 했는지·플레이 초·점수 (마우스 테스트와 3초 미만은 빼고) */
+/**
+ * 방문·플레이 통계(GA4)에 한 판: 게임 이름·회원/게스트·끝까지 했는지·플레이 초·점수 (3초 미만은 빼고).
+ * 카메라 없이 체험한 판은 진짜 판 수에 섞이지 않게 trial_game 으로 따로 센다 (운영자 테스트는 안 셈)
+ */
 function trackPlay(result) {
-  if (app.mouseMode || !(result.elapsed >= 3)) return;
+  if (!(result.elapsed >= 3)) return;
+  if (app.mouseMode) {
+    if (!isAdmin(app.account?.current())) track('trial_game', { mode: result.mode.name, completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed) });
+    return;
+  }
   track('game_end', {
     mode: result.mode.name, member: app.account?.current() ? 'member' : 'guest',
     completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed), score: Math.round(Number(result.score) || 0),
@@ -970,7 +977,7 @@ function bindUI() {
   // 바닥 수동 핸들
   bindFloorHandles();
 
-  window.addEventListener('resize', layout);
+  window.addEventListener('resize', () => { if (app.mouseMode) applyMouseSource(); layout(); });
   if (screen.orientation?.addEventListener) screen.orientation.addEventListener('change', () => setTimeout(layout, 200));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (game.running) game.stop('manual'); app.wasHidden = true; }
@@ -1011,16 +1018,26 @@ function toggleFullscreen() {
   else if (doc.exitFullscreen) doc.exitFullscreen().catch(() => {});
 }
 
-// =============== 테스트 관리자: 마우스 모드 (카메라 없이) ===============
-// 첫 화면 보조 버튼: 휴대폰 카메라(QR 연결)는 모두에게 보이고(누르면 로그인 확인), 마우스 모드는 운영자만
+// =============== 카메라 없이 체험 (마우스·터치, 누구나) ===============
+// 처음 온 사람이 카메라·퍽 없이 먼저 해 보게: 마우스 포인터나 손가락이 곧 퍽 (src/mouse-input.js).
+// 기록·랭킹·출석에는 안 들어가고, 결과 화면에서 카메라로 해 보라고 권한다. 운영자 테스트도 같은 모드를 쓴다.
+// 첫 화면 보조 버튼: 체험과 휴대폰 카메라(QR 연결)는 모두에게 보인다(QR 은 누르면 로그인 확인)
 function refreshMouseButton() {
   const onSplash = !els.btnCamera.classList.contains('hidden') && !app.started;
-  $('#btn-mouse').classList.toggle('hidden', !(onSplash && isAdmin(app.account?.current())));
+  $('#trial-start').classList.toggle('hidden', !onSplash);
   $('#remote-start').classList.toggle('hidden', !onSplash);
 }
 
+/** 체험 화면 비율: 세로로 든 휴대폰이면 세로(9:16), 아니면 가로(16:9). 카메라 영상처럼 화면을 채우고, 돌리면 따라 바뀐다 */
+function applyMouseSource() {
+  const portrait = innerHeight > innerWidth;
+  const w = portrait ? MOUSE_SRC.height : MOUSE_SRC.width, h = portrait ? MOUSE_SRC.width : MOUSE_SRC.height;
+  if (vision.srcW === w && vision.srcH === h) return;
+  vision.setSourceSize(w, h);
+  els.view.style.aspectRatio = `${w} / ${h}`;
+}
+
 function startMouse() {
-  if (!isAdmin(app.account?.current())) { toast('관리자 계정으로 로그인해야 합니다'); return; }
   sfx.unlock();
   sfx.enabled = settings.sound;
   app.mouseMode = true;
@@ -1028,8 +1045,7 @@ function startMouse() {
   vision.mirror = false;
   els.view.classList.remove('mirror');
   els.view.classList.add('mouse-mode');
-  vision.setSourceSize(MOUSE_SRC.width, MOUSE_SRC.height);
-  els.view.style.aspectRatio = `${MOUSE_SRC.width} / ${MOUSE_SRC.height}`;
+  applyMouseSource();
   layout();
   els.splash.classList.add('hidden');
   $('#splash-diag').classList.add('hidden');
@@ -1038,6 +1054,15 @@ function startMouse() {
   app.lastFrameAt = clockNow();
   requestAnimationFrame(loop);
   openModeAfterStart();
+  if (!isAdmin(app.account?.current())) track('trial_start', { input: matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse' });
+  toast('체험 모드 · 마우스나 손가락이 퍽이에요. 기록은 저장되지 않아요', 4000);
+}
+
+/** 체험 결과 화면: 기록은 저장 안 됨 + 카메라로 해 보기 (첫 화면으로 = 새로고침, 로그인은 그대로) */
+function renderTrialNotice() {
+  els.resultRank.innerHTML = '체험 기록은 저장되지 않아요. 카메라로 진짜 퍽을 움직여 보세요! <button type="button" class="btn btn-primary" id="btn-trial-camera">카메라로 하기</button>';
+  els.resultRank.classList.remove('hidden');
+  $('#btn-trial-camera').addEventListener('click', () => { track('trial_to_camera'); location.reload(); });
 }
 
 // =============== 휴대폰 카메라 (QR 연결, 로그인한 회원) ===============
@@ -1395,7 +1420,7 @@ async function showCameraDiagnostics(err) {
 }
 
 async function flipCamera() {
-  if (app.mouseMode) { toast('마우스 모드에서는 카메라를 쓰지 않습니다'); return; }
+  if (app.mouseMode) { toast('체험 모드에서는 카메라를 쓰지 않아요'); return; }
   if (app.remoteMode) { remote?.host.send({ t: 'flip' }); toast('휴대폰 카메라를 전환합니다'); return; }
   if (game.running) game.stop('manual');
   settings.facing = settings.facing === 'user' ? 'environment' : 'user';
@@ -1558,7 +1583,8 @@ function loop(raw) {
   if (!app.mouseMode && video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
     app.lastFrameAt = now;
-    if (app.frozenWarned) { app.frozenWarned = false; toast('카메라 영상이 다시 들어옵니다'); }
+    // 연결이 끊긴 뒤 늦게 들어온 마지막 프레임으로 '끊겼습니다' 안내를 덮지 않게 (다시 이어지면 따로 알림)
+    if (app.frozenWarned) { app.frozenWarned = false; if (!app.cameraLost) toast('카메라 영상이 다시 들어옵니다'); }
     result = processFrame(video);
     app.lastVision = result;
     autoCameraRate(performance.now());
@@ -1622,7 +1648,7 @@ function loop(raw) {
  * 게임 종료 후 선택 (결과 화면이 떠 있는 동안): 퍽을 왼쪽 영역에 2초 두면 한 번 더, 오른쪽 영역에 두면 모드 선택.
  * 결과 창이 카메라를 가리므로 창 안의 트랙에 퍽의 좌우 위치를 점으로 보여준다.
  */
-/** 마우스 모드 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이어도 마지막 자리를 유지) */
+/** 체험(마우스·터치) 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이거나 손가락을 떼도 마지막 자리를 유지) */
 function stepMouse(now) {
   let meas = null;
   // 마우스 모드도 카메라와 같이 네 모서리로 정한 바닥을 쓴다 (게임은 모두 평면 경기장이라 맵이 비틀리지 않음).
@@ -2021,8 +2047,8 @@ function updateChips(result) {
     result.floor.mode === 'manual' ? '영역(사다리꼴)' : result.floor.mode === 'full' || result.floor.fallback ? '영역(전체화면)' : vision.floorLocked ? '바닥(고정)' : '바닥(흰색)');
   const stickCtl = settings.controller === 'stick';
   if (app.mouseMode) {
-    setChip(els.chipPuck, mouse.has ? 'ok' : 'warn', '마우스(조작)');
-    setChip(els.chipStick, '', '스틱(마우스 모드)');
+    setChip(els.chipPuck, mouse.has ? 'ok' : 'warn', '퍽(마우스·터치)');
+    setChip(els.chipStick, '', '스틱(체험 모드)');
     els.chipFps.textContent = fpsChipText();
     return;
   }
@@ -2265,7 +2291,7 @@ function syncScoreChallenge() {
 async function renderShare(result) {
   const box = $('#result-share');
   box.classList.add('hidden'); box.innerHTML = '';
-  if (result.versus || (result.reason !== 'time' && result.reason !== 'done')) return;
+  if (result.versus || app.mouseMode || (result.reason !== 'time' && result.reason !== 'done')) return; // 체험 기록은 자랑·도전 기록에도 안 올림
   // 버튼 하나 또는 둘 (둘째: [라벨, 동작])
   const show = (html, btnLabel, onClick, second) => {
     box.innerHTML = `<div class="share-msg">${html}</div><div class="share-btns">${second ? `<button type="button" class="btn btn-ghost" id="btn-share-2">${second[0]}</button>` : ''}${btnLabel ? `<button type="button" class="btn" id="btn-share">${btnLabel}</button>` : ''}</div>`;
@@ -2415,7 +2441,7 @@ function renderModeList() {
       syncScoreChallenge();
       if (app.afterStart) {
         app.afterStart = false;
-        toast(app.mouseMode ? `${m.name} 선택됨 · 커서를 가운데 원에 3초 두거나 시작을 누르세요` : `${m.name} 선택됨 · 퍽을 가운데 원 안에 놓고 3초 기다리세요`, 5000);
+        toast(app.mouseMode ? `${m.name} 선택됨 · 가운데 원에 3초 머무르거나 시작을 누르세요` : `${m.name} 선택됨 · 퍽을 가운데 원 안에 놓고 3초 기다리세요`, 5000);
       } else toast(`${m.name} 선택됨`);
     });
     els.modeList.appendChild(card);

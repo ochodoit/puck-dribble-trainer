@@ -95,7 +95,7 @@ export function jerseyOf(v) {
   const s = String(v).trim();
   return /^\d{1,2}$/.test(s) ? Number(s) : NaN;
 }
-// 운영자(관리자): 운영자 화면, 카메라 없이 마우스로 플레이.
+// 운영자(관리자): 운영자 화면. (카메라 없이 체험은 이제 누구나)
 // 온라인 저장소는 Firestore admins/{uid} 문서로 정하고(콘솔에서 만듦), 기기 내 저장소는 아래 별명으로 정한다.
 export const ADMIN_NICKS = ['test123'];
 export const isAdmin = (user) => !!user?.admin;

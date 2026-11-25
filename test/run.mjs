@@ -1019,6 +1019,43 @@ const skipSetup = async (page, touch = false) => {
   await context.close();
 }
 
+// ---- 4-2) 카메라 없이 체험 (누구나): 손가락이 퍽, 세로 휴대폰은 세로 판, 기록·자랑 없이 '카메라로 하기' 안내 ----
+{
+  const context = await newCtx({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/index.html`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.waitForSelector('#trial-start:not(.hidden)');
+  const note = await page.textContent('#trial-start');
+  await page.tap('#btn-mouse');
+  await page.waitForSelector('#panel-mode:not(.hidden)');
+  const started = await page.evaluate(() => ({ trial: window.__puckTrainer.app.mouseMode, splash: document.querySelector('#splash').classList.contains('hidden') }));
+  const card = page.locator('#mode-list .mode-card', { hasText: /아케이드/ }).first();
+  await card.tap();
+  await page.tap('#btn-start');
+  await page.waitForFunction(() => window.__puckTrainer.game.running);
+  const vb = await page.locator('#view').boundingBox();
+  for (const [x, y] of [[0.3, 0.7], [0.6, 0.8], [0.5, 0.75]]) { await page.touchscreen.tap(vb.x + vb.width * x, vb.y + vb.height * y); await page.waitForTimeout(80); }
+  const play = await page.evaluate(() => ({ has: window.__puckTrainer.mouse.has, state: window.__puckTrainer.tracker.state, portrait: document.querySelector('#view').getBoundingClientRect().height > document.querySelector('#view').getBoundingClientRect().width }));
+  await page.evaluate(() => window.__puckTrainer.game.stop('time'));
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  await page.waitForSelector('#btn-trial-camera');
+  const res = await page.evaluate(() => ({ rank: document.querySelector('#result-rank').textContent, share: document.querySelector('#result-share').classList.contains('hidden'), guest: document.querySelector('#result-guest').classList.contains('hidden') }));
+  const ok = note.includes('기록은 저장되지 않아요') && started.trial && started.splash && play.has && play.state !== 'lost' && play.portrait
+    && res.rank.includes('체험 기록은 저장되지 않아요') && res.share && res.guest && errors.length === 0;
+  console.log(`${ok ? 'PASS' : 'FAIL'} camera-free trial: anyone can start it, a finger moves the puck on a portrait board, the result offers the camera instead of saving or sharing (${JSON.stringify({ ...started, ...play, ...res, errors })})`);
+  if (!ok) failed = true;
+  // 카메라로 하기 -> 첫 화면으로 돌아옴 (체험 끝)
+  await Promise.all([page.waitForNavigation(), page.tap('#btn-trial-camera')]);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  const back = await page.evaluate(() => !window.__puckTrainer.app.mouseMode && !document.querySelector('#splash').classList.contains('hidden'));
+  console.log(`${back ? 'PASS' : 'FAIL'} 'play with camera' after a trial goes back to the start screen`);
+  if (!back) failed = true;
+  await context.close();
+}
+
 // ---- 5) 영어 화면 + 커뮤니티: 언어 전환, 코스 도전 -> 기록 게시판 -> 기록 갱신 공유, 코스·기록 글쓰기 ----
 {
   const context = await newCtx({ locale: 'en-US', viewport: { width: 1180, height: 820 }, permissions: ['camera'], deviceScaleFactor: 1 });

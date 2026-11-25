@@ -373,11 +373,12 @@
               <small class="hint" id="proc-live"></small>
             </label>
             <label>카메라 프레임
-              <select id="set-camFps">
-                <option value="60">60fps (빠른 드리블, 기본)</option>
-                <option value="30">30fps (어두운 곳)</option>
+              <select id="set-camRate">
+                <option value="auto">자동 (기본)</option>
+                <option value="60">항상 60fps</option>
+                <option value="30">항상 30fps (어두운 곳)</option>
               </select>
-              <small class="hint">카메라가 60을 못 내면 알아서 30으로 찍어요. 화면이 어둡거나 자글거리면 30으로 내리세요</small>
+              <small class="hint">자동: 60fps로 찍다가 이 기기가 다 처리하지 못하면 30으로 낮춰요. 휴대폰 카메라 연결은 Wi-Fi 상태를 보고 60·30을 알아서 바꿔요. 화면이 어둡거나 자글거리면 30으로 고정하세요</small>
             </label>
           </div>
         </details>

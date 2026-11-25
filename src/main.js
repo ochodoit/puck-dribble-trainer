@@ -1,6 +1,6 @@
 // 앱 오케스트레이션: 카메라 -> 영상처리 -> 추적 -> 게임 -> 렌더/HUD
 import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨터가 아니면 여기서 멈춤 (복제 사이트·iframe 막기)
-import { Camera, describeCameraError } from './camera.js';
+import { Camera, CameraRateAuto, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator } from './vision.js';
 import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
@@ -46,6 +46,7 @@ const els = {
 
 const settings = loadSettings();
 const camera = new Camera(els.video);
+const camRateAuto = new CameraRateAuto(); // '카메라 프레임: 자동' — 이 기기가 60을 다 인식하지 못하면 30으로
 const vision = new Vision(settings.procWidth);
 const tracker = new Tracker();
 const stickBridge = new StickBridge(); // 스틱이 퍽을 가린 동안 블레이드로 퍽 자리를 잇는다 (스틱 지정 시)
@@ -901,7 +902,7 @@ function bindUI() {
     }
   }
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
-  $('#set-camFps').addEventListener('change', (e) => { settings.camFps = Number(e.target.value); camera.setFrameRate(settings.camFps); persist(); });
+  $('#set-camRate').addEventListener('change', (e) => { settings.camRate = e.target.value; applyCamRate(); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
     settings.controller = e.target.value; persist(); tracker.reset();
     if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
@@ -1085,6 +1086,8 @@ function cancelRemote() {
 
 function onRemoteState(s, err) {
   if (err) console.error(err);
+  // 연결되면 '카메라 프레임' 설정을 휴대폰에 알린다 (자동이면 휴대폰이 Wi-Fi 상태를 보고 60·30을 고른다)
+  if (s === 'connected') remote?.host.send({ t: 'rate', mode: settings.camRate });
   if (!app.started) {
     const msg = {
       preparing: ['연결 준비 중…'],
@@ -1180,7 +1183,10 @@ function onOrientationFlip(oldAr, newAr) {
 
 function onRemoteMessage(m) {
   // 휴대폰 카메라를 바꾸면 영상 크기가 바뀔 수 있다 (loop 가 알아서 맞춘다)
-  if (m.t === 'info') app.remoteFacing = m.facing;
+  if (m.t === 'info') {
+    app.remoteFacing = m.facing;
+    app.remoteLink = { fps: m.fps || 0, mode: m.mode || 'auto' }; // 휴대폰이 지금 보내는 단계 (설정 창에 보인다)
+  }
 }
 
 window.addEventListener('pagehide', () => { if (remote) remote.host.close(); });
@@ -1388,7 +1394,8 @@ async function requestWakeLock() {
 }
 
 async function startStream() {
-  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing, settings.camFps);
+  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing, settings.camRate === '30' ? 30 : 60);
+  camRateAuto.reset();
   if (facing === 'user' || facing === 'environment') settings.facing = facing;
   const track = camera.stream.getVideoTracks()[0];
   track.addEventListener('ended', () => { app.cameraLost = true; toast('카메라 연결이 끊겼습니다. 설정에서 카메라를 다시 선택하세요.', 6000); if (game.running) game.stop('manual'); });
@@ -1455,9 +1462,28 @@ function countFrame() {
   const t = performance.now();
   app.frames++;
   if (t - app.fpsAt >= 1000) {
+    // 1.5초 안쪽 구간만 '이 기기가 따라가는 속도'로 믿는다 (창이 열려 멈췄던 구간 제외)
+    app.fpsFresh = t - app.fpsAt < 1500;
     app.fps = t - app.fpsAt < 2000 ? Math.round((app.frames * 1000) / (t - app.fpsAt)) : app.frames;
     app.frames = 0; app.fpsAt = t;
   }
+}
+
+/** '카메라 프레임' 설정 적용: 직접 연결 카메라는 바로 바꾸고, 휴대폰 카메라 연결이면 휴대폰에 알린다 (휴대폰이 Wi-Fi 상태를 보고 정함) */
+function applyCamRate() {
+  camRateAuto.reset();
+  app.fpsFresh = false;
+  if (app.remoteMode) remote?.host.send({ t: 'rate', mode: settings.camRate });
+  else if (!app.mouseMode) camera.setFrameRate(settings.camRate === '30' ? 30 : 60);
+}
+
+/** 자동: 1초마다 이 기기가 카메라 프레임을 따라가는지 보고, 60을 다 인식하지 못하면 카메라를 30으로 (게임 중 화면만 볼 때 — 설정 창 미리보기는 빼고) */
+function autoCameraRate(now) {
+  if (!app.fpsFresh) return;
+  app.fpsFresh = false;
+  if (settings.camRate !== 'auto' || app.remoteMode || app.mouseMode) return;
+  const next = camRateAuto.update(now, camera.frameRate(), app.fps);
+  if (next) camera.setFrameRate(next);
 }
 
 /** 화면 칩: '58 fps · 3.1ms' + 마우스를 올리면 카메라가 보내는 fps, 영역을 읽는 해상도 */
@@ -1470,7 +1496,8 @@ function fpsChipText() {
 function fpsChipTitle() {
   const r = vision.roi, cam = camera.frameRate();
   const parts = [`인식 ${app.fps} fps, 프레임당 ${app.procMs ? app.procMs.toFixed(1) : '-'}ms`];
-  if (cam) parts.push(`카메라 ${Math.round(cam)} fps`);
+  if (app.remoteMode && app.remoteLink?.fps) parts.push(app.remoteLink.mode === 'auto' ? `휴대폰 연결 ${app.remoteLink.fps}fps (Wi-Fi 상태에 맞춰 자동)` : `휴대폰 연결 ${app.remoteLink.fps}fps (고정)`);
+  else if (cam) parts.push(camRateAuto.lowered && settings.camRate === 'auto' ? `카메라 ${Math.round(cam)} fps (이 기기에 맞춰 자동으로 낮춤)` : `카메라 ${Math.round(cam)} fps`);
   if (r) parts.push(`영역 ${r.W}×${r.H}px로 읽음 (×${r.sx.toFixed(2)})`);
   return parts.join(' · ');
 }
@@ -1508,6 +1535,7 @@ function loop(raw) {
     if (app.frozenWarned) { app.frozenWarned = false; toast('카메라 영상이 다시 들어옵니다'); }
     result = processFrame(video);
     app.lastVision = result;
+    autoCameraRate(performance.now());
 
     // 조작 대상(퍽 또는 스틱 블레이드) 측정값 -> 정규화 바닥 좌표
     const m = result.floor.mapping;
@@ -2584,7 +2612,7 @@ function applySettingsToUI() {
   applyWash();
   game.arcade.floorWidthM = settings.floorWidthM;
   $('#set-procWidth').value = String(settings.procWidth);
-  $('#set-camFps').value = String(settings.camFps);
+  $('#set-camRate').value = settings.camRate;
   $('#set-controller').value = settings.controller;
   els.p1.value = settings.p1; els.p2.value = settings.p2;
   refreshCalibUI();
@@ -2644,6 +2672,7 @@ function previewWhilePaused(now) {
   if (!app.mouseMode && video.readyState >= 2 && video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
     app.lastVision = processFrame(video);
+    app.fpsFresh = false; // 설정 창 미리보기(더 무거움) 동안의 속도로는 카메라를 바꾸지 않는다
   }
   drawTransparencyPreview(app.lastVision);
   drawMaskPreview(app.lastVision);

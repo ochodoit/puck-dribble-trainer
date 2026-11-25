@@ -411,7 +411,8 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${liveOk ? 'PASS' : 'FAIL'} settings show live detection speed and area read size (${live})`);
   if (!liveOk) failed = true;
   await page.selectOption('#set-procWidth', '320');
-  await page.selectOption('#set-camFps', '30');
+  const rateDefault = await page.inputValue('#set-camRate');
+  await page.selectOption('#set-camRate', '30');
   const fps30 = await page.evaluate(async () => { await new Promise((r) => setTimeout(r, 200)); const c = document.querySelector('#video').srcObject?.getVideoTracks()[0].getConstraints().frameRate; return typeof c === 'number' ? c : c?.ideal; });
   await page.selectOption('#set-controller', 'stick');
   await page.click('[data-close="panel-settings"]');
@@ -432,8 +433,9 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#btn-start');
   await page.click('[data-close="panel-result"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
-  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 && saved.camFps === 30 && fps30 === 30 ? 'PASS' : 'FAIL'} webcam settings persisted (camera fps ${fps30})`);
-  if (!(saved.floorMode === 'manual' && saved.procWidth === 320 && saved.camFps === 30 && fps30 === 30)) failed = true;
+  const camOk = rateDefault === 'auto' && saved.camRate === '30' && fps30 === 30;
+  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 && camOk ? 'PASS' : 'FAIL'} webcam settings persisted (camera frame ${rateDefault} -> ${saved.camRate}, camera fps ${fps30})`);
+  if (!(saved.floorMode === 'manual' && saved.procWidth === 320 && camOk)) failed = true;
   // 기록 등록 + 랭킹 패널: 게임이 끝까지 진행된 결과를 흉내내어 onEnd 호출
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 17]] }); });
   await page.waitForSelector('#result-rank:not(.hidden)');

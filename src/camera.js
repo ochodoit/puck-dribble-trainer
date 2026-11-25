@@ -3,6 +3,26 @@
 /** 카메라에 바라는 화질: 1280×720, 초당 fps 프레임 (모두 'ideal' — 못 맞추면 가장 가까운 것으로) */
 export const cameraConstraints = (fps = 60) => ({ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: fps } });
 
+/**
+ * 직접 연결한 카메라의 초당 프레임 자동 조절 ('카메라 프레임: 자동').
+ * 60을 바라고 켜되(카메라가 못 내면 카메라가 알아서 30), 이 기기가 60프레임을 다 인식하지 못하면
+ * (1초에 인식한 프레임이 36개도 안 되는 일이 4초 이어짐: 처리가 느리거나, 화면이 저전력 모드로 30만 그리거나) 카메라를 30으로 내린다.
+ * 남는 프레임은 어차피 버려지고 기기만 뜨거워지기 때문. 내린 뒤에는 카메라를 다시 켤 때까지 30 (자꾸 바꾸면 화면이 잠깐씩 끊긴다)
+ */
+export class CameraRateAuto {
+  constructor() { this.reset(); }
+  reset() { this.target = 60; this.badSince = null; this.lowered = false; }
+  /** 1초마다: cam = 카메라가 보내는 fps (모르면 0), done = 그 1초에 인식한 프레임 수. 카메라를 바꿀 fps 를 돌려준다 (그대로면 null) */
+  update(now, cam, done) {
+    if (this.target !== 60 || !(cam >= 45)) { this.badSince = null; return null; }
+    if (done >= Math.max(36, cam * 0.6)) { this.badSince = null; return null; }
+    if (this.badSince == null) this.badSince = now;
+    if (now - this.badSince < 4000) return null;
+    this.target = 30; this.lowered = true;
+    return 30;
+  }
+}
+
 export class Camera {
   constructor(videoEl) {
     this.video = videoEl;

@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS = {
   stickModel: null,                           // null = 스틱 추적 안 함
   floorMode: 'manual',                        // 게임 영역 = 네 모서리로 맞춘 바닥 (예전 'auto'·'full' 은 불러올 때 'manual' 로 옮김)
   procWidth: 240,                             // 인식 해상도(처리 폭 px): 240 | 320 | 400. 게임 영역이 화면보다 작으면 영역만 이 픽셀 수만큼 더 촘촘히 읽는다
-  camFps: 60,                                 // 카메라에 바라는 초당 프레임: 60 (못 내는 카메라는 알아서 30) | 30 (어두운 곳에서 더 밝게)
+  camRate: 'auto',                            // 카메라 프레임: 'auto' (60으로 찍다가 기기·Wi-Fi 상태에 맞춰 30으로) | '60' 항상 | '30' 항상 (어두운 곳)
   controller: 'puck',                         // 게임 조작 대상: 'puck' | 'stick'(퍽 없이 스틱 블레이드로)
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
@@ -61,7 +61,9 @@ export function sanitizeSettings(s) {
   s.puckModel = isColorModel(s.puckModel) ? { r: s.puckModel.r, g: s.puckModel.g, b: s.puckModel.b, area: s.puckModel.area } : structuredClone(d.puckModel);
   s.stickModel = isColorModel(s.stickModel) ? { r: s.stickModel.r, g: s.stickModel.g, b: s.stickModel.b, area: s.stickModel.area } : null;
   s.procWidth = [240, 320, 400].includes(s.procWidth) ? s.procWidth : d.procWidth;
-  s.camFps = [30, 60].includes(s.camFps) ? s.camFps : d.camFps;
+  // 예전(잠깐 있던) camFps 저장값: 30 을 고른 사람만 '30' 고정으로, 나머지는 자동 (기본값이 먼저 섞여 오므로 camFps 가 있으면 그것으로)
+  if ('camFps' in s) { s.camRate = s.camFps === 30 ? '30' : 'auto'; delete s.camFps; }
+  s.camRate = ['auto', '60', '30'].includes(s.camRate) ? s.camRate : d.camRate;
   s.controller = s.controller === 'stick' ? 'stick' : 'puck';
   const quadOk = Array.isArray(s.manualQuad) && s.manualQuad.length === 4 &&
     s.manualQuad.every((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((c) => Number.isFinite(c) && c >= 0 && c <= 1));

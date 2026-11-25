@@ -12,6 +12,8 @@
   import { placementCheck } from '../src/placement.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
+  import { CameraRateAuto } from '../src/camera.js';
+  import { linkStep, linkSample, newLinkState, LINK_LEVELS } from '../src/remote-cam.js';
   import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
   import { C } from '../src/theme.js';
   import { alphaLayer } from '../src/theme.js';
@@ -1514,6 +1516,68 @@
       check('ROI10 blob coordinates lifted to processing units (x2) and unchanged at x1',
         Math.abs(c2.area - 1) < 1e-9 && Math.abs(c2.cx - 12) < 1e-9 && Math.abs(c2.cy - 23) < 1e-9 && c2.maxx - c2.minx + 1 === 1 && Math.abs(c2.bxsum / c2.bxn - 12) < 1e-9 &&
         c1.area === 3 && c1.cx === 15 && c1.cy === 27 && c1.minx === 14 && c1.maxx === 16 && c1.maxy === 27 && c1.bxsum === 45, { c2, c1 });
+    }
+    // FPS) 카메라 프레임 자동 조절
+    {
+      // 직접 연결 카메라: 60을 다 인식하면 그대로, 1초 36개 미만이 4초 이어지면 30으로 (카메라가 60을 못 내면 손대지 않음), 내린 뒤엔 그대로
+      const ra = new CameraRateAuto();
+      let got = []; for (let t = 0; t <= 6000; t += 1000) got.push(ra.update(t, 60, 55));
+      const keep = got.every((x) => x === null) && ra.target === 60;
+      got = []; for (let t = 0; t <= 6000; t += 1000) got.push(ra.update(10000 + t, 60, 28));
+      const lowered = got.indexOf(30) === 4 && ra.target === 30 && ra.lowered && ra.update(20000, 30, 60) === null;
+      const rb = new CameraRateAuto(); let cam30 = null; for (let t = 0; t <= 8000; t += 1000) cam30 = cam30 || rb.update(t, 30, 20);
+      const rc = new CameraRateAuto(); rc.update(0, 60, 20); rc.update(1000, 60, 20); rc.update(2000, 60, 58); let blip = null; for (let t = 3000; t <= 5000; t += 1000) blip = blip || rc.update(t, 60, 20);
+      check('FPS1 direct camera auto: keeps 60 when this device keeps up, drops to 30 after 4s of < 36 frames/s, leaves 30fps cameras and short dips alone',
+        keep && lowered && cam30 === null && blip === null && rc.target === 60, { got, lowered, cam30, blip });
+
+      // 휴대폰 연결: 높음(60)으로 시작 -> 통신 한계 두 번이면 낮음 (금방 실패했으니 기다림 20->40초) -> 멀쩡히 40초면 다시 높음 -> 곧 또 실패하면 80초
+      const good = { fps: 58, short: 720, capShort: 720, capFps: 60, limit: 'none', loss: 0 };
+      const bw = { ...good, limit: 'bandwidth', short: 360 };
+      const st = newLinkState(0, 'auto');
+      const seq = [];
+      seq.push(st.level, linkStep(st, bw, 2000), linkStep(st, bw, 4000)); // 처음 6초는 보지 않음
+      seq.push(linkStep(st, bw, 8000), linkStep(st, bw, 10000));          // 두 번째에 낮춤
+      const low1 = st.level, backoff1 = st.backoff;
+      seq.push(linkStep(st, { ...good, fps: 30 }, 12000), linkStep(st, { ...good, fps: 30 }, 32000), linkStep(st, { ...good, fps: 30 }, 52000)); // 40초 멀쩡 -> 높음
+      const high2 = st.level;
+      linkStep(st, bw, 60000); linkStep(st, bw, 62000);                    // 10초 만에 다시 실패
+      const backoff2 = st.backoff;
+      check('FPS2 phone link starts at 60fps, drops to 30 after two strained checks, retries after a calm wait that doubles after each quick failure',
+        seq[0] === 'high' && seq.slice(1, 3).every((x) => x === null) && seq[3] === null && seq[4] === 'low' && low1 === 'low' && backoff1 === 40000 &&
+        seq[5] === null && seq[6] === null && seq[7] === 'high' && high2 === 'high' && st.level === 'low' && backoff2 === 80000, { seq, backoff1, backoff2 });
+
+      // 낮음에서 통신이 계속 빠듯하면(해상도 깎임) 다시 올리지 않고, 손실이 크거나 휴대폰 처리가 모자라도(cpu) 낮춘다
+      const s2 = newLinkState(0, 'auto'); s2.level = 'low';
+      let up = null; for (let t = 0; t <= 60000; t += 2000) up = up || linkStep(s2, { ...good, fps: 30, short: 540 }, t);
+      const s3 = newLinkState(0, 'auto'); linkStep(s3, { ...good, loss: 0.08 }, 7000); const lossDrop = linkStep(s3, { ...good, loss: 0.08 }, 9000);
+      const s4 = newLinkState(0, 'auto'); linkStep(s4, { ...good, limit: 'cpu' }, 7000); const cpuDrop = linkStep(s4, { ...good, limit: 'cpu' }, 9000);
+      // 카메라가 60을 못 찍으면 바로 낮음, 고정 모드는 그대로
+      const s5 = newLinkState(0, 'auto'); const camLow = linkStep(s5, { ...good, capFps: 30, fps: 30 }, 2000);
+      const s6 = newLinkState(0, '60'); const fixed60 = [linkStep(s6, bw, 8000), linkStep(s6, bw, 10000), linkStep(s6, bw, 12000)];
+      const s7 = newLinkState(0, '30');
+      let fixed30 = null; for (let t = 0; t <= 60000; t += 2000) fixed30 = fixed30 || linkStep(s7, good, t);
+      check('FPS3 phone link: stays at 30 while the network is tight, drops on loss or phone CPU limit, 30fps cameras stay low, fixed modes hold',
+        up === null && lossDrop === 'low' && cpuDrop === 'low' && camLow === 'low' && fixed60.every((x) => x === null) && s6.level === 'high' && fixed30 === null && s7.level === 'low' &&
+        LINK_LEVELS.high.fps === 60 && LINK_LEVELS.low.fps === 30, { up, lossDrop, cpuDrop, camLow, fixed60, fixed30 });
+
+      // 통계 뽑기: 보낸 영상(outbound-rtp)·받는 쪽 손실(remote-inbound-rtp)·카메라 설정. 없는 값은 null
+      const rep = new Map([
+        ['o', { type: 'outbound-rtp', kind: 'video', framesPerSecond: 59, frameWidth: 1280, frameHeight: 720, qualityLimitationReason: 'none' }],
+        ['r', { type: 'remote-inbound-rtp', kind: 'video', fractionLost: 0.01 }],
+        ['a', { type: 'outbound-rtp', kind: 'audio', framesPerSecond: 1 }],
+      ]);
+      const smp = linkSample(rep, { getSettings: () => ({ width: 720, height: 1280, frameRate: 60 }) });
+      const empty = linkSample(new Map(), null);
+      check('FPS4 link sample reads sent fps, short side, camera, limit reason and loss (missing values are null)',
+        smp.fps === 59 && smp.short === 720 && smp.capShort === 720 && smp.capFps === 60 && smp.limit === 'none' && smp.loss === 0.01 &&
+        Object.values(empty).every((v) => v === null), { smp, empty });
+
+      // 설정: 잠깐 있던 camFps 저장값을 옮긴다 (30 고른 사람만 30 고정, 나머지 자동), 이상한 값은 자동
+      const m30 = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), camFps: 30 });
+      const m60 = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), camFps: 60 });
+      const bad = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), camRate: 'fast' });
+      check('FPS5 camera frame setting: default auto, old 30 kept as fixed 30, old 60 becomes auto',
+        DEFAULT_SETTINGS.camRate === 'auto' && m30.camRate === '30' && !('camFps' in m30) && m60.camRate === 'auto' && bad.camRate === 'auto', { m30: m30.camRate, m60: m60.camRate, bad: bad.camRate });
     }
     // SEC) 규칙 파일(firestore.rules)과 앱이 같은 약속을 쓰는지: 게임이 만드는 모든 랭킹 키가 규칙의 쓰기 허용 모양에 맞고(어긋나면
     //      그 모드 기록이 거절됨) 이상한 키는 안 맞는다. 규칙의 '나이대 → 가장 많은 나이' 표가 화면(community.js)과 같다

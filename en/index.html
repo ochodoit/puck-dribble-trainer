@@ -371,11 +371,12 @@
               <small class="hint" id="proc-live"></small>
             </label>
             <label>Camera frame rate
-              <select id="set-camFps">
-                <option value="60">60fps (fast dribbling, default)</option>
-                <option value="30">30fps (dim rooms)</option>
+              <select id="set-camRate">
+                <option value="auto">Auto (default)</option>
+                <option value="60">Always 60fps</option>
+                <option value="30">Always 30fps (dim rooms)</option>
               </select>
-              <small class="hint">Cameras that cannot do 60 fall back to 30 on their own. If the picture looks dark or grainy, choose 30</small>
+              <small class="hint">Auto: films at 60fps and drops to 30 if this device cannot keep up. The phone camera link switches between 60 and 30 based on the Wi-Fi. If the picture looks dark or grainy, fix it at 30</small>
             </label>
           </div>
         </details>

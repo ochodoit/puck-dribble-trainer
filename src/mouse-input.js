@@ -23,16 +23,17 @@ const inv = (val, a, b) => (b === a ? 0.5 : (val - a) / (b - a));
 
 /**
  * 포인터 위치 -> 추적 좌표 {u, v}
- * ctx: { view, canvas, modeList, choiceTrack, modeOpen, resultOpen, game, topInset, flipDepth, flipV, floorMap, PW, PH }
- * flipV: 화면을 위아래로 뒤집어 보이는 중 (퀵 핸즈·반응 타겟·자유 연습) — 카메라 화면 좌표를 거꾸로 읽는다
+ * ctx: { view, canvas, modeList, choiceTrack, modeOpen, resultOpen, game, topInset, cursorFlip, puckFlip, floorMap, PW, PH }
+ * cursorFlip: 모드 선택 커서가 v를 뒤집어 쓰는지. puckFlip: 바닥 위 화면에서 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리는 중
+ * (퀵 핸즈·반응 타겟·자유 연습) — 커서 자리에 퍽이 보이도록 거꾸로 읽는다
  */
 export function pointerToUV(px, py, ctx) {
   const { view, canvas, game } = ctx;
   if (ctx.modeOpen && ctx.modeList) {
-    // 모드 선택: 커서가 카드 목록 위 포인터 자리에 오도록 (main 은 flipDepth 면 v를 뒤집어 쓴다)
+    // 모드 선택: 커서가 카드 목록 위 포인터 자리에 오도록 (main 은 cursorFlip 이면 v를 뒤집어 쓴다)
     const r = ctx.modeList.getBoundingClientRect();
     const vv = clamp01((py - r.top) / r.height);
-    return { u: clamp01((px - r.left) / r.width), v: ctx.flipDepth ? 1 - vv : vv };
+    return { u: clamp01((px - r.left) / r.width), v: ctx.cursorFlip ? 1 - vv : vv };
   }
   if (ctx.resultOpen && ctx.choiceTrack) {
     const r = ctx.choiceTrack.getBoundingClientRect();
@@ -55,10 +56,9 @@ export function pointerToUV(px, py, ctx) {
     return { u: clamp01(inv(X, p0.x, p1.x)), v: clamp01(inv(Y, p0.y, p1.y)) };
   }
   // 그 밖(바닥 위 게임: 와이드·퀵 핸즈·반응 타겟·자유 연습 · 대기 중 가운데 원): 카메라 화면 좌표 그대로
-  // (화면을 위아래로 뒤집어 보이는 중이면 거꾸로). 바닥 = 수동으로 맞춘 네 모서리(있으면), 없으면 화면 전체
-  const cy = ctx.flipV ? 1 - ny : ny;
-  if (ctx.floorMap) { const [u, v] = ctx.floorMap.toUV(nx * ctx.PW, cy * ctx.PH); return { u: clamp01(u), v: clamp01(v) }; }
-  return { u: clamp01(nx), v: clamp01(cy) };
+  // (내 퍽을 위아래 반대 자리에 그리는 중이면 거꾸로). 바닥 = 수동으로 맞춘 네 모서리(있으면), 없으면 화면 전체
+  const [u, v] = ctx.floorMap ? ctx.floorMap.toUV(nx * ctx.PW, ny * ctx.PH) : [nx, ny];
+  return { u: clamp01(u), v: clamp01(ctx.puckFlip ? 1 - v : v) };
 }
 
 /** 카메라 영상 처리 결과 대신 쓰는 가짜 결과: 화면 전체가 바닥, 퍽은 포인터 자리 */

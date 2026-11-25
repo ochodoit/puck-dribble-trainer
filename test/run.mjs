@@ -230,15 +230,15 @@ const skipSetup = async (page, touch = false) => {
   console.log(`${modeSetOk ? 'PASS' : 'FAIL'} mode window has Register puck/stick and Settings left of Close; each opens over it and closing returns to the modes (${JSON.stringify({ modeBtns, calibOverMode, calibBack, overMode, backMode })})`);
   if (!modeSetOk) failed = true;
   // 자유 연습(8번 칸) 선택 -> 코스 편집: 번호 3, 1을 영역(실제 바닥) 안에 끌어다 놓기 -> 저장, 번호 순서 정렬.
-  // 퀵 핸즈처럼 영역 안에서 배경을 보며 하므로 번호는 바닥 위 자리(원근대로, 화면은 위아래로 뒤집어 보임)에 놓인다:
-  // 영역 안 비율 -> 화면 자리는 앱의 바닥 사상으로 구한다
+  // 퀵 핸즈처럼 영역 안에서 배경을 보며 하므로 번호는 바닥 위 자리(원근대로)에 놓인다:
+  // 영역 안 비율 -> 화면 자리는 앱의 바닥 사상으로 구한다 (평면 경기장을 영역에 그대로 그림)
   await page.click('#mode-list > :nth-child(8)');
   await page.waitForSelector('#course:not(.hidden)');
   const fieldBox = await (await page.$('#course-field')).boundingBox(); // 맨 위 번호 띠(트레이) 자리
   const floorPt = (fx, fy) => page.evaluate(([x, y]) => {
     const T = window.__puckTrainer, m = T.app.lastVision.floor.mapping, r = document.querySelector('#view').getBoundingClientRect();
-    const [px, py] = m.toPx(x, T.game.plane.flip ? 1 - y : y);
-    return [r.left + (px / T.vision.PW) * r.width, r.top + ((T.app.flipV ? T.vision.PH - py : py) / T.vision.PH) * r.height];
+    const [px, py] = m.toPx(x, y);
+    return [r.left + (px / T.vision.PW) * r.width, r.top + (py / T.vision.PH) * r.height];
   }, [fx, fy]);
   const dragTo = async (n, [tx, ty]) => { const b = await (await page.$(`.course-pt[data-n="${n}"]`)).boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await page.mouse.move(tx, ty, { steps: 6 }); await page.mouse.up(); };
   const dragPt = async (n, fx, fy) => dragTo(n, await floorPt(fx, fy));
@@ -247,12 +247,12 @@ const skipSetup = async (page, touch = false) => {
   const course = await page.evaluate(() => {
     const T = window.__puckTrainer, r = document.querySelector('#course > .course-pt[data-n="3"]')?.getBoundingClientRect();
     return { saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).course, game: T.game.course.points.map((p) => p.n), inField: document.querySelectorAll('#course > .course-pt').length, inTray: document.querySelectorAll('#course-slots > .course-pt').length,
-      flipV: T.app.flipV, viewFlip: document.querySelector('#view').classList.contains('flip-v'), at3: r ? [r.left + r.width / 2, r.top + r.height / 2] : null };
+      at3: r ? [r.left + r.width / 2, r.top + r.height / 2] : null };
   });
   const want3 = await floorPt(0.75, 0.6), s3 = course.saved.find((p) => p.n === 3);
   const courseOk = course.saved.length === 2 && course.game.join(',') === '1,3' && course.inField === 2 && course.inTray === 8 && Math.abs(s3.x - 0.75) < 0.03 && Math.abs(s3.y - 0.6) < 0.03
-    && course.flipV && course.viewFlip && !!course.at3 && Math.hypot(course.at3[0] - want3[0], course.at3[1] - want3[1]) < 3;
-  console.log(`${courseOk ? 'PASS' : 'FAIL'} course builder: drag numbers onto the floor area (flipped view like the game) ${JSON.stringify({ ...course, want3 })}`);
+    && !!course.at3 && Math.hypot(course.at3[0] - want3[0], course.at3[1] - want3[1]) < 3;
+  console.log(`${courseOk ? 'PASS' : 'FAIL'} course builder: drag numbers onto the floor area ${JSON.stringify({ ...course, want3 })}`);
   if (!courseOk) failed = true;
   // 트레이로 되돌리면 삭제
   await dragTo(3, [fieldBox.x + fieldBox.width * 0.5, fieldBox.y + fieldBox.height * 0.02]);

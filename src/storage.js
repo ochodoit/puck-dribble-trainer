@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS = {
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
-  flipDepth: true,                            // 앞뒤 방향(와이드 드리블을 뺀 모든 게임 공통): true = 카메라 쪽으로 밀면 화면 위로
+  reverseDepth: false,                        // 위아래 반대로(와이드 드리블을 뺀 모든 게임): 게임마다 정한 앞뒤 방향(main depthFlip)을 뒤집는다
   puckTransparency: 0,                        // 플레이 중 내 퍽 투명도(%): 0 = 또렷이, 100 = 안 보임 (1 단위). 화면의 퍽 표시와 카메라 속 진짜 퍽 모두
   figure8Dir: 'L-up',                         // 8자 드리블 방향: L|R(어느 콘 먼저) - up|down(콘을 위·아래 어느 쪽부터)
   invisible: false,                           // 투명 모드: 플레이 중 내 퍽을 아예 숨김 (손의 감각으로만). 랭킹·자랑은 일반과 따로
@@ -75,7 +75,9 @@ export function sanitizeSettings(s) {
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
   s.figure8Dir = ['L-up', 'L-down', 'R-up', 'R-down'].includes(s.figure8Dir) ? s.figure8Dir : d.figure8Dir;
-  s.flipDepth = typeof s.flipDepth === 'boolean' ? s.flipDepth : d.flipDepth;
+  // 예전 '카메라 쪽으로 밀면 화면 위로'(flipDepth)는 모든 게임이 같은 방향이던 때의 설정이라, 게임마다 방향을 정한 지금은 버리고 기본값으로
+  delete s.flipDepth;
+  s.reverseDepth = s.reverseDepth === true;
   s.bgTransparency = num(s.bgTransparency, 0, 100, d.bgTransparency);
   s.invisible = s.invisible === true;
   // 퍽 투명도 (예전 '내 퍽 표시 %' 설정은 100 - 값 으로 옮긴다)

@@ -12,11 +12,11 @@ export function dodgeField(W, H, topInset = 0) {
 /** 평면 판(화면 전체) 대신 카메라 영상 위 실제 바닥(영역 안)에 원근대로 그리는 모드 — 배경(카메라)이 보이는 게임 */
 export const FLOOR_MODES = new Set(['wide', 'quick', 'reaction', 'free']);
 /**
- * 바닥 위 게임 중 화면(카메라 영상 + 그림)을 위아래로 뒤집어 보이는 모드: 퀵 핸즈·반응 타겟·자유 연습.
- * '카메라 쪽으로 밀면 화면 위로'가 켜져 있으면 영상째 상하만 뒤집어, 흰 화면 게임(아케이드·퍽 피하기·8자)과 같은 방향으로 움직이게 한다.
- * 와이드 드리블은 카메라 화면 그대로 (뒤집지 않음)
+ * 바닥 위 게임 중 내 퍽의 위아래 움직임을 영상 속 진짜 퍽과 반대로 하는 모드: 퀵 핸즈·반응 타겟·자유 연습.
+ * 화면(카메라 영상·영역)은 그대로 두고, 평면 경기장(판정 좌표)을 영역 안에 그대로 그린다 — 평면이 뒤집혀 있으면(plane.flip)
+ * 카메라 쪽으로 밀 때 내 퍽이 영역 안에서 위로 간다. 와이드 드리블은 영상 속 진짜 퍽 자리 그대로
  */
-export const FLIP_VIEW_MODES = new Set(['quick', 'reaction', 'free']);
+export const FLOOR_FLIP_MODES = new Set(['quick', 'reaction', 'free']);
 
 export class Renderer {
   constructor(canvas) {
@@ -37,15 +37,14 @@ export class Renderer {
 
   /**
    * vision: Vision 결과, puck: Tracker, game: Game, procSize: {PW,PH}, now: ms
-   * flipV: 화면을 위아래로 뒤집어 보이는 중 (영상은 CSS 로 뒤집히므로, 카메라 좌표로 그리는 모든 것을 같이 뒤집는다)
    */
-  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false, pick = null, flipV = false }) {
+  draw({ vision, puck, game, procSize, now, showCandidates, idleHold = 0, calib = null, areaEditing = false, areaDragging = false, cover = null, setupTest = null, peek = false, pick = null }) {
     const { ctx, canvas } = this;
     this.peek = peek; // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중처럼 (내 퍽 투명도 적용)
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
     const sx = W / procSize.PW, sy = H / procSize.PH;
-    const toC = flipV ? (px, py) => [px * sx, (procSize.PH - py) * sy] : (px, py) => [px * sx, py * sy];
+    const toC = (px, py) => [px * sx, py * sy];
     // 퍽 투명도: 카메라 영상 속 진짜 퍽을 둘레 바닥색으로 덮는다 (맨 아래 층 — 목표·영역 그림은 그 위에)
     if (cover && cover.alpha > 0.001) {
       const [cx, cy] = toC(cover.x, cover.y), rr = cover.r * sx * 2.4;
@@ -66,6 +65,7 @@ export class Renderer {
     // pick: 보정 '터치로 지정' 중 ('puck'|'stick') — 게임 화면 대신 카메라 영상을 보여 줘야 화면에서 물체를 누를 수 있다
     const playing = mapping && !areaEditing && !(calib?.active && calib.circle && !calib.plane) && !setupTest && !pick; // calib.plane: 8자 대기 원은 흰 훈련 화면 위에
     const view = !playing ? 'setup' : game.mode.id === 'arcade' ? 'arcade' : FLOOR_MODES.has(game.mode.id) ? 'floor' : 'flat';
+    this.view = view; // 체험(마우스) 모드가 커서 자리에 퍽이 오도록 좌표를 맞출 때 쓴다 (setup = 영상 속 진짜 자리)
 
     // ---- 게임 영역 (평면 판 모드에서는 그리지 않음: 평면 판이 곧 영역이라 뒤에 비치는 사다리꼴은 헷갈리기만 한다) ----
     if (floor?.quad && view !== 'flat') {
@@ -118,7 +118,7 @@ export class Renderer {
       return;
     }
 
-    // ---- 와이드 드리블·퀵 핸즈·반응 타겟·자유 연습: 카메라 영상 위 실제 바닥(영역 안)에 원근대로 (내 퍽 = 영상 속 진짜 퍽 자리) ----
+    // ---- 와이드 드리블·퀵 핸즈·반응 타겟·자유 연습: 카메라 영상 위 실제 바닥(영역 안)에 원근대로 (와이드의 내 퍽 = 영상 속 진짜 퍽 자리) ----
     if (view === 'floor') {
       const drawFloor = { wide: this._drawWide, quick: this._drawQuick, reaction: this._drawReaction, free: this._drawCourse }[game.mode.id];
       drawFloor.call(this, ctx, W, H, game, puck, now, uvToC);
@@ -133,7 +133,7 @@ export class Renderer {
       for (const c of vision.puckCandidates) {
         const [x0, y0] = toC(c.minx, c.miny), [x1, y1] = toC(c.maxx + 1, c.maxy + 1);
         ctx.strokeStyle = C.red; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-        text(ctx, `${c.area} · ${c.score.toFixed(2)}`, x0, Math.min(y0, y1) - 3, fs * 0.6, { weight: 500, color: C.ink, align: 'left', baseline: 'bottom' });
+        text(ctx, `${c.area} · ${c.score.toFixed(2)}`, x0, y0 - 3, fs * 0.6, { weight: 500, color: C.ink, align: 'left', baseline: 'bottom' });
       }
     }
   }
@@ -242,8 +242,8 @@ export class Renderer {
       const rr = game.course.reach * pxPerX(tg.x, tg.y * A) * (1.05 + 0.12 * Math.sin(now / 160));
       ctx.beginPath(); ctx.arc(tx, ty, rr, 0, Math.PI * 2); ctx.lineWidth = hair * 1.5; ctx.strokeStyle = C.red; ctx.stroke();
     }
-    // 내 퍽에서 목표까지의 선 + 궤적 + 내 퍽 (영상 속 진짜 퍽 자리)
-    this._drawMeFloor(ctx, game, puck, now, K, uvToC, (ctx, mx, my) => {
+    // 내 퍽에서 목표까지의 선 + 궤적 + 내 퍽 (평면 자리: 영상 속 퍽과 위아래 반대로 움직임)
+    this._drawMeFloor(ctx, game, puck, now, K, (ctx, mx, my) => {
       if (!game.running || !pts.length) return;
       const tg = pts[game.courseIdx % pts.length];
       const [tx, ty] = P(tg.x, tg.y * A);
@@ -261,14 +261,17 @@ export class Renderer {
   /**
    * 바닥 위 경기장 (와이드 드리블·퀵 핸즈·반응 타겟·자유 연습): 카메라 영상은 그대로 두고, 구역·목표를 실제 바닥(영역 안)에 원근대로 그린다.
    * 평면 좌표(가로 1 × 세로 A) → 바닥 uv → 화면. 판정과 같은 좌표라 그린 사각 구역이 곧 판정 범위.
-   * 화면을 위아래로 뒤집어 보이는 중(퀵 핸즈·반응 타겟·자유 연습)이면 uvToC 가 이미 뒤집어 준다 (영상과 함께).
+   *  - 와이드 드리블: 평면의 뒤집기를 되돌려 그린다 = 구역·내 퍽이 영상 속 실제 바닥 자리 그대로
+   *  - 퀵 핸즈·반응 타겟·자유 연습(FLOOR_FLIP_MODES): 평면을 영역에 그대로 그린다 = 평면이 뒤집혀 있으면(plane.flip)
+   *    화면은 그대로인 채 내 퍽만 영상 속 진짜 퍽과 위아래 반대로 움직인다 (카메라 쪽으로 밀면 위로)
    * 동그라미(대기 원·내 퍽)는 세로 비율 A가 실제 바닥 비율과 달라 찌그러지므로, 그 자리의 가로 축척(pxPerX)으로 둥글게 그린다.
    * f: 바닥 영역을 감싸는 화면 사각형 (안내 글자 자리)
    */
   _floorField(ctx, W, H, game, uvToC) {
     const dpr = this.dpr, hair = Math.max(1, dpr), fs = Math.max(11 * dpr, W * 0.017);
     const A = game.plane.A, flip = game.plane.flip;
-    const P = (x, y) => uvToC(x, flip ? 1 - y / A : y / A);
+    const undo = flip && !FLOOR_FLIP_MODES.has(game.mode.id);
+    const P = (x, y) => uvToC(x, undo ? 1 - y / A : y / A);
     const path = (pts) => { ctx.beginPath(); pts.forEach(([x, y], i) => { const [cx, cy] = P(x, y); if (i) ctx.lineTo(cx, cy); else ctx.moveTo(cx, cy); }); ctx.closePath(); };
     const rect = (z) => path([[z.x - z.w / 2, z.y - z.h / 2], [z.x + z.w / 2, z.y - z.h / 2], [z.x + z.w / 2, z.y + z.h / 2], [z.x - z.w / 2, z.y + z.h / 2]]);
     const pxPerX = (x, y) => { const a = P(x - 0.01, y), b = P(x + 0.01, y); return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.02; };
@@ -283,25 +286,27 @@ export class Renderer {
   }
 
   /**
-   * 바닥 위 경기장의 내 퍽: 카메라 속 진짜 퍽 자리에 잉크 정원 (그 자리의 바닥 축척대로 — 먼 쪽은 작게). 궤적은 헤어라인.
+   * 바닥 위 경기장의 내 퍽: 잉크 정원 (그 자리의 바닥 축척대로 — 먼 쪽은 작게). 궤적은 헤어라인.
+   * 자리는 판정과 같은 평면 좌표를 바닥에 그린 곳 (K.P): 와이드 드리블은 영상 속 진짜 퍽 자리, 퀵 핸즈·반응 타겟·자유 연습은 위아래 반대.
    * before(ctx, cx, cy): 같은 농도로 먼저 그릴 것 (자유 연습의 목표까지 선). cx·cy = 내 퍽의 화면 자리
    */
-  _drawMeFloor(ctx, game, puck, now, { hair }, uvToC, before = null) {
+  _drawMeFloor(ctx, game, puck, now, { hair, P, pxPerX }, before = null) {
     if (!puck.pos) return;
+    const at = (u, v) => { const p = game.toPlane(u, v); return P(p.x, p.y); };
     alphaLayer(ctx, game.running || this.peek ? this.puckAlpha : 1, (ctx) => {
-      if (before) { const [mx, my] = uvToC(puck.pos.x, puck.pos.y); before(ctx, mx, my); }
+      const me = game.toPlane(puck.pos.x, puck.pos.y);
+      const [cx, cy] = P(me.x, me.y);
+      if (before) before(ctx, cx, cy);
       if (puck.trail.length > 1) {
         ctx.lineWidth = hair;
         for (let i = 1; i < puck.trail.length; i++) {
           const alpha = Math.max(0, 1 - (now - puck.trail[i].t) / 700) * 0.45;
           if (alpha <= 0) continue;
-          const [ax, ay] = uvToC(puck.trail[i - 1].x, puck.trail[i - 1].y), [bx, by] = uvToC(puck.trail[i].x, puck.trail[i].y);
+          const [ax, ay] = at(puck.trail[i - 1].x, puck.trail[i - 1].y), [bx, by] = at(puck.trail[i].x, puck.trail[i].y);
           ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.strokeStyle = rgba(C.ink, alpha); ctx.stroke();
         }
       }
-      const { x: u, y: v } = puck.pos;
-      const [cx, cy] = uvToC(u, v), [ax, ay] = uvToC(u - 0.01, v), [bx, by] = uvToC(u + 0.01, v);
-      const r = Math.max(3 * this.dpr, PUCK_R * Math.hypot(bx - ax, by - ay) / 0.02); // 그 자리의 바닥 가로 축척 (u = 평면 x)
+      const r = Math.max(3 * this.dpr, PUCK_R * pxPerX(me.x, me.y)); // 그 자리의 바닥 가로 축척 (u = 평면 x)
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = puck.state === 'predicted' ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
       ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.9); ctx.stroke(); // 어두운 바닥에서도 보이게 얇은 종이색 가장자리
@@ -363,7 +368,7 @@ export class Renderer {
       }
     }
 
-    this._drawMeFloor(ctx, game, puck, now, K, uvToC);
+    this._drawMeFloor(ctx, game, puck, now, K);
     if (!game.running) {
       const min = Math.round(game.playSeconds / 60);
       text(ctx, `시작하면 훈련 3가지를 ${min}분씩 이어서 합니다`, f.x + f.w / 2, f.y + f.h * 0.42, fs, { weight: 600, color: C.inkSoft, halo: true });
@@ -474,7 +479,7 @@ export class Renderer {
       else if (game.running) { ctx.fillStyle = rgba(C.red, 0.16 + 0.1 * pulse); ctx.fill(); ctx.lineWidth = hair * 2.2; ctx.strokeStyle = C.red; ctx.stroke(); }
       else { ctx.fillStyle = rgba(C.paper, 0.3); ctx.fill(); ctx.setLineDash([unit * 0.012, unit * 0.01]); inkStroke(ctx, hair * 1.4, C.ink); ctx.setLineDash([]); }
     }
-    this._drawMeFloor(ctx, game, puck, now, K, uvToC);
+    this._drawMeFloor(ctx, game, puck, now, K);
     if (!game.running) text(ctx, game.mode.desc, f.x + f.w / 2, f.y + f.h / 2, fs, { weight: 600, color: C.inkSoft, halo: true });
     this._fieldEffects(ctx, game, K, W, 0.05);
     ctx.restore();
@@ -498,7 +503,7 @@ export class Renderer {
       }
       this._nextDot(ctx, cx, cy, r, pulse, hair, C.red);
     }
-    this._drawMeFloor(ctx, game, puck, now, K, uvToC);
+    this._drawMeFloor(ctx, game, puck, now, K);
     if (!game.running) text(ctx, game.mode.desc, f.x + f.w / 2, f.y + f.h / 2, fs, { weight: 600, color: C.inkSoft, halo: true });
     this._fieldEffects(ctx, game, K, W, 0.05);
     ctx.restore();

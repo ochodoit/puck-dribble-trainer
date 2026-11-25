@@ -303,6 +303,7 @@ export class Game {
 
   setMode(id) {
     this.mode = MODES.find((m) => m.id === id) || MODES[0];
+    this.onModeChange?.(this.mode); // main: 모드마다 다른 앞뒤 방향(plane.flip)을 바로 맞춘다
     this.resetState();
   }
 

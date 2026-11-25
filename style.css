@@ -50,9 +50,6 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .view video, .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .view video { object-fit: fill; background: var(--ink); transition: filter 0.4s; }
 .view.mirror video { transform: scaleX(-1); }
-/* 위아래 뒤집어 보기 (퀵 핸즈·반응 타겟·자유 연습: 카메라 쪽으로 밀면 화면 위로). 오버레이는 그리는 쪽에서 같이 뒤집는다 */
-.view.flip-v video, .view.flip-v #debug { transform: scaleY(-1); }
-.view.mirror.flip-v video { transform: scale(-1, -1); }
 .view.mouse-mode video { visibility: hidden; }
 .view.mouse-mode { background: var(--paper); }
 /* 체험 모드(카메라 없이): 손가락으로 끌어도 브라우저가 화면을 움직이지 않고 포인터가 계속 따라오게 */

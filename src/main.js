@@ -7,7 +7,7 @@ import { StickBridge } from './occlusion.js';
 import { placementCheck } from './placement.js';
 import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
 import { C, rgba } from './theme.js';
-import { Renderer, dodgeField, FLOOR_MODES, FLIP_VIEW_MODES } from './render.js';
+import { Renderer, dodgeField, FLOOR_MODES, FLOOR_FLIP_MODES } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel, LOTTERY_WINNERS, lotteryPool, drawLottery, couponUntil, passName, EXT_PASS } from './account.js';
@@ -52,6 +52,7 @@ const tracker = new Tracker();
 const stickBridge = new StickBridge(); // 스틱이 퍽을 가린 동안 블레이드로 퍽 자리를 잇는다 (스틱 지정 시)
 const sfx = new Sfx();
 const game = new Game(sfx);
+game.onModeChange = () => applyDepthDirection(); // 앞뒤 방향은 게임마다 다르다 (depthFlip) — 모드를 바꾸는 즉시
 const renderer = new Renderer(els.overlay);
 const mouse = new MouseInput(); // 카메라 없이 체험: 마우스 포인터나 손가락이 퍽 (누구나)
 
@@ -68,7 +69,6 @@ const app = {
   authStick: null,   // 회원가입 스틱 선택: 'L' | 'R'
   cornerDrag: false, // 영역 편집: 모서리를 끄는 중
   paused: false,     // 옵션 창이 떠서 멈춘 상태
-  flipV: false,      // 화면(카메라 영상 + 그림)을 위아래로 뒤집어 보이는 중 (viewFlipped)
   cover: null,       // 퍽 투명도: 카메라 속 진짜 퍽을 덮는 자리 {x, y, r, rgb, alpha, at} (처리 픽셀 좌표)
   calib: { active: false, manual: false, target: 'puck', hold: 0, status: 'none', sample: null, circle: null }, // 가운데 원: 물체 학습 + 핸즈프리 시작
   calibFromMode: false, // 모드 창에서 시작한 보정이면 끝난 뒤 모드 창으로 돌아간다
@@ -907,7 +907,7 @@ function bindUI() {
     toast(settings.invisible ? '투명 모드 — 플레이 중 내 퍽이 보이지 않습니다. 손의 감각으로만 피하세요' : '투명 모드 끔');
   });
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
-  $('#set-flipDepth').addEventListener('change', (e) => { settings.flipDepth = e.target.checked; applyDepthDirection(); persist(); });
+  $('#set-reverseDepth').addEventListener('change', (e) => { settings.reverseDepth = e.target.checked; applyDepthDirection(); persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
 
   // 모드/대결
@@ -1483,7 +1483,7 @@ function layout() {
     const hud = $('#hud').getBoundingClientRect();
     renderer.topInset = clamp((hud.bottom - rect.top) / rect.height, 0, 0.4);
     const f = dodgeField(renderer.canvas.width, renderer.canvas.height, renderer.topInset);
-    game.plane = { A: f.h / f.w, flip: settings.flipDepth };
+    game.plane = { A: f.h / f.w, flip: depthFlip() };
     // 자유 연습 번호 띠(트레이) 자리: 상단 HUD 아래 화면 폭. 놓은 번호는 실제 바닥(영역) 위 자리에 (placeCoursePoints)
     const cw = renderer.canvas.width, chh = renderer.canvas.height, cf = $('#course-field');
     cf.style.left = `${(f.x / cw) * 100}%`; cf.style.top = `${(f.y / chh) * 100}%`;
@@ -1566,7 +1566,6 @@ function loop(raw) {
   if (clock.pausedAt != null) { clock.offset += raw - clock.pausedAt; clock.pausedAt = null; app.paused = false; }
   const now = raw - clock.offset; // 멈춘 시간을 뺀 게임 시계 (clockNow() 와 같은 기준)
   const video = els.video;
-  applyViewFlip(); // 이번 프레임의 화면 뒤집기 (모드·영역 편집·보정이 바뀌면 바로) — 마우스·코스 번호·그리기가 모두 이 값을 쓴다
   if (app.mouseMode) stepMouse(now);
   else if (video.readyState < 2) return;
 
@@ -1638,8 +1637,7 @@ function loop(raw) {
   game.arcade.idleHold = app.idleHold;
   applyWash(); // 게임마다 다른 배경·퍽 투명도 규칙 (모드가 바뀌어도 바로)
   updatePuckCover(result, now);
-  applyViewFlip(); // 이번 프레임에 시작·보정·영역 편집으로 바뀌었으면 그리기 전에 맞춘다
-  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug && !game.running, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null, pick: app.calibTarget, flipV: app.flipV });
+  renderer.draw({ vision: result, puck: tracker, game, procSize: { PW: vision.PW, PH: vision.PH }, now, showCandidates: settings.debug && !game.running, idleHold: app.idleHold, calib: app.calib, areaEditing: app.areaEditing, areaDragging: app.cornerDrag, cover: app.cover, setupTest: app.setup === 'test' ? app.test : null, pick: app.calibTarget });
   drawTransparencyPreview(result);
   if (settings.debug && vision.debugImage) els.debug.getContext('2d').putImageData(vision.debugImage, 0, 0);
 
@@ -1660,7 +1658,9 @@ function stepMouse(now) {
   if (mouse.has) {
     meas = pointerToUV(mouse.x, mouse.y, {
       floorMap, PW: vision.PW, PH: vision.PH,
-      view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, flipDepth: settings.flipDepth, flipV: app.flipV,
+      view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, cursorFlip: !settings.reverseDepth,
+      // 퀵 핸즈·반응 타겟·자유 연습 화면: 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리므로 커서도 그 자리로 (대기 중 가운데 원은 진짜 자리)
+      puckFlip: renderer.view === 'floor' && FLOOR_FLIP_MODES.has(game.mode.id) && game.plane.flip,
       modeList: els.modeList, modeOpen: !els.panelMode.classList.contains('hidden'),
       choiceTrack: $('#choice-track'), resultOpen: !els.panelResult.classList.contains('hidden'),
     });
@@ -1755,7 +1755,7 @@ function updateModeChoice(dt) {
   let idx = null;
   if (tracked) {
     const r = els.modeList.getBoundingClientRect();
-    const u = clamp(tracker.pos.x, 0, 1), v = clamp(settings.flipDepth ? 1 - tracker.pos.y : tracker.pos.y, 0, 1);
+    const u = clamp(tracker.pos.x, 0, 1), v = clamp(!settings.reverseDepth ? 1 - tracker.pos.y : tracker.pos.y, 0, 1); // 기본: 카메라 쪽으로 밀면 커서가 위로
     const cx = r.left + u * r.width, cy = r.top + v * r.height;
     cursor.style.left = `${cx}px`; cursor.style.top = `${cy}px`;
     cursor.classList.remove('hidden');
@@ -1814,23 +1814,23 @@ function checkChallenge() {
 
 /**
  * 자유 연습 포인트(평면 비율 x·y, 0~1 — 화면에서 영역의 왼쪽 위가 0,0) -> 보기 영역(#view) 안의 비율 [nx, ny].
- * 포인트는 실제 바닥(네 모서리로 맞춘 영역) 위에 놓이므로 원근대로, 화면을 위아래로 뒤집어 보이는 중이면 뒤집어서
+ * 평면 경기장을 영역(네 모서리로 맞춘 실제 바닥)에 그대로 그리므로 포인트도 그 자리에 원근대로 놓인다
  */
 function courseToView(p, m = app.lastVision?.floor?.mapping) {
   if (!m) return null;
-  const [px, py] = m.toPx(p.x, game.plane.flip ? 1 - p.y : p.y);
-  return [px / vision.PW, (app.flipV ? vision.PH - py : py) / vision.PH];
+  const [px, py] = m.toPx(p.x, p.y);
+  return [px / vision.PW, py / vision.PH];
 }
 
 /** 보기 영역 안의 비율 [nx, ny] -> 자유 연습 포인트(평면 비율). 영역(실제 바닥) 밖이면 null */
 function viewToCourse(nx, ny, m = app.lastVision?.floor?.mapping) {
   if (!m) return null;
-  const [u, v] = m.toUV(nx * vision.PW, (app.flipV ? 1 - ny : ny) * vision.PH);
+  const [u, v] = m.toUV(nx * vision.PW, ny * vision.PH);
   if (!(u >= -0.01 && u <= 1.01 && v >= -0.01 && v <= 1.01)) return null;
-  return { x: clamp(u, 0.03, 0.97), y: clamp(game.plane.flip ? 1 - v : v, 0.03, 0.97) };
+  return { x: clamp(u, 0.03, 0.97), y: clamp(v, 0.03, 0.97) };
 }
 
-/** 놓은 번호(DOM)를 실제 바닥 위 자리로 — 영역·화면 크기·뒤집기가 바뀌어도 맞도록 매 프레임. 끄는 중인 번호는 손가락을 따라가게 둔다 */
+/** 놓은 번호(DOM)를 실제 바닥 위 자리로 — 영역·화면 크기가 바뀌어도 맞도록 매 프레임. 끄는 중인 번호는 손가락을 따라가게 둔다 */
 function placeCoursePoints() {
   const m = app.lastVision?.floor?.mapping;
   if (!m) return;
@@ -2700,7 +2700,7 @@ function applySettingsToUI() {
   $('#set-mirror').checked = settings.mirror;
   $('#set-sound').checked = settings.sound;
   $('#set-autoStart').checked = settings.autoStart;
-  $('#set-flipDepth').checked = settings.flipDepth;
+  $('#set-reverseDepth').checked = settings.reverseDepth;
   applyDepthDirection();
   els.invisibleToggle.checked = settings.invisible;
   game.invisible = settings.invisible;
@@ -2737,9 +2737,7 @@ function drawTransparencyPreview(result) {
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
   const ctx = cv.getContext('2d');
   const live = !app.mouseMode && v.readyState >= 2;
-  const flipV = viewFlipped(); // 게임 화면처럼 위아래로 뒤집어 (퀵 핸즈·반응 타겟·자유 연습)
-  const procY = (y) => (flipV ? vision.PH - y : y) * (h / vision.PH);
-  if (live) { ctx.save(); if (settings.mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); } if (flipV) { ctx.translate(0, h); ctx.scale(1, -1); } ctx.drawImage(v, 0, 0, w, h); ctx.restore(); }
+  if (live) { ctx.save(); if (settings.mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); } ctx.drawImage(v, 0, 0, w, h); ctx.restore(); }
   else { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, w, h); }
   const pa = renderer.puckAlpha;
   // 영상 속 진짜 퍽을 둘레 바닥색으로 덮기 (게임 중 퍽 투명도와 같은 방식)
@@ -2748,25 +2746,23 @@ function drawTransparencyPreview(result) {
     const r = Math.max(3, Math.sqrt((p.area || settings.puckModel.area || 40) / Math.PI));
     const ring = vision.ringColor(p.x, p.y, r * 2.2, r * 3.4) || { r: 236, g: 233, b: 226 };
     const col = `${Math.round(ring.r)},${Math.round(ring.g)},${Math.round(ring.b)}`;
-    const cx = p.x * (w / vision.PW), cy = procY(p.y), rr = r * (w / vision.PW) * 2.4;
+    const cx = p.x * (w / vision.PW), cy = p.y * (h / vision.PH), rr = r * (w / vision.PW) * 2.4;
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
     g.addColorStop(0, `rgba(${col},${1 - pa})`); g.addColorStop(0.62, `rgba(${col},${1 - pa})`); g.addColorStop(1, `rgba(${col},0)`);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill();
   }
   ctx.fillStyle = rgba(C.paper, renderer.wash); ctx.fillRect(0, 0, w, h); // 평면 판의 종이 배경
   ctx.beginPath(); ctx.arc(w * 0.72, h * 0.4, w * 0.045, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill(); // 목표 하나
-  // 내 퍽: 지금 보이는 자리 — 평면 판 게임은 판에서와 같은 자리, 바닥 위 게임은 영상 속 진짜 퍽 자리. 못 찾으면 왼쪽 아래
+  // 내 퍽: 지금 보이는 자리 — 평면 판 게임은 판에서와 같은 자리, 바닥 위 게임은 영역 안 자리
+  // (와이드는 영상 속 진짜 퍽 자리, 퀵 핸즈·반응 타겟·자유 연습은 위아래 반대). 못 찾으면 왼쪽 아래
   const obj = settings.controller === 'stick' ? result?.stick : p, m = result?.floor?.mapping;
-  let pos = { x: 0.3, y: 0.62 };
-  if (FLOOR_MODES.has(game.mode.id)) {
-    const at = obj ? [obj.x, obj.y] : m && tracker.pos && tracker.state !== 'lost' ? m.toPx(tracker.pos.x, tracker.pos.y) : null;
-    if (at) pos = { x: at[0] / vision.PW, y: procY(at[1]) / h };
-  } else {
-    let uv = null;
-    if (obj && m) { const [u, v] = m.toUV(obj.x, obj.y); if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) uv = { x: u, y: v }; }
-    else if (tracker.pos && tracker.state !== 'lost') uv = tracker.pos;
-    if (uv) pos = { x: uv.x, y: game.plane.flip ? 1 - uv.y : uv.y };
-  }
+  let uv = null, pos = { x: 0.3, y: 0.62 };
+  if (obj && m) { const [u, v] = m.toUV(obj.x, obj.y); if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) uv = { x: u, y: v }; }
+  else if (tracker.pos && tracker.state !== 'lost') uv = tracker.pos;
+  if (uv && m && FLOOR_MODES.has(game.mode.id)) {
+    const [px, py] = m.toPx(uv.x, FLOOR_FLIP_MODES.has(game.mode.id) && game.plane.flip ? 1 - uv.y : uv.y);
+    pos = { x: px / vision.PW, y: py / vision.PH };
+  } else if (uv) pos = { x: uv.x, y: game.plane.flip ? 1 - uv.y : uv.y };
   ctx.globalAlpha = pa;
   ctx.beginPath(); ctx.arc(pos.x * w, pos.y * h, Math.max(4 * dpr, PUCK_R * w), 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill();
   ctx.globalAlpha = 1;
@@ -2833,7 +2829,7 @@ function drawPeek(now) {
   const puck = { pos: pos || held || tracker.pos, state: pos ? 'tracked' : 'predicted', trail: [], speed: 0, touches: 0 };
   if (game.mode.id === 'arcade' && puck.pos) game.arcade.avatar = game.arcade.toZone(puck.pos.x, puck.pos.y);
   updatePuckCover(result, now, true);
-  renderer.draw({ vision: result, puck, game, procSize: { PW: vision.PW, PH: vision.PH }, now, cover: app.cover, peek: true, flipV: applyViewFlip() });
+  renderer.draw({ vision: result, puck, game, procSize: { PW: vision.PW, PH: vision.PH }, now, cover: app.cover, peek: true });
 }
 
 /**
@@ -2885,31 +2881,21 @@ function refreshVisualLocks() {
 }
 
 /**
- * 앞뒤 방향 (와이드 드리블을 뺀 모든 게임 공통): true = 퍽을 카메라 쪽으로 밀면 화면 위로, 몸쪽으로 당기면 아래로.
- * 흰 화면 게임(아케이드·퍽 피하기·8자)은 판 위의 퍽만, 배경이 보이는 게임(퀵 핸즈·반응 타겟·자유 연습)은 화면째(viewFlipped) 뒤집는다.
- * 모든 모드가 같은 값을 쓰도록 한 곳에서 맞춘다 (설정 초기화 때 평면 모드만 예전 값으로 남던 문제 방지)
+ * 게임마다 앞뒤(위아래) 방향: true = 판정 평면의 위아래를 카메라 영상과 반대로 (퍽을 카메라 쪽으로 밀면 화면 위로).
+ *  - 아케이드·퍽 피하기·8자 드리블 (흰 화면): false — 카메라 쪽으로 밀면 아래로 (영상 속 퍽과 같은 방향)
+ *  - 퀵 핸즈·반응 타겟·자유 연습 (영역 안, 배경이 보임): true — 화면(영상)은 그대로 두고 내 퍽만 위아래 반대로 (카메라 쪽으로 밀면 위로)
+ *  - 와이드 드리블: 영상 속 진짜 퍽 자리 그대로 (렌더러가 평면의 뒤집기를 되돌려 그리므로 이 값과 상관없음)
+ * 설정 '위아래 반대로'(reverseDepth)를 켜면 와이드 드리블을 뺀 모든 게임이 반대로 바뀐다
  */
+function depthFlip(modeId = game.mode.id) {
+  const base = FLOOR_FLIP_MODES.has(modeId);
+  return settings.reverseDepth ? !base : base;
+}
+
+/** 지금 모드의 앞뒤 방향을 게임에 적용 (모드를 바꿀 때·설정을 바꿀 때·화면 크기가 바뀔 때) */
 function applyDepthDirection() {
-  game.arcade.flipY = settings.flipDepth;
-  game.plane.flip = settings.flipDepth;
-  applyViewFlip();
-}
-
-/**
- * 화면(카메라 영상 + 그 위 그림)을 위아래로 뒤집어 보이는지: 영역 안에서 배경을 보며 하는 게임(퀵 핸즈·반응 타겟·자유 연습)은
- * '카메라 쪽으로 밀면 화면 위로'가 켜져 있으면 상하만 뒤집는다 (좌우는 거울 모드 그대로) — 영상 속 진짜 퍽과 화면의 내 퍽이
- * 같은 자리에서 같은 방향으로 움직이고, 흰 화면 게임과 앞뒤 방향이 같다. 와이드 드리블은 카메라 화면 그대로.
- * 시작 준비·영역 편집·보정(터치로 지정·원 안에 3초)은 카메라 그대로 (네 모서리 손잡이·누른 자리가 영상과 맞아야 하므로)
- */
-function viewFlipped() {
-  return !!settings.flipDepth && FLIP_VIEW_MODES.has(game.mode.id) && !app.setup && !app.areaEditing && !app.calibTarget && !app.calib.manual;
-}
-
-/** viewFlipped 를 화면에 적용: 영상(과 디버그 마스크)은 CSS 로 뒤집고, 오버레이는 renderer.draw 의 flipV 로 같이 뒤집는다 */
-function applyViewFlip() {
-  const on = viewFlipped();
-  if (app.flipV !== on || els.view.classList.contains('flip-v') !== on) { app.flipV = on; els.view.classList.toggle('flip-v', on); }
-  return on;
+  game.arcade.flipY = depthFlip('arcade');
+  game.plane.flip = depthFlip();
 }
 
 function persist() { saveSettings(settings); }

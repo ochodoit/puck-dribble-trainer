@@ -1749,8 +1749,8 @@
       ];
       const bad = cases.filter(([ko, en]) => tr(ko) !== en).map(([ko]) => [ko, tr(ko)]);
       check('L3 dictionary, patterns and segment-wise translation', bad.length === 0, bad);
-      const camMsg = tr('카메라 권한이 거부되었습니다. (NotAllowedError: Permission denied)\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.');
-      check('L3 multi-line camera help is fully translated', !/[가-힣]/.test(camMsg) && camMsg.includes('(NotAllowedError: Permission denied)') && camMsg.includes('\n'), camMsg);
+      const camMsg = tr('카메라 권한이 거부되었습니다.\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.');
+      check('L3 multi-line camera help is fully translated', !/[가-힣]/.test(camMsg) && camMsg.startsWith('Camera permission was denied.\n') && !camMsg.includes('Error'), camMsg);
       // DOM: 새로 들어온 글자·속성도 따라가며 번역, 사용자가 쓴 글(data-ugc)은 그대로, 한국어로 돌리면 원문 복원
       const box = document.createElement('div');
       box.innerHTML = '<p id="l-a">설정</p><input id="l-b" placeholder="가입 코드"><b id="l-c" data-ugc>설정</b><span id="l-d"></span>';

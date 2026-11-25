@@ -987,13 +987,35 @@ const skipSetup = async (page, touch = false) => {
   const errText = await page.textContent('#splash-error');
   const diag = await page.textContent('#diag-info');
   const options = await page.$$eval('#diag-camera option', (o) => o.length);
-  const ok = errText.includes('다른 프로그램') && diag.includes('NotReadableError') && diag.includes('시도 기록') && options >= 2;
-  console.log(`${ok ? 'PASS' : 'FAIL'} camera failure shows diagnostics (${options - 1} device(s), ${errText.trim().slice(0, 40)}…)`);
+  const diagHidden = await page.$eval('#diag-info', (e) => e.classList.contains('hidden')); // 기술 정보는 화면에 안 보이고 복사로만
+  const ok = errText.includes('다른 프로그램') && !errText.includes('NotReadableError') && diagHidden && diag.includes('NotReadableError') && diag.includes('시도 기록') && options >= 2;
+  console.log(`${ok ? 'PASS' : 'FAIL'} camera failure shows a plain message, camera list and retry; technical details only in the copy (${options - 1} device(s), ${errText.trim().slice(0, 40)}…)`);
   if (!ok) failed = true;
   // 재시도(4번째 호출부터 성공) -> 앱 시작
   await page.click('#btn-retry-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   console.log('PASS retry after failure starts the camera');
+  await context.close();
+}
+
+// ---- 4-1) 카메라가 아예 없을 때: '연결된 카메라를 찾지 못했습니다.' 한 줄만, 진단 상자는 숨김 ----
+{
+  const context = await newCtx({ viewport: { width: 1180, height: 820 }, permissions: ['camera'] });
+  await context.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => { const e = new Error('Requested device not found'); e.name = 'NotFoundError'; return Promise.reject(e); };
+    navigator.mediaDevices.enumerateDevices = async () => [];
+  });
+  const page = await context.newPage();
+  await page.goto(`${base}/index.html`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.click('#auth-guest');
+  await page.waitForSelector('#splash-error:not(.hidden)', { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('#diag-info').textContent.length > 0); // 진단(복사용)까지 끝난 뒤
+  const errText = (await page.textContent('#splash-error')).trim();
+  const boxHidden = await page.$eval('#splash-diag', (e) => e.classList.contains('hidden'));
+  const ok = errText === '연결된 카메라를 찾지 못했습니다.' && boxHidden;
+  console.log(`${ok ? 'PASS' : 'FAIL'} no camera: one plain line, no diagnostics box (${errText}, box hidden ${boxHidden})`);
+  if (!ok) failed = true;
   await context.close();
 }
 

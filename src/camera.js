@@ -138,11 +138,10 @@ function platformHint() {
   return { isMac, isWin, isIOS, isAndroid, isSafari };
 }
 
-/** 오류 이름 + 플랫폼별 해결 순서 */
+/** 오류 이름 + 플랫폼별 해결 순서 (NotFoundError 같은 기술 코드는 화면에 안 쓰고, '진단 정보 복사'에만 들어감) */
 export function describeCameraError(err) {
   const name = err?.name || '';
   const p = platformHint();
-  const detail = `(${name || 'Error'}${err?.message ? ': ' + err.message : ''})`;
   if (!window.isSecureContext) {
     return '카메라는 HTTPS(또는 localhost)에서만 사용할 수 있습니다.\n배포된 주소(https://)로 열거나, README의 HTTPS 개발 서버 안내를 참고하세요.';
   }
@@ -152,16 +151,16 @@ export function describeCameraError(err) {
       : '주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.';
     const os = p.isWin ? '\nWindows: 설정 > 개인 정보 및 보안 > 카메라에서 "카메라 액세스"와 "앱이 카메라에 액세스하도록 허용"을 켜세요 (데스크톱 앱 항목에 브라우저 포함).'
       : p.isMac ? '\nmacOS: 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 사용 중인 브라우저를 켜세요.' : '';
-    return `카메라 권한이 거부되었습니다. ${detail}\n${steps}${os}`;
+    return `카메라 권한이 거부되었습니다.\n${steps}${os}`;
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-    return `연결된 카메라를 찾지 못했습니다. ${detail}\n노트북 카메라 가림막(프라이버시 셔터)이나 Fn 카메라 끄기 키가 눌려 있지 않은지, 장치 관리자에서 카메라가 사용 중지되지 않았는지 확인하세요.`;
+    return '연결된 카메라를 찾지 못했습니다.';
   }
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError' || name === 'TimeoutError') {
-    return `카메라를 열 수 없습니다. 다른 프로그램이 카메라를 쓰고 있을 가능성이 큽니다. ${detail}\nZoom·Teams·카카오톡·카메라 앱·OBS 등을 완전히 종료하고(트레이 아이콘까지), 브라우저의 다른 탭에서 카메라를 쓰고 있지 않은지 확인한 뒤 "다시 시도"를 누르세요.${p.isWin ? '\n그래도 안 되면 Windows 설정 > 개인 정보 및 보안 > 카메라에서 접근을 켜고, 브라우저를 완전히 껐다 켜세요.' : ''}`;
+    return `카메라를 열 수 없습니다. 다른 프로그램이 카메라를 쓰고 있을 가능성이 큽니다.\nZoom·Teams·카카오톡·카메라 앱·OBS 등을 완전히 종료하고(트레이 아이콘까지), 브라우저의 다른 탭에서 카메라를 쓰고 있지 않은지 확인한 뒤 "다시 시도"를 누르세요.${p.isWin ? '\n그래도 안 되면 Windows 설정 > 개인 정보 및 보안 > 카메라에서 접근을 켜고, 브라우저를 완전히 껐다 켜세요.' : ''}`;
   }
   if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-    return `선택한 카메라를 쓸 수 없습니다. ${detail}\n아래 목록에서 다른 카메라를 고른 뒤 다시 시도하세요.`;
+    return `선택한 카메라를 쓸 수 없습니다.\n아래 목록에서 다른 카메라를 고른 뒤 다시 시도하세요.`;
   }
-  return `카메라를 시작할 수 없습니다. ${detail}\n아래 목록에서 카메라를 직접 고르거나, 브라우저를 Chrome/Edge 최신 버전으로 바꿔 보세요.`;
+  return `카메라를 시작할 수 없습니다.\n아래 목록에서 카메라를 직접 고르거나, 브라우저를 Chrome/Edge 최신 버전으로 바꿔 보세요.`;
 }

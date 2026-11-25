@@ -1366,12 +1366,13 @@ async function startCamera() {
   }
 }
 
-/** 카메라 실패 진단: 감지된 장치 목록 + 선택 재시도 + 환경 정보 */
+/** 카메라 실패 진단: 감지된 장치 목록 + 선택 재시도. 환경 정보는 화면에 안 보이고 '진단 정보 복사'로만 (카메라가 하나도 없으면 상자째 숨김) */
 async function showCameraDiagnostics(err) {
   const box = $('#splash-diag'), sel = $('#diag-camera'), info = $('#diag-info');
-  box.classList.remove('hidden');
   let devices = [];
   try { devices = await camera.listDevices(); } catch { /* ignore */ }
+  box.classList.toggle('hidden', !devices.length);
+  info.classList.add('hidden');
   sel.innerHTML = '<option value="">자동 선택</option>';
   devices.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `카메라 ${i + 1} (권한 허용 후 이름 표시)`; sel.appendChild(o); });
   if (settings.cameraId && devices.some((d) => d.deviceId === settings.cameraId)) sel.value = settings.cameraId;
@@ -1389,7 +1390,7 @@ async function showCameraDiagnostics(err) {
   if (!sel.dataset.bound) {
     sel.dataset.bound = '1';
     $('#btn-retry-camera').addEventListener('click', () => { settings.cameraId = sel.value; persist(); els.splashError.classList.add('hidden'); startCamera(); });
-    $('#btn-copy-diag').addEventListener('click', async () => { try { await navigator.clipboard.writeText(info.textContent); toast('진단 정보를 복사했습니다'); } catch { toast('복사 실패: 아래 내용을 직접 선택해 복사하세요'); } });
+    $('#btn-copy-diag').addEventListener('click', async () => { try { await navigator.clipboard.writeText(info.textContent); toast('진단 정보를 복사했습니다'); } catch { info.classList.remove('hidden'); toast('복사 실패: 아래 내용을 직접 선택해 복사하세요'); } });
   }
 }
 

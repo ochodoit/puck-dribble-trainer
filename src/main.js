@@ -226,7 +226,7 @@ async function showInvite() {
   else if (ok) { title = '정회원 초대 코드예요'; sub = line('가입하면 바로 정회원이 됩니다', until); }
   else {
     title = info.status === 'expired' ? '마감된 링크예요' : info.status === 'error' ? codeError('error') : info.status === 'full' ? (info.type === 'beta' ? '오픈베타 인원이 다 찼어요' : codeError('full', info)) : '쓸 수 없는 코드예요';
-    sub = '정회원 친구에게 초대 링크를 받거나, 게스트로 플레이하고 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요';
+    sub = '정회원 친구에게 초대 링크를 받거나, 게스트로 한 판을 끝내고 결과 화면의 가입 방법을 보세요';
   }
   $('#invite-title').textContent = title;
   $('#invite-sub').textContent = sub;
@@ -453,7 +453,10 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&am
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
 /**
- * 게스트 결과 화면: 정회원이었다면 몇 위였을지 + 인스타 플레이 인증 후 DM으로 정회원 코드를 받는 방법.
+ * 게스트 결과 화면: 정회원이었다면 몇 위였을지 + 정회원이 되는 방법 (SNS에 영상을 올리라는 조건은 없음).
+ *   - 운영자가 공개 가입 코드(오픈베타 코드)를 걸어 두었고 아직 쓸 수 있으면 [정회원 가입하기] (가입 칸을 열고 코드를 채움).
+ *     마감일이 지나거나 인원이 차면 저절로 아래 안내로 돌아간다
+ *   - 그 밖에는 정회원 친구의 초대 링크, 또는 보호자가 공식 인스타 DM으로 가입 코드 요청
  * lapsed: 베타가 끝나 정회원이 유지되지 않은 계정 (기록이 랭킹에 안 올라감 + DM 문의)
  */
 async function renderGuestNotice(result, lapsed = false) {
@@ -464,8 +467,9 @@ async function renderGuestNotice(result, lapsed = false) {
     app.account.wouldRank(key, result.score).catch(() => null),
     app.account.getSiteConfig().catch(() => ({})),
   ]);
+  const join = !lapsed && cfg.joinCode ? await app.account.checkCode(cfg.joinCode).catch(() => null) : null;
+  const canJoin = join?.status === 'ok' && join.type === 'beta';
   if (app.lastResult !== result || (!lapsed && app.account.current())) return; // 그새 다음 게임이 끝났거나 로그인함
-  const tag = String(cfg.hashtag || '').trim().replace(/^#+/, '');
   const sns = instaId(cfg.snsAccount);
   const html = [];
   if (lapsed) {
@@ -473,17 +477,32 @@ async function renderGuestNotice(result, lapsed = false) {
     html.push('<p>이번 기록은 랭킹에 올라가지 않아요. 정회원 등급은 공식 인스타 DM으로 문의해 주세요.</p>');
   } else {
     if (r) html.push(`<p class="guest-rank"><b>정회원이었다면 지금 전체 ${r.rank}위 / ${r.total}명</b></p>`);
-    html.push('<details class="guest-how"><summary>정회원이 되려면</summary>');
-    html.push('<p>정회원 친구에게 초대 링크를 받으면 바로 가입할 수 있어요.</p>');
-    html.push('<p>또는 플레이 영상을 SNS(인스타 등)에 올리고, 올린 게시물 링크를 공식 인스타 DM으로 보내 주세요. 확인되면 정회원 가입 코드를 DM으로 보내 드려요.</p>');
-    if (tag || sns) html.push(`<p class="guest-tags" data-ugc>${[tag && `#${esc(tag)}`, sns && `@${esc(sns)}`].filter(Boolean).join(' ')}</p>`);
-    html.push('<p class="muted">보호자와 함께 해 주세요 · 얼굴 없이 판과 퍽만 나와도 괜찮아요 · 비공개 계정이면 영상이나 캡처를 DM에 함께 보내 주세요</p>');
-    html.push('</details>');
+    if (canJoin) {
+      html.push('<p>지금은 누구나 정회원으로 가입할 수 있어요.</p>');
+      html.push('<div class="guest-dm"><button type="button" class="btn btn-primary" id="guest-join">정회원 가입하기</button></div>');
+      html.push('<p class="muted">보호자와 함께 가입해 주세요</p>');
+    } else {
+      html.push('<details class="guest-how"><summary>정회원이 되려면</summary>');
+      html.push('<p>정회원 친구에게 초대 링크를 받으면 바로 가입할 수 있어요.</p>');
+      if (sns) html.push('<p>초대 링크가 없으면 보호자가 공식 인스타 DM으로 가입 코드를 요청해 주세요.</p>');
+      html.push('<p class="muted">보호자와 함께 해 주세요</p>');
+      html.push('</details>');
+    }
   }
-  if (sns) html.push(`<div class="guest-dm"><a class="btn btn-primary" id="guest-dm" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span></div>`);
-  if (!lapsed) html.push('<p class="muted">받은 코드는 첫 화면 회원가입의 가입 코드 칸에 넣으세요.</p>');
+  if (sns && !canJoin) html.push(`<div class="guest-dm"><a class="btn btn-primary" id="guest-dm" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span></div>`);
+  if (!lapsed && !canJoin) html.push('<p class="muted">받은 코드는 첫 화면 회원가입의 가입 코드 칸에 넣으세요.</p>');
   box.innerHTML = html.join('');
+  if (canJoin) $('#guest-join').addEventListener('click', () => openJoin(join.code));
   box.classList.remove('hidden');
+}
+
+/** 게스트 결과 화면의 [정회원 가입하기]: 결과 창을 닫고 회원가입 칸을 열어 공개 가입 코드를 채운다 */
+function openJoin(code) {
+  close(els.panelResult);
+  openLogin();
+  setAuthTab('register');
+  $('#auth-code').value = codeLabel(code);
+  track('join_click', { from: 'result' });
 }
 
 // =============== 내 정보 ===============
@@ -577,7 +596,13 @@ function setupAdmin() {
   $('#adm-save-config').addEventListener('click', () => adminDo(async () => {
     const raw = $('#adm-sns').value.trim(), sns = instaId(raw);
     if (raw && !sns) throw new Error('인스타 계정 아이디를 확인하세요 (영문·숫자·밑줄·점)');
-    app.site = await app.account.setSiteConfig({ hashtag: $('#adm-hashtag').value.trim().replace(/^#+/, ''), snsAccount: sns });
+    const joinCode = normCode($('#adm-join-code').value);
+    if (joinCode) { // 공개 가입 코드: 지금 쓸 수 있는 오픈베타 코드만 (1회용·친구 초대 코드를 걸면 첫 사람만 가입하고 끝남)
+      const info = await app.account.checkCode(joinCode);
+      if (info.status !== 'ok') throw new Error(codeError(info.status, info));
+      if (info.type !== 'beta') throw new Error('공개 가입 코드에는 오픈베타 코드만 넣을 수 있어요');
+    }
+    app.site = await app.account.setSiteConfig({ snsAccount: sns, joinCode: joinCode || null });
     app.adminConfigLoaded = false;
     toast('게스트 안내를 저장했습니다');
   }));
@@ -794,7 +819,7 @@ async function renderAdmin() {
     $('#adm-init').classList.toggle('hidden', m.ready);
     if (!app.adminConfigLoaded) {
       const cfg = await a.getSiteConfig();
-      $('#adm-hashtag').value = cfg.hashtag || ''; $('#adm-sns').value = cfg.snsAccount || '';
+      $('#adm-join-code').value = cfg.joinCode ? codeLabel(cfg.joinCode) : ''; $('#adm-sns').value = cfg.snsAccount || '';
       $('#adm-beta-end').value = cfg.betaEndsAt ? ymd(cfg.betaEndsAt) : '';
       app.adminConfigLoaded = true;
     }

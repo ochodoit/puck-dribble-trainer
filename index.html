@@ -234,7 +234,7 @@
               </div>
             </div>
             <p class="reg-only hidden auth-hint">아이디는 로그인에만 쓰고 공개되지 않아요 (4~20자, 영문 소문자로 시작, 영문·숫자·_). 별명은 랭킹에 공개되니 실명 대신 쓰고, 아이디와 다르게 정하세요. 비밀번호는 8자 이상, 영문과 숫자를 함께 넣으세요.</p>
-            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요.</p>
+            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 한 판을 끝내 보세요. 결과 화면에 가입 방법이 나와요.</p>
             <p class="login-only auth-hint muted">예전에 별명과 숫자 6자리로 가입했다면 별명과 그 비밀번호로 로그인하세요. 아이디를 한 번 새로 만들게 됩니다.</p>
             <div class="login-only auth-forgot">
               <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">비밀번호를 잊었어요</button>
@@ -610,7 +610,7 @@
         </section>
         <section class="adm-sec">
           <h3>1회용 코드</h3>
-          <p class="muted">SNS 플레이 인증(올린 영상 링크)을 DM으로 확인한 게스트에게 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
+          <p class="muted">DM으로 가입 코드를 요청한 게스트(보호자)에게 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
           <div class="adm-row">
             <input id="adm-one-note" type="text" maxlength="60" placeholder="메모 (예: 인스타 아이디)" aria-label="메모" />
             <button type="button" id="adm-one" class="btn btn-primary">만들기</button>
@@ -630,10 +630,10 @@
         </section>
         <section class="adm-sec">
           <h3>게스트 안내</h3>
-          <p class="muted">게스트의 결과 화면에 나오는 정회원 코드 받는 방법입니다. 정회원 친구의 초대 링크로 가입하거나, 플레이 영상을 SNS에 올리고 그 링크를 공식 인스타 DM으로 보내도록 안내합니다.</p>
+          <p class="muted">게스트의 결과 화면에 나오는 정회원 가입 방법입니다. 공개 가입 코드(위에서 만든 오픈베타 코드)를 넣어 두면 결과 화면에 [정회원 가입하기] 버튼이 나오고, 마감일이 지나거나 인원이 차면 저절로 사라집니다. 비워 두면 정회원 친구의 초대 링크와 공식 인스타 DM 문의만 안내합니다.</p>
           <div class="adm-row">
             <label>공식 인스타 계정<input id="adm-sns" type="text" maxlength="60" placeholder="예: puck.official" /></label>
-            <label>해시태그<input id="adm-hashtag" type="text" maxlength="40" placeholder="예: 퍽드리블챌린지" /></label>
+            <label>공개 가입 코드<input id="adm-join-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="오픈베타 코드 (비우면 끔)" /></label>
             <button type="button" id="adm-save-config" class="btn">저장</button>
           </div>
         </section>

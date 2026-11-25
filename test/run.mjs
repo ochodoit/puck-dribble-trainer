@@ -454,15 +454,36 @@ const skipSetup = async (page, touch = false) => {
   // 로그아웃 후 로그인
   await page.click('#btn-settings'); await page.click('#btn-settings-logout'); await page.click('[data-close="panel-settings"]');
   const loggedOut = await page.evaluate(() => !window.__puckTrainer.account.current());
-  // 게스트 결과: 정회원이었다면 몇 위 + 인스타 플레이 인증 안내 + 공식 계정 DM 버튼 (운영자가 저장한 안내)
+  // 게스트 결과: 정회원이었다면 몇 위 + 친구 초대 / 보호자가 공식 계정 DM으로 코드 요청 (SNS 영상 조건 없음)
   await page.evaluate(() => localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ hashtag: '퍽챌린지', snsAccount: 'puck.official' })));
-  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 9, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 9]] }); });
+  const guestEnd = (score) => page.evaluate((s) => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: s, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', s]] }); }, score);
+  const guestBox = () => page.evaluate(() => ({ text: document.querySelector('#result-guest').textContent, dm: document.querySelector('#guest-dm')?.getAttribute('href') || '', join: !!document.querySelector('#guest-join'), rank: !document.querySelector('#result-rank').classList.contains('hidden') }));
+  await guestEnd(9);
   await page.waitForSelector('#result-guest:not(.hidden)');
-  const guest = await page.evaluate(() => ({ text: document.querySelector('#result-guest').textContent, dm: document.querySelector('#guest-dm')?.getAttribute('href') || '', rank: !document.querySelector('#result-rank').classList.contains('hidden') }));
-  const guestOk = guest.text.includes('정회원이었다면 지금 전체 2위 / 2명') && guest.text.includes('#퍽챌린지 @puck.official') && guest.text.includes('보호자와 함께') && guest.text.includes('DM') && guest.dm === 'https://ig.me/m/puck.official' && !guest.rank;
-  console.log(`${guestOk ? 'PASS' : 'FAIL'} guest result: would-be rank + share play on Instagram, DM the official account for a code (${guest.dm} ${guest.text.slice(0, 60)}…)`);
+  const guest = await guestBox();
+  const guestOk = guest.text.includes('정회원이었다면 지금 전체 2위 / 2명') && guest.text.includes('보호자가 공식 인스타 DM으로 가입 코드를 요청') && guest.text.includes('보호자와 함께')
+    && !/SNS|영상|#퍽챌린지/.test(guest.text) && guest.dm === 'https://ig.me/m/puck.official' && !guest.join && !guest.rank;
+  console.log(`${guestOk ? 'PASS' : 'FAIL'} guest result: would-be rank + invite link or a parent DMs the official account for a code, no social video required (${guest.dm} ${guest.text.slice(0, 60)}…)`);
   if (!guestOk) failed = true;
   await page.click('[data-close="panel-result"]');
+  // 공개 가입 코드(오픈베타)를 걸면 결과 화면에 [정회원 가입하기] -> 회원가입 칸이 열리고 코드가 채워짐. 1회용 코드를 걸면 버튼이 안 나옴
+  await page.evaluate(() => localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ snsAccount: 'puck.official', joinCode: 'BETA2026' })));
+  await guestEnd(8);
+  await page.waitForSelector('#guest-join');
+  const joinBox = await guestBox();
+  await page.click('#guest-join');
+  await page.waitForSelector('#panel-login:not(.hidden)');
+  const joinForm = await page.evaluate(() => ({ result: !document.querySelector('#panel-result').classList.contains('hidden'), tab: document.querySelector('.auth-tabs .tab.active')?.dataset.tab, code: document.querySelector('#auth-code').value }));
+  await page.click('[data-close="panel-login"]');
+  await page.evaluate(() => { window.__puckTrainer.account._putCode('ONEUSE22', { type: 'one', maxUses: 1, expiresAt: null }); localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ snsAccount: 'puck.official', joinCode: 'ONEUSE22' })); });
+  await guestEnd(7);
+  await page.waitForFunction(() => !document.querySelector('#result-guest').classList.contains('hidden') && document.querySelector('#guest-dm'));
+  const oneBox = await guestBox();
+  await page.click('[data-close="panel-result"]');
+  await page.evaluate(() => { localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ snsAccount: 'puck.official' })); const k = 'puck-trainer.codes.v1', c = JSON.parse(localStorage.getItem(k)); delete c.ONEUSE22; localStorage.setItem(k, JSON.stringify(c)); }); // 아래 운영자 코드 목록 수가 그대로이게
+  const guestJoinOk = joinBox.join && joinBox.text.includes('지금은 누구나 정회원으로 가입할 수 있어요') && !joinBox.dm && !joinForm.result && joinForm.tab === 'register' && joinForm.code === 'BETA-2026' && !oneBox.join && !!oneBox.dm;
+  console.log(`${guestJoinOk ? 'PASS' : 'FAIL'} guest result: public open-beta code shows [Join as a member], which opens sign-up with the code filled; a one-time code is never shown (${JSON.stringify({ joinForm, one: oneBox.join })})`);
+  if (!guestJoinOk) failed = true;
   // 운영자 화면 (관리자 별명): 1회용 코드 만들기 -> 목록, 끄기
   await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ loginId: 'opsadmin', password: 'ops12345', nick: 'test123', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' , stick: 'L' }); });
   await page.click('#btn-settings');

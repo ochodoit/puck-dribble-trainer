@@ -177,7 +177,7 @@ export function instaId(s) {
   const id = String(s || '').trim().replace(/^(https?:\/\/)?(www\.)?instagram\.com\//i, '').replace(/^@+/, '').replace(/[/?#].*$/, '');
   return /^[A-Za-z0-9._]{1,30}$/.test(id) ? id : '';
 }
-/** 게스트 -> 공식 인스타 계정 DM 열기 (플레이 인증 후 정회원 코드를 받는 곳) */
+/** 게스트 -> 공식 인스타 계정 DM 열기 (가입 코드 요청·비밀번호 문의) */
 export const instaDmLink = (s) => (instaId(s) ? `https://ig.me/m/${instaId(s)}` : '');
 
 // ---- 베타 기간: 무료 정회원은 가입 경로(오픈베타·초대·1회용 코드)와 상관없이 베타 종료일까지 ----

@@ -232,7 +232,7 @@
               </div>
             </div>
             <p class="reg-only hidden auth-hint">Your ID is only for logging in and is never shown (4–20 characters, start with a lowercase letter; letters, numbers, _). Your nickname is public in the rankings, so use one instead of your real name and make it different from your ID. Passwords need 8+ characters with both letters and numbers.</p>
-            <p class="reg-only hidden auth-hint">Members join with a sign-up code. No code? Play as a guest and follow the steps on the result screen to verify your play and get one.</p>
+            <p class="reg-only hidden auth-hint">Members join with a sign-up code. No code? Finish one game as a guest. The result screen shows how to join.</p>
             <p class="login-only auth-hint muted">Joined earlier with a nickname and a 6-digit password? Log in with those once and you will create an ID.</p>
             <div class="login-only auth-forgot">
               <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">Forgot your password?</button>
@@ -608,7 +608,7 @@
         </section>
         <section class="adm-sec">
           <h3>One-time code</h3>
-          <p class="muted">Send the code (or link) to a guest whose play video link you checked by DM. Only one person can use it.</p>
+          <p class="muted">Send the code (or link) to a guest (or their parent) who asked for a sign-up code by DM. Only one person can use it.</p>
           <div class="adm-row">
             <input id="adm-one-note" type="text" maxlength="60" placeholder="Note (e.g. Instagram ID)" aria-label="Note" />
             <button type="button" id="adm-one" class="btn btn-primary">Create</button>
@@ -628,10 +628,10 @@
         </section>
         <section class="adm-sec">
           <h3>Guest notice</h3>
-          <p class="muted">How guests become members, shown on their result screen: sign up with a member friend's invite link, or post a play video on social media and DM the link to our official Instagram.</p>
+          <p class="muted">How guests become members, shown on their result screen. Enter a public sign-up code (an open beta code made above) and a [Join as a member] button appears there; it disappears on its own when the deadline passes or the spots fill up. Leave it empty to show only a member friend's invite link and asking by Instagram DM.</p>
           <div class="adm-row">
             <label>Official Instagram account<input id="adm-sns" type="text" maxlength="60" placeholder="e.g. puck.official" /></label>
-            <label>Hashtag<input id="adm-hashtag" type="text" maxlength="40" placeholder="e.g. puckdribblechallenge" /></label>
+            <label>Public sign-up code<input id="adm-join-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Open beta code (leave empty to turn off)" /></label>
             <button type="button" id="adm-save-config" class="btn">Save</button>
           </div>
         </section>

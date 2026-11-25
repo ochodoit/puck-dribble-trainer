@@ -466,14 +466,14 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** 퀵 핸즈 (바닥 위): 지금 세트의 박스(3시 → 12시 → 9시). 박스 안 = 옅은 빨강 맥박, 밖으로 나가면 빨강 점선 경고, 시작 전은 잉크 점선(첫 세트 자리) */
+  /** 퀵 핸즈 (바닥 위): 지금 세트의 박스(3시 → 6시 → 9시). 박스 안 = 옅은 빨강 맥박, 밖으로 나가면 빨강 점선 경고, 시작 전은 잉크 점선(첫 세트 자리) */
   _drawQuick(ctx, W, H, game, puck, now, uvToC) {
     ctx.save();
     const K = this._floorField(ctx, W, H, game, uvToC);
     const { f, hair, fs } = K;
     const unit = Math.min(W, H);
     const pulse = 0.5 + 0.5 * Math.sin(now / 250);
-    // 세트 번호 (3시 → 12시 → 9시): 바닥 영역 왼쪽 위 (위쪽 점수판에 가리지 않게)
+    // 세트 번호 (3시 → 6시 → 9시): 바닥 영역 왼쪽 위 (위쪽 점수판에 가리지 않게)
     const set = game.running ? game.quickSet : 0;
     text(ctx, `SET ${set + 1}/${QUICK_SETS.length}`, f.x, Math.max(f.y - fs * 0.9, this.topInset * H + fs * 0.9), fs * 0.7, { weight: 700, color: C.ink, align: 'left', halo: true });
     for (const z of game.zones) {

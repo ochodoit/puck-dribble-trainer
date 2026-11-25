@@ -14,7 +14,7 @@ export const MODES = [
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
     desc: '두 콘 사이를 8자로 돌며 게이트 통과.' },
   { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 0, timed: true, stages: 3,
-    desc: '3시·12시·9시 방향 박스에서 차례로 빠르게 좌우로.' },
+    desc: '3시·6시·9시 방향 박스에서 차례로 빠르게 좌우로.' },
   { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
     desc: '나타나는 타겟으로 최대한 빨리 이동.' },
   { id: 'free', name: '자유 연습', en: 'Free · course', duration: 0,
@@ -73,12 +73,12 @@ const F8_CONES = [0.3, 0.7];       // 두 콘의 가로 위치 (세로는 가운
 /** 퀵 핸즈 박스 (경기장 가로·세로 대비). 예전 가운데 박스(0.272 × 0.4)의 2/3 — 세 방향으로 옮겨 다니도록 작게 */
 export const QUICK_BOX = { w: 0.272 * (2 / 3), h: 0.4 * (2 / 3) };
 /**
- * 퀵 핸즈 3세트: 고른 시간(1·3·5분)씩 3시 → 12시 → 9시 방향 박스에서 (= 한 사이클). x = 경기장 가로, y = 세로(A배) 비율.
- * 12시 = 화면 위쪽 (카메라 쪽으로 밀면 위로 가므로 몸 앞쪽), 3시 = 오른쪽, 9시 = 왼쪽
+ * 퀵 핸즈 3세트: 고른 시간(1·3·5분)씩 3시 → 6시 → 9시 방향 박스에서 (= 한 사이클). x = 경기장 가로, y = 세로(A배) 비율.
+ * 6시 = 화면 아래쪽 (카메라 쪽으로 밀면 위로 가므로 몸쪽), 3시 = 오른쪽, 9시 = 왼쪽
  */
 export const QUICK_SETS = [
   { label: '3시 방향', x: 0.75, y: 0.5 },
-  { label: '12시 방향', x: 0.5, y: 0.25 },
+  { label: '6시 방향', x: 0.5, y: 0.75 },
   { label: '9시 방향', x: 0.25, y: 0.5 },
 ];
 
@@ -241,7 +241,7 @@ export class Game {
     this._f8Prev = null;
     this._prevMe = null;
     this.f8Hold = null; // 8자 시작 대기 {t: 가운데 원에 퍽을 둔 시간(초)}. null 이면 진행 중
-    this.quickSet = 0;  // 퀵 핸즈: 지금 세트 (0 = 3시, 1 = 12시, 2 = 9시)
+    this.quickSet = 0;  // 퀵 핸즈: 지금 세트 (0 = 3시, 1 = 6시, 2 = 9시)
     this._A = this.plane.A; // 경기장 세로 비율이 바뀌면(화면 회전 등) 코스·목표를 다시 맞춘다
     if (this.mode?.id === 'figure8') this._figure8Course(); // 시작 전에도 코스와 첫 방향(점선)을 미리 보여 준다
     if (this.mode?.id === 'quick') this.zones = [{ ...this._quickZone(0), active: false }]; // 시작 전 첫 세트(3시) 박스 미리보기
@@ -535,7 +535,7 @@ export class Game {
         break;
       }
       case 'quick': {
-        if (this.stage !== this.quickSet) this._quickStage(this.stage); // 고른 시간이 지나면 다음 방향 박스로 (3시 → 12시 → 9시)
+        if (this.stage !== this.quickSet) this._quickStage(this.stage); // 고른 시간이 지나면 다음 방향 박스로 (3시 → 6시 → 9시)
         const z = this.zones[0];
         if (me && tracked) {
           if (discInRect(me, PUCK_R, z)) {

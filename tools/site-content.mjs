@@ -8,7 +8,7 @@ export const SITE = 'https://puck-trainer.com';
  * 페이지마다 내용을 마지막으로 크게 바꾼 날 (YYYY-MM-DD). sitemap.xml 의 <lastmod>, rss.xml 의 <pubDate> 로 나간다.
  * 네이버·구글·Bing 이 바뀐 페이지를 먼저 다시 가져가게 하는 값이라, 페이지 내용을 바꾸면 이 날짜도 고친다. '' = 첫 화면
  */
-export const UPDATED = { '': '2026-11-26', guide: '2026-11-25', games: '2026-11-25', faq: '2026-11-26', compare: '2026-11-26' };
+export const UPDATED = { '': '2026-11-26', guide: '2026-11-25', games: '2026-11-26', faq: '2026-11-26', compare: '2026-11-26' };
 
 /** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구·Daum 웹마스터도구·네이버 서치어드바이저에서 받은 값 */
 export const VERIFY = {
@@ -62,8 +62,8 @@ export const GAMES = [
     ko: { name: '8자 드리블', what: '두 콘 사이를 8자로 돌며 게이트를 통과합니다. 먼저 돌 콘과 방향은 직접 골라요.', skills: '포핸드·백핸드 전환 · 퍽 보호 · 돌면서 퍽 유지' },
     en: { name: 'Figure 8', what: 'Take the puck through the gates in a figure 8 around two cones. You pick the first cone and the direction.', skills: 'Forehand–backhand transitions · protecting the puck · keeping control through turns' } },
   { id: 'quick',
-    ko: { name: '퀵 핸즈', what: '바닥 가운데 박스 안에서 20초 동안 최대한 빠르게 좌우로 터치합니다.', skills: '손목 속도 · 부드러운 손(소프트 핸즈) · 짧은 터치' },
-    en: { name: 'Quick Hands', what: 'Touch the puck side to side as fast as you can inside the box on your floor for 20 seconds.', skills: 'Wrist speed · soft hands · short touches' } },
+    ko: { name: '퀵 핸즈', what: '3시·6시·9시 방향 박스에서 차례로, 고른 시간(1·3·5분)씩 최대한 빠르게 좌우로 터치합니다.', skills: '손목 속도 · 부드러운 손(소프트 핸즈) · 짧은 터치' },
+    en: { name: 'Quick Hands', what: 'Touch the puck side to side as fast as you can in a box at 3, 6 and 9 o’clock in turn, for the time you pick (1, 3 or 5 minutes) at each.', skills: 'Wrist speed · soft hands · short touches' } },
   { id: 'reaction',
     ko: { name: '반응 타겟', what: '아무 데나 나타나는 타겟으로 최대한 빨리 퍽을 가져갑니다. 반응 시간과 이동 시간을 따로 잽니다.', skills: '반응 속도 · 첫 터치 · 방향 전환' },
     en: { name: 'Reaction Target', what: 'Get the puck to targets that pop up anywhere, as fast as you can. Reaction time and travel time are timed separately.', skills: 'Reaction speed · first touch · changing direction' } },
@@ -289,7 +289,7 @@ export const PAGES = [
       gamesTitle: '게임별 훈련 효과',
       skillsLabel: '키우는 기술',
       sections: [
-        ['기록과 랭킹', '아케이드·퍽 피하기·와이드 드리블은 1·3·5분 중에 고릅니다. 정회원이 게임을 끝까지 하면(자유 연습 제외) 최고 기록이 전체·국가·팀·연령대 랭킹에 오르고, 출석과 최근 기록은 내 정보에서 봅니다.'],
+        ['기록과 랭킹', '아케이드·퍽 피하기·와이드 드리블·퀵 핸즈는 1·3·5분 중에 고릅니다(와이드 드리블·퀵 핸즈는 고른 시간씩 세 번 이어서). 정회원이 게임을 끝까지 하면(자유 연습 제외) 최고 기록이 전체·국가·팀·연령대 랭킹에 오르고, 출석과 최근 기록은 내 정보에서 봅니다.'],
       ],
     },
     en: {
@@ -301,7 +301,7 @@ export const PAGES = [
       gamesTitle: 'What each game trains',
       skillsLabel: 'Skills',
       sections: [
-        ['Scores and leaderboards', 'Arcade, Dodge and Wide Dribble let you pick 1, 3 or 5 minutes. When a member finishes a game (except Free Practice), their best score goes on the world, country, team and age-group leaderboards; attendance and recent scores are in My info.'],
+        ['Scores and leaderboards', 'Arcade, Dodge, Wide Dribble and Quick Hands let you pick 1, 3 or 5 minutes (Wide Dribble and Quick Hands run three rounds of that time). When a member finishes a game (except Free Practice), their best score goes on the world, country, team and age-group leaderboards; attendance and recent scores are in My info.'],
       ],
     },
   },

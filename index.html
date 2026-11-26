@@ -85,6 +85,12 @@
           </div>
           <pre id="diag-info" class="diag-info hidden"></pre>
         </div>
+        <!-- 바로가기 만들기 (src/install.js): 크롬·엣지는 설치 창, 아이폰·맥 사파리·파이어폭스·앱 안 브라우저는 방법 안내. 아이콘으로 열었으면 숨김 -->
+        <div id="install-card" class="install-card hidden">
+          <button type="button" id="btn-install" class="btn btn-install" aria-expanded="false" aria-controls="install-help">바로가기 만들기</button>
+          <p class="install-note">아이콘을 누르면 주소 입력 없이 바로 열려요 · 한 번 연 뒤에는 인터넷이 끊겨도 열려요</p>
+          <div id="install-help" class="install-help hidden" aria-live="polite"></div>
+        </div>
         <p class="start-note">로그인하지 않으면 게스트로 시작합니다 (랭킹 미등록)</p>
         <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
         <div id="invite-card" class="invite-card hidden" role="status">

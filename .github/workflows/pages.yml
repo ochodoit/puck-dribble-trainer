@@ -58,7 +58,7 @@ jobs:
       - name: Collect site files
         run: |
           mkdir -p _site
-          cp -r index.html favicon.ico style.css manifest.webmanifest src icons cam _site/
+          cp -r index.html favicon.ico style.css manifest.webmanifest sw.js src icons cam _site/
           # 검색엔진·AI 검색용 (tools/build-site.mjs 로 만든 파일): 영어 첫 화면, 안내 페이지, 사이트맵 등
           cp -r en guide games faq compare pages.css robots.txt sitemap.xml rss.xml llms.txt 404.html google3d8a4c89a20c8fb9.html adc596214f1816d3cd9de83acad9a56b.txt _site/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

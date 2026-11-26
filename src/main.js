@@ -23,6 +23,7 @@ import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAg
 import { initCommunity } from './community-ui.js';
 import { memberStats } from './stats.js';
 import { initAnalytics, track } from './analytics.js';
+import { initInstall } from './install.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -95,6 +96,7 @@ if (!redirecting) init(); // 예전에 고른 다른 언어 주소로 옮겨 가
 
 function init() {
   initAnalytics(); // 방문·플레이 통계 (공식 주소에서만, 개인정보 없이)
+  initInstall(); // 바로가기 만들기 버튼 + 오프라인 실행 (서비스 워커, 공식 주소에서만)
   initI18n();
   bindLangButtons(document, pickLang);
   showLangHint();

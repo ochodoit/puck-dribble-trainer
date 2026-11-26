@@ -1454,6 +1454,128 @@ const skipSetup = async (page, touch = false) => {
   await context.close();
 }
 
+// ---- 8) 바로가기 만들기 + 오프라인 실행 (src/install.js, sw.js) ----
+{
+  const { installKind, swAllowed, isMobileUa } = await import('../src/install.js');
+  const UA = {
+    iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1',
+    macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
+    macChrome: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    winFirefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+    androidFirefox: 'Mozilla/5.0 (Android 14; Mobile; rv:133.0) Gecko/133.0 Firefox/133.0',
+    kakaoAndroid: 'Mozilla/5.0 (Linux; Android 14; SM-S921N Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.135 Mobile Safari/537.36;KAKAOTALK 2610420',
+    kakaoIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 KAKAOTALK 10.8.5',
+    samsung: 'Mozilla/5.0 (Linux; Android 14; SM-S921N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36',
+  };
+  const kinds = {
+    iphone: installKind(UA.iphone, 5, true), ipadDesktop: installKind(UA.macSafari, 5, false), macSafari: installKind(UA.macSafari, 0, false),
+    macChrome: installKind(UA.macChrome, 0, true), winFirefox: installKind(UA.winFirefox, 0, false), androidFirefox: installKind(UA.androidFirefox, 5, false),
+    kakaoAndroid: installKind(UA.kakaoAndroid, 5, false), kakaoIos: installKind(UA.kakaoIos, 5, false), samsung: installKind(UA.samsung, 5, true),
+  };
+  const want = { iphone: 'ios', ipadDesktop: 'ios', macSafari: 'mac', macChrome: 'prompt', winFirefox: 'drag', androidFirefox: 'android', kakaoAndroid: 'inapp', kakaoIos: 'inapp', samsung: 'prompt' };
+  const sw = [swAllowed(new URL('https://puck-trainer.com/')), swAllowed(new URL('https://www.puck-trainer.com/en/')), swAllowed(new URL('http://127.0.0.1:8000/')), swAllowed(new URL('http://127.0.0.1:8000/?sw=1')),
+    swAllowed(new URL('https://192.168.0.5:8443/')), swAllowed(new URL('https://copy.example.com/')), swAllowed(new URL('http://puck-trainer.com/'))];
+  const mob = [isMobileUa(UA.iphone), isMobileUa(UA.macSafari, 5), isMobileUa(UA.macSafari, 0), isMobileUa(UA.winFirefox), isMobileUa(UA.samsung)];
+  const ok0 = JSON.stringify(kinds) === JSON.stringify(want) && sw.join() === 'true,true,false,true,false,false,false' && mob.join() === 'true,true,false,false,true';
+  console.log(`${ok0 ? 'PASS' : 'FAIL'} install: how to add a shortcut on each browser (install prompt / iPhone share / Mac Dock / drag / app-in-app), service worker only on the official https address or ?sw=1 ${JSON.stringify({ kinds, sw, mob })}`);
+  if (!ok0) failed = true;
+}
+{
+  // 크롬·엣지: 설치 창이 준비되면(beforeinstallprompt) 버튼이 보이고, 누르면 설치 창, 설치하면 버튼이 사라진다
+  const context = await newCtx({ viewport: { width: 1180, height: 820 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  const before = await page.evaluate(() => document.querySelector('#install-card').classList.contains('hidden'));
+  await page.evaluate(() => {
+    window.__prompts = 0;
+    const e = new Event('beforeinstallprompt', { cancelable: true });
+    e.prompt = async () => { window.__prompts++; };
+    e.userChoice = Promise.resolve({ outcome: 'accepted', platform: 'web' });
+    window.dispatchEvent(e);
+  });
+  const shown = await page.evaluate(() => ({ visible: !document.querySelector('#install-card').classList.contains('hidden'), label: document.querySelector('#btn-install').textContent }));
+  await page.click('#btn-install');
+  await page.waitForFunction(() => document.querySelector('#install-card').classList.contains('hidden'));
+  const after = await page.evaluate(() => ({ prompts: window.__prompts, help: document.querySelector('#install-help').classList.contains('hidden') }));
+  const ok1 = before && shown.visible && shown.label === '바탕화면에 바로가기 만들기' && after.prompts === 1 && after.help && !errors.length;
+  console.log(`${ok1 ? 'PASS' : 'FAIL'} install (Chrome/Edge): button waits for the browser's install prompt, opens it, and hides once installed ${JSON.stringify({ before, ...shown, ...after, errors })}`);
+  if (!ok1) failed = true;
+  await context.close();
+}
+{
+  // 아이폰(영어 화면): 설치 창이 없으니 버튼을 누르면 공유 → 홈 화면에 추가 방법이 영어로 나온다
+  const context = await newCtx({ locale: 'en-US', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/en/`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.waitForSelector('#install-card:not(.hidden)');
+  const label = await page.textContent('#btn-install');
+  await page.tap('#btn-install');
+  await page.waitForSelector('#install-help:not(.hidden) li');
+  const steps = await page.$$eval('#install-help li', (l) => l.map((x) => x.textContent));
+  const exp = await page.getAttribute('#btn-install', 'aria-expanded');
+  const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  const miss = await page.evaluate(() => [...window.__puckTrainer.i18n.missing]);
+  const ok2 = label === 'Add to home screen' && steps.length === 3 && /Share/.test(steps[0]) && /Add to Home Screen/.test(steps[1]) && exp === 'true' && noOverflow && !miss.length && !errors.length;
+  console.log(`${ok2 ? 'PASS' : 'FAIL'} install (iPhone, English): the button shows the Share > Add to Home Screen steps in English ${JSON.stringify({ label, steps, exp, noOverflow, miss, errors })}`);
+  if (!ok2) failed = true;
+  await context.close();
+}
+{
+  // 오프라인: 공식 주소처럼 서비스 워커를 켜고(?sw=1) 한 번 연 뒤, 서버를 꺼도 첫 화면이 열리고 체험 게임이 시작된다.
+  // 저장 안 된 페이지는 '인터넷 연결이 필요해요' 안내. 이 검사만 자기 서버를 쓴다 (꺼야 하니까. Firebase 설정은 null 로)
+  const srv = http.createServer(async (req, res) => {
+    const path = decodeURIComponent(req.url.split('?')[0]);
+    if (path === '/src/firebase-config.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); return res.end('export const firebaseConfig = null;\n'); }
+    const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path);
+    if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
+    try { const data = await readFile(file); res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream' }); res.end(data); } catch { res.writeHead(404); res.end('not found'); }
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const b2 = `http://127.0.0.1:${srv.address().port}`;
+  const context = await browser.newContext({ locale: 'ko-KR', viewport: { width: 1180, height: 820 } });
+  await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await context.route(/gstatic\.com\/firebasejs/, (r) => r.abort());
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${b2}/?sw=1`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  // 서비스 워커가 페이지를 맡고 첫 화면 파일을 다 저장할 때까지 기다린다 (최대 15초)
+  let saved = 0;
+  for (let i = 0; i < 60 && !saved; i++) {
+    saved = await page.evaluate(async () => {
+      if (!navigator.serviceWorker.controller) return 0;
+      const c = await caches.open('puck-trainer-v1');
+      const need = ['/', '/style.css', '/src/main.js', '/src/install.js', '/src/game.js', '/src/i18n-en.js', '/manifest.webmanifest'];
+      const got = await Promise.all(need.map((p) => c.match(location.origin + p)));
+      return got.every(Boolean) ? (await c.keys()).length : 0;
+    }).catch(() => 0);
+    if (!saved) await page.waitForTimeout(250);
+  }
+  srv.close(); srv.closeAllConnections();
+  const down = await page.request.get(`${b2}/`).then(() => 'up', () => 'down');
+  await page.goto(`${b2}/?sw=1&c=TEST-CODE`);
+  await page.waitForFunction(() => window.__puckTrainer?.account, null, { timeout: 10000 }).catch(() => {});
+  const off = await page.evaluate(() => ({ h1: document.querySelector('h1')?.textContent || '', app: !!window.__puckTrainer, ctrl: !!navigator.serviceWorker.controller }));
+  let trial = false;
+  if (off.app) {
+    await page.click('#btn-mouse');
+    trial = await page.waitForSelector('#panel-mode:not(.hidden)', { timeout: 5000 }).then(() => true, () => false);
+  }
+  const res404 = await page.goto(`${b2}/compare/`);
+  const offlinePage = { status: res404?.status(), text: await page.textContent('h1').catch(() => '') };
+  const ok3 = saved > 10 && down === 'down' && off.app && off.ctrl && /퍽 드리블 트레이너/.test(off.h1) && trial && offlinePage.status === 503 && /인터넷 연결이 필요해요/.test(offlinePage.text) && !errors.length;
+  console.log(`${ok3 ? 'PASS' : 'FAIL'} offline: after one visit the service worker keeps the app, so with the server off the first screen (even with ?c=…) opens and a camera-free game starts; an unsaved page says it needs the internet ${JSON.stringify({ saved, down, ...off, trial, offlinePage, errors })}`);
+  if (!ok3) failed = true;
+  await context.close();
+}
+
 await browser.close();
 server.close();
 console.log(failed ? '\nSOME TESTS FAILED' : '\nALL TESTS PASSED');

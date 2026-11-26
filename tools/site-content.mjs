@@ -316,7 +316,7 @@ export const PAGES = [
       faq: [
         ['퍽 드리블 트레이너는 무엇인가요?', '@DEF'],
         ['무료인가요?', '네, 누구나 무료로 플레이합니다. 랭킹 등록과 커뮤니티 글쓰기만 정회원(가입 코드로 가입)이 할 수 있어요.'],
-        ['앱을 설치해야 하나요?', '아니요. Safari·Chrome에서 puck-trainer.com을 열면 바로 됩니다. 홈 화면에 추가하면 앱처럼 열려요.'],
+        ['앱을 설치해야 하나요?', '아니요. Safari·Chrome에서 puck-trainer.com을 열면 바로 됩니다. 첫 화면의 **바로가기 만들기**를 누르면 바탕화면이나 홈 화면에 아이콘이 생겨 앱처럼 열리고, 한 번 연 뒤에는 인터넷이 끊겨도 게임이 열려요(로그인·랭킹은 인터넷이 필요해요).'],
         ['어떤 기기에서 할 수 있나요?', '카메라가 있는 휴대폰(아이폰·안드로이드), 아이패드·태블릿, 노트북이면 됩니다. 바닥이 보이게 거치대에 세워 두세요.'],
         ['카메라 없이 해 볼 수 있나요?', '네. 첫 화면의 **카메라 없이 체험하기**를 누르면 마우스나 손가락이 퍽이 됩니다. 체험 기록은 저장되지 않고 랭킹에도 오르지 않아요. 마음에 들면 카메라와 진짜 퍽으로 해 보세요.'],
         ['카메라 영상이 저장되거나 어딘가로 보내지나요?', '아니요. 영상은 기기 안에서 퍽 위치를 찾는 데만 쓰고, 저장하거나 서버로 보내지 않습니다. 남는 건 점수·기록·설정뿐이에요.'],
@@ -348,7 +348,7 @@ export const PAGES = [
       faq: [
         ['What is Puck Dribble Trainer?', '@DEF'],
         ['Is it free?', 'Yes, anyone can play for free. Only leaderboards and community posts are for members (who join with an invite code).'],
-        ['Do I need to install an app?', 'No. Open puck-trainer.com in Safari or Chrome and play. Add it to your home screen and it opens like an app.'],
+        ['Do I need to install an app?', 'No. Open puck-trainer.com in Safari or Chrome and play. Press **Add a shortcut** on the first screen to put an icon on your desktop or home screen: it opens like an app, and once opened it works offline too (logging in and leaderboards need the internet).'],
         ['Which devices does it work on?', 'Any phone (iPhone or Android), iPad, tablet or laptop with a camera. Put it on a stand so it can see the floor.'],
         ['Can I try it without a camera?', 'Yes. Press **Try it without a camera** on the first screen and your mouse or finger becomes the puck. Trial scores are not saved or ranked. If you like it, play with your camera and a real puck.'],
         ['Is the camera video saved or sent anywhere?', 'No. The video is only used on your device to find the puck. It is never saved or uploaded; only scores, records and settings are kept.'],

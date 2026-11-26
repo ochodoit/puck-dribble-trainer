@@ -83,6 +83,12 @@
           </div>
           <pre id="diag-info" class="diag-info hidden"></pre>
         </div>
+        <!-- 바로가기 만들기 (src/install.js): 크롬·엣지는 설치 창, 아이폰·맥 사파리·파이어폭스·앱 안 브라우저는 방법 안내. 아이콘으로 열었으면 숨김 -->
+        <div id="install-card" class="install-card hidden">
+          <button type="button" id="btn-install" class="btn btn-install" aria-expanded="false" aria-controls="install-help">Add a shortcut</button>
+          <p class="install-note">Tap the icon to open it, no address to type · once opened, it works offline too</p>
+          <div id="install-help" class="install-help hidden" aria-live="polite"></div>
+        </div>
         <p class="start-note">Without logging in you start as a guest (not ranked)</p>
         <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
         <div id="invite-card" class="invite-card hidden" role="status">

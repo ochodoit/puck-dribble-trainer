@@ -20,8 +20,10 @@ const server = http.createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
-const ctx = await browser.newContext({ locale: 'ko-KR', viewport: { width: 1280, height: 800 } });
+// 두 탭을 같은 기기 안에서 잇는다: 숨긴 주소(.local)는 기기에 따라 못 풀고, 내 Wi-Fi 주소로 가는 UDP 는 방화벽이 막을 수 있어
+// 진짜 주소를 드러내고(카메라 권한 + mDNS 끔) 127.0.0.1 로 잇게 한다 (Windows 에서 이것 없이는 연결 실패)
+const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-features=WebRtcHideLocalIpsWithMdns', '--allow-loopback-in-peer-connection'] });
+const ctx = await browser.newContext({ locale: 'ko-KR', viewport: { width: 1280, height: 800 }, permissions: ['camera', 'microphone'] });
 await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
 await ctx.route(/\/src\/firebase-config\.js(\?|$)/, (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const firebaseConfig = null;\n' }));
 await ctx.route(/gstatic\.com\/firebasejs|googletagmanager|google-analytics/, (r) => r.abort());
@@ -36,20 +38,20 @@ host.on('console', (m) => { if (m.type() === 'error') errors.push('host console:
 await host.goto(`${base}/index.html`);
 await host.waitForFunction(() => window.__puckTrainer?.account);
 
-// 게스트에게도 버튼과 같은 Wi-Fi 안내가 보이고, 누르면 창 대신 로그인 안내 (연결 문서는 로그인한 회원만 쓴다). 마우스 모드는 운영자만
+// 게스트에게도 버튼과 같은 Wi-Fi 안내가 보이고, 누르면 창 대신 로그인 안내 (연결 문서는 로그인한 회원만 쓴다). 카메라 없이 체험은 누구나
 await host.waitForSelector('#remote-start:not(.hidden)', { timeout: 8000 });
-const guest = await host.evaluate(() => ({ wifi: document.querySelector('#remote-start').textContent.includes('같은 Wi-Fi'), mouse: document.querySelector('#btn-mouse').classList.contains('hidden') }));
+const guest = await host.evaluate(() => ({ wifi: document.querySelector('#remote-start').textContent.includes('같은 Wi-Fi'), trial: !document.querySelector('#trial-start').classList.contains('hidden') }));
 await host.click('#btn-remote');
 await host.waitForTimeout(300);
 const guestPanel = await host.isVisible('#panel-remote');
-check(guest.wifi && guest.mouse && !guestPanel, 'guests see the phone-camera button with the same-Wi-Fi note; clicking asks to log in (no panel); mouse mode stays operator-only', JSON.stringify({ ...guest, guestPanel }));
+check(guest.wifi && guest.trial && !guestPanel, 'guests see the phone-camera button with the same-Wi-Fi note; clicking asks to log in (no panel); the camera-free trial is open to everyone', JSON.stringify({ ...guest, guestPanel }));
 
 // 일반 회원 가입 (운영자 아님) 후 새로고침 -> 바로 연결 창
-await host.evaluate(async () => { const a = window.__puckTrainer.account; a._putCode('BETA2026', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 7 * 864e5 }); await a.register({ loginId: 'camplayer', password: 'cam12345', nick: 'CamPlayer', country: 'KR', team: 'Cam', age: 12, code: 'BETA2026', stick: 'L' }); });
+await host.evaluate(async () => { const a = window.__puckTrainer.account; a._putCode('BETA2026', { type: 'beta', maxUses: 0, expiresAt: Date.now() + 7 * 864e5 }); await a.register({ loginId: 'camplayer', password: 'cam12345', nick: 'CamStar', country: 'KR', team: 'Cam', age: 12, code: 'BETA2026', stick: 'L' }); });
 await host.reload();
 await host.waitForFunction(() => window.__puckTrainer?.account?.current());
 await host.waitForSelector('#btn-remote:not(.hidden)', { timeout: 8000 });
-check(await host.isHidden('#btn-mouse'), 'a regular member gets the phone camera, not the operator mouse mode');
+check(await host.isVisible('#btn-mouse'), 'a regular member gets the phone camera and the camera-free trial');
 
 await host.click('#btn-remote');
 await host.waitForSelector('#panel-remote:not(.hidden)');
@@ -103,6 +105,19 @@ await host.waitForFunction(() => { const b = document.querySelector('#remote-bad
 const badge = await host.evaluate(() => ({ text: document.querySelector('#remote-badge').textContent, title: document.querySelector('#remote-badge').title }));
 check(/^📱 \d+ms/.test(badge.text), 'latency badge shows estimate', JSON.stringify(badge));
 if (SHOT) await host.screenshot({ path: `${SHOT}-host-live.png` });
+
+// 카메라 프레임 자동: 휴대폰은 60 단계로 시작하지만, 가짜 카메라는 60을 못 찍으므로(약 20fps) 곧 30 단계로 내린다
+await host.waitForFunction(() => window.__puckTrainer.app.remoteLink?.fps === 30, null, { timeout: 10000 });
+const link1 = await host.evaluate(() => window.__puckTrainer.app.remoteLink);
+check(link1.fps === 30 && link1.mode === 'auto', "phone link (auto): a phone camera that cannot film 60 sends the 30fps step", JSON.stringify(link1));
+// 노트북 설정 '항상 60fps' -> 휴대폰이 60 단계로 고정, 다시 '자동'
+await host.evaluate(() => { const s = document.querySelector('#set-camRate'); s.value = '60'; s.dispatchEvent(new Event('change')); });
+await host.waitForFunction(() => { const l = window.__puckTrainer.app.remoteLink; return l?.mode === '60' && l.fps === 60; }, null, { timeout: 8000 });
+await host.waitForTimeout(4500);
+const link2 = await host.evaluate(() => window.__puckTrainer.app.remoteLink);
+await host.evaluate(() => { const s = document.querySelector('#set-camRate'); s.value = 'auto'; s.dispatchEvent(new Event('change')); });
+await host.waitForFunction(() => window.__puckTrainer.app.remoteLink?.mode === 'auto', null, { timeout: 8000 });
+check(link2.fps === 60 && link2.mode === '60', "host setting 'always 60fps' reaches the phone and holds; back to auto", JSON.stringify(link2));
 
 // 노트북의 카메라 전환 버튼 -> 휴대폰이 카메라를 바꾼다 (가짜 카메라는 하나라 같은 장치로 다시 열림)
 const before = await phone.evaluate(() => document.querySelector('#preview').srcObject?.id);

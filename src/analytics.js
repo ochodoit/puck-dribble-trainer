@@ -4,6 +4,7 @@
 // 보내는 이벤트 (GA 관리 > 맞춤 정의에 같은 이름으로 측정기준 mode·member·completed·method·error, 측정항목 play_seconds 등록):
 //   game_start { mode, member }   game_end { mode, member, completed, play_seconds, score }
 //   sign_up { method }   login { method }   camera_start   camera_error { error }   puck_registered
+//   install_prompt { outcome }   install_help { kind }   app_installed   (바로가기 만들기, src/install.js)
 export const GA_ID = 'G-ZMXQ9TNPLQ';
 const HOSTS = ['puck-trainer.com', 'www.puck-trainer.com'];
 

@@ -13,17 +13,18 @@ export const DEFAULT_SETTINGS = {
   puckModel: { r: 0, g: 0, b: 0, area: 0 },   // area 0 = 바닥 크기 기준 자동
   stickModel: null,                           // null = 스틱 추적 안 함
   floorMode: 'manual',                        // 게임 영역 = 네 모서리로 맞춘 바닥 (예전 'auto'·'full' 은 불러올 때 'manual' 로 옮김)
-  procWidth: 240,                             // 인식 해상도(처리 폭 px): 240 | 320 | 400
+  procWidth: 240,                             // 인식 해상도(처리 폭 px): 240 | 320 | 400. 게임 영역이 화면보다 작으면 영역만 이 픽셀 수만큼 더 촘촘히 읽는다
+  camRate: 'auto',                            // 카메라 프레임: 'auto' (60으로 찍다가 기기·Wi-Fi 상태에 맞춰 30으로) | '60' 항상 | '30' 항상 (어두운 곳)
   controller: 'puck',                         // 게임 조작 대상: 'puck' | 'stick'(퍽 없이 스틱 블레이드로)
   manualQuad: null,                           // [[u,v]x4] 정규화 좌표 (0-1)
   difficulty: 'normal',
   playMinutes: 1,                             // 시간제 모드 제한 시간: 1 | 3 | 5 (분)
-  flipDepth: true,                            // 앞뒤 방향(아케이드·퍽 피하기·자유 연습 공통): true = 카메라 쪽으로 밀면 화면 위로
+  reverseDepth: false,                        // 위아래 반대로(와이드 드리블을 뺀 모든 게임): 게임마다 정한 앞뒤 방향(main depthFlip)을 뒤집는다
   puckTransparency: 0,                        // 플레이 중 내 퍽 투명도(%): 0 = 또렷이, 100 = 안 보임 (1 단위). 화면의 퍽 표시와 카메라 속 진짜 퍽 모두
   figure8Dir: 'L-up',                         // 8자 드리블 방향: L|R(어느 콘 먼저) - up|down(콘을 위·아래 어느 쪽부터)
   invisible: false,                           // 투명 모드: 플레이 중 내 퍽을 아예 숨김 (손의 감각으로만). 랭킹·자랑은 일반과 따로
   courseCycles: 10,                           // 자유 연습 목표 사이클 수 (10~100, 10 단위)
-  course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (평면 경기장 비율)
+  course: [],                                 // 자유 연습 코스: [{n: 1~10, x: 0~1, y: 0~1}] (영역 = 평면 경기장 비율, 화면에서 왼쪽 위가 0,0)
   courseRecord: null,                         // 현재 코스로 세운 내 최고 기록: {sig, avg, best, at} (커뮤니티 공유용)
   bgTransparency: 12,                         // 게임 배경 투명도(%): 0 = 종이색으로 완전히 덮음, 100 = 카메라 영상 그대로
   floorWidthM: 1.5,                           // 결과 리포트의 이동 거리(m) 환산용 게임 영역 실제 폭
@@ -60,6 +61,9 @@ export function sanitizeSettings(s) {
   s.puckModel = isColorModel(s.puckModel) ? { r: s.puckModel.r, g: s.puckModel.g, b: s.puckModel.b, area: s.puckModel.area } : structuredClone(d.puckModel);
   s.stickModel = isColorModel(s.stickModel) ? { r: s.stickModel.r, g: s.stickModel.g, b: s.stickModel.b, area: s.stickModel.area } : null;
   s.procWidth = [240, 320, 400].includes(s.procWidth) ? s.procWidth : d.procWidth;
+  // 예전(잠깐 있던) camFps 저장값: 30 을 고른 사람만 '30' 고정으로, 나머지는 자동 (기본값이 먼저 섞여 오므로 camFps 가 있으면 그것으로)
+  if ('camFps' in s) { s.camRate = s.camFps === 30 ? '30' : 'auto'; delete s.camFps; }
+  s.camRate = ['auto', '60', '30'].includes(s.camRate) ? s.camRate : d.camRate;
   s.controller = s.controller === 'stick' ? 'stick' : 'puck';
   const quadOk = Array.isArray(s.manualQuad) && s.manualQuad.length === 4 &&
     s.manualQuad.every((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((c) => Number.isFinite(c) && c >= 0 && c <= 1));
@@ -71,7 +75,9 @@ export function sanitizeSettings(s) {
   s.floorWidthM = num(s.floorWidthM, 0.3, 20, d.floorWidthM);
   s.playMinutes = [1, 3, 5].includes(s.playMinutes) ? s.playMinutes : d.playMinutes;
   s.figure8Dir = ['L-up', 'L-down', 'R-up', 'R-down'].includes(s.figure8Dir) ? s.figure8Dir : d.figure8Dir;
-  s.flipDepth = typeof s.flipDepth === 'boolean' ? s.flipDepth : d.flipDepth;
+  // 예전 '카메라 쪽으로 밀면 화면 위로'(flipDepth)는 모든 게임이 같은 방향이던 때의 설정이라, 게임마다 방향을 정한 지금은 버리고 기본값으로
+  delete s.flipDepth;
+  s.reverseDepth = s.reverseDepth === true;
   s.bgTransparency = num(s.bgTransparency, 0, 100, d.bgTransparency);
   s.invisible = s.invisible === true;
   // 퍽 투명도 (예전 '내 퍽 표시 %' 설정은 100 - 값 으로 옮긴다)

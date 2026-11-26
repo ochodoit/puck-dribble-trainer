@@ -6,13 +6,15 @@
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
 <script type="module">
-  import { Vision, AutoCalibrator, colorsTooClose, colorDist } from '../src/vision.js';
+  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp } from '../src/vision.js';
   import { Tracker } from '../src/tracker.js';
   import { StickBridge } from '../src/occlusion.js';
   import { placementCheck } from '../src/placement.js';
   import { Game } from '../src/game.js';
   import { sanitizeSettings, DEFAULT_SETTINGS } from '../src/storage.js';
-  import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
+  import { CameraRateAuto } from '../src/camera.js';
+  import { linkStep, linkSample, newLinkState, LINK_LEVELS } from '../src/remote-cam.js';
+  import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, SCORE_MULT, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
   import { C } from '../src/theme.js';
   import { alphaLayer } from '../src/theme.js';
   import { rankKey, FLYER_R, WIDE_DRILLS, WIDE_HOLD_R, laneX, figure8Waypoints, FIGURE8_DIRS, GATE_DRAW_R, TARGET_DRAW_R, PUCK_R as ME_R, HIT_OVERLAP, circleOverlap, overlapReach, discRectOverlap } from '../src/game.js';
@@ -354,11 +356,11 @@
     check('A1 play starts after 3s hold', ar.phase === 'play');
 
     const fall = (x, y, r = 0.035, vy = 0.5, color = PUCK_COLORS[0]) => ({ x, y, r, vy, color, minDist: Infinity, passed: false, hit: false, threat: false });
-    // A2) 내려오는 퍽과 충돌 -> −10, 1.5초 무적 동안 추가 피격 없음, 연속 터치 초기화
+    // A2) 내려오는 퍽과 충돌 -> 감점 (쉬움 3 × 난이도 배율: 보통 5), 1.5초 무적 동안 추가 피격 없음, 연속 터치 초기화
     ar = mk(); t = toPlay(ar, 20000); ar.streak = 7; ar.score = 50;
     ar.obstacles.push(fall(0.5, 0.1));
     t = stepTo(ar, 0.5, 0.5, t, 40); // 1.3초: 퍽이 내 퍽(y≈0.478)을 통과
-    check('A2 falling puck hit = −10 and streak reset (no lives)', ar.hits === 1 && ar.streak === 0 && ar.score === 50 - HIT_PENALTY && ar.lives === undefined, { hits: ar.hits, score: ar.score });
+    check(`A2 falling puck hit = −${ar.hitPenalty} (normal) and streak reset (no lives)`, ar.hits === 1 && ar.streak === 0 && ar.score === 50 - ar.hitPenalty && HIT_PENALTY === 3 && ar.hitPenalty === 5 && ar.lives === undefined, { hits: ar.hits, score: ar.score });
     ar.obstacles.push(fall(0.5, zoneY(ar, 0.5) - 0.05));
     t = stepTo(ar, 0.5, 0.5, t, 6); // 무적 중
     check('A2 invulnerable right after hit', ar.hits === 1);
@@ -370,18 +372,18 @@
     t = stepTo(ar, 0.85, 0.5, t, 45);            // 한쪽으로 비켜 피함 (방향 전환 없음 = 터치 아님)
     check('A3 dodging an aimed puck is counted but gives no points', ar.passed === 1 && ar.hits === 0 && ar.score === s0, { passed: ar.passed, d: ar.score - s0 });
 
-    // A4) coin +10
+    // A4) coin +10 (쉬움 기준 × 난이도 배율: 보통 +15)
     ar = mk(); t = toPlay(ar, 40000); const s2 = ar.score;
     ar.pickups.push({ x: 0.5, y: zoneY(ar, 0.5) - 0.01, r: COIN_R, vy: 0.001, born: t });
     t = stepTo(ar, 0.5, 0.5, t, 2);
-    check('A4 coin +10', ar.items === 1 && ar.score - s2 === COIN_POINTS && COIN_POINTS === 10, { items: ar.items, d: ar.score - s2 });
+    check('A4 coin +15 on normal (10 × 1.5)', ar.items === 1 && ar.score - s2 === 15 && COIN_POINTS === 10, { items: ar.items, d: ar.score - s2 });
 
-    // A5) 좌우 터치마다 +1, 연속 터치가 길어도 보너스·배율 없음. 가만히 있으면 0점
-    ar = mk(); t = toPlay(ar, 45000); const s3 = ar.score;
+    // A5) 좌우 터치마다 +1 × 난이도 배율(보통 1.5), 연속 터치가 길어도 보너스 없음. 가만히 있으면 0점
+    ar = mk(); t = toPlay(ar, 45000); const s3 = ar.points;
     t = stepTo(ar, 0.5, 0.5, t, 60);
-    check('A5 standing still scores nothing', ar.score === s3 && ar.touches === 0, ar.score - s3);
+    check('A5 standing still scores nothing', ar.points === s3 && ar.touches === 0, ar.points - s3);
     for (let k = 0; k < 26; k++) t = stepTo(ar, k % 2 ? 0.3 : 0.7, 0.5, t, 5);
-    check('A5 every side-to-side touch +1, no streak bonus or multiplier', ar.touches >= 20 && ar.score - s3 === ar.touches * TOUCH_POINTS && TOUCH_POINTS === 1 && ar.maxStreak >= 10 && ar.multiplier === undefined, { touches: ar.touches, d: ar.score - s3, maxStreak: ar.maxStreak });
+    check('A5 every side-to-side touch +1 × difficulty (normal 1.5), no streak bonus', ar.touches >= 20 && Math.abs(ar.points - s3 - ar.touches * TOUCH_POINTS * 1.5) < 1e-9 && TOUCH_POINTS === 1 && ar.maxStreak >= 10 && ar.multiplier === undefined && Number.isInteger(ar.score), { touches: ar.touches, d: ar.points - s3, maxStreak: ar.maxStreak });
     t = stepTo(ar, 0.33, 0.5, t, 2); t = stepTo(ar, 0.3, 0.5, t, 4); // 긴 스윙 뒤 첫 반전은 정상 터치일 수 있으니 먼저 정리
     const s4 = ar.score;
     t = stepTo(ar, 0.33, 0.5, t, 2); t = stepTo(ar, 0.3, 0.5, t, 2); t = stepTo(ar, 0.33, 0.5, t, 2); t = stepTo(ar, 0.3, 0.5, t, 2);
@@ -389,7 +391,15 @@
 
     // A6) 충돌 감점은 0점 아래로 내려가지 않는다
     ar.avatar = { x: 0.5, y: 0.5 }; ar.score = 30; ar._onHit({}, t);
-    check('A6 hit subtracts penalty, never below zero', ar.score === 30 - HIT_PENALTY && (ar.score = 5, ar._onHit({}, t), ar.score === 0), ar.score);
+    check('A6 hit subtracts penalty, never below zero', ar.score === 30 - ar.hitPenalty && (ar.score = ar.hitPenalty - 1, ar._onHit({}, t), ar.score === 0), ar.score);
+
+    // A6b) 난이도별 점수 배율: 쉬움 ×1 · 보통 ×1.5 · 어려움 ×2 (coin 10·15·20, 충돌 3·5·6, 터치 1·1.5·2). 점수는 늘 정수
+    {
+      const per = Object.fromEntries(['easy', 'normal', 'hard'].map((lv) => { const a = new Arcade(null); a.start(fakePuck(0.5, 0.5), lv, true); a.avatar = { x: 0.5, y: 0.5 }; a._addScore(TOUCH_POINTS * a.mult); a._addScore(TOUCH_POINTS * a.mult); a._addScore(a.coinPoints); return [lv, { mult: a.mult, coin: a.coinPoints, hit: a.hitPenalty, score: a.score }]; }));
+      check('A6b points scale with difficulty (easy x1, normal x1.5, hard x2)', JSON.stringify(SCORE_MULT) === JSON.stringify({ easy: 1, normal: 1.5, hard: 2 })
+        && per.easy.coin === 10 && per.normal.coin === 15 && per.hard.coin === 20 && per.easy.hit === 3 && per.normal.hit === 5 && per.hard.hit === 6
+        && per.easy.score === 12 && per.normal.score === 18 && per.hard.score === 24, per);
+    }
 
     // A7) 스폰: 막대 없이 정원 퍽만, 색은 빨강 하나(퍽 피하기와 같게), 속도는 모두 같고 테두리 안쪽 무작위 위치
     ar = mk(); t = toPlay(ar, 60000); ar.spawnTimer = 0; ar.pickupTimer = 0.3;
@@ -453,7 +463,7 @@
       const g = new Game(null); g.setMode('arcade');
       check('G1 default limit is 1 minute', g.limit === 60 && g.timeLeft === 60);
       g.playSeconds = 180; g.resetState();
-      check('G1 3-minute setting applies to timed modes only (wide = 3 drills)', g.limit === 180 && (g.setMode('wide'), g.limit === 540) && (g.setMode('quick'), g.limit === 20) && (g.setMode('free'), g.limit === 0));
+      check('G1 3-minute setting applies to timed modes only (wide = 3 drills, quick hands = 3 sets)', g.limit === 180 && (g.setMode('wide'), g.limit === 540) && (g.setMode('quick'), g.limit === 540) && (g.setMode('figure8'), g.limit === 45) && (g.setMode('free'), g.limit === 0));
       g.setMode('arcade'); g.playSeconds = 60;
       let ended = null; g.onEnd = (res) => { ended = res; };
       const tp = { pos: { x: 0.02, y: 0.02 }, state: 'tracked', trail: [], distance: 0, speed: 0, touches: 0, frames: 10, trackedFrames: 10, trackRate: 1 };
@@ -461,7 +471,7 @@
       let guard = 0;
       while (!ended && guard++ < 3000) { g.update(0.033, tp, tg); tg += 33; }
       check('G1 arcade ends on time (not on hits) at ~60s', ended && ended.reason === 'time' && Math.abs(ended.elapsed - 60) < 0.2, ended && { reason: ended.reason, elapsed: ended.elapsed, hits: g.hits });
-      check('G1 rank key separates durations', ended.rankKey === 'arcade@60' && rankKey('arcade', 300) === 'arcade@300' && rankKey('wide', 300) === 'wide@300' && rankKey('quick', 300) === 'quick', ended.rankKey);
+      check('G1 rank key separates durations', ended.rankKey === 'arcade@60' && rankKey('arcade', 300) === 'arcade@300' && rankKey('wide', 300) === 'wide@300' && rankKey('quick', 300) === 'quick@300' && rankKey('reaction', 300) === 'reaction', ended.rankKey);
       // 난이도별 랭킹: 아케이드·퍽 피하기만 (보통은 예전 키 그대로), 다른 모드는 난이도를 무시
       check('G1b rank key separates difficulty for arcade/dodge only', rankKey('arcade', 60, false, 'hard') === 'arcade@60-hard' && rankKey('arcade', 60, true, 'easy') === 'arcade@60-inv-easy'
         && rankKey('arcade', 60, false, 'normal') === 'arcade@60' && rankKey('wide', 60, false, 'hard') === 'wide@60' && rankKey('figure8', 45, false, 'hard') === 'figure8'
@@ -1006,17 +1016,22 @@
       const idx = g.wpIndex; g.plane = { A: 1.2, flip: true }; at(0.5, 0.5);
       check('PL2 figure 8 course follows a new field aspect (phone rotated) and keeps its progress', g.wpIndex === idx && near(g.waypoints[1].y, 0.22 * 1.2) && near(g.cones[0].y, 0.6), { idx, now: g.wpIndex, y: g.waypoints[1].y });
 
-      // 퀵 핸즈: 박스도 평면 좌표 (예전 0.34 × 0.5 의 80%). 퍽 원이 박스에 30% 이상 걸치면 안 (가운데가 살짝 밖이어도)
+      // 퀵 핸즈: 박스도 평면 좌표 (예전 가운데 박스 0.272 × 0.4 의 2/3). 3세트 = 고른 시간씩 3시 -> 6시 -> 9시 자리.
+      // 퍽 원이 박스에 30% 이상 걸치면 안 (가운데가 살짝 밖이어도)
       const q = new Game(null); q.plane = { A: 0.5, flip: false }; q.setMode('quick');
-      const preview = q.zones.length === 1 && !q.zones[0].active && near(q.zones[0].h, 0.2) && near(q.zones[0].w, 0.272);
-      const qp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
+      const preview = q.zones.length === 1 && !q.zones[0].active && near(q.zones[0].h, 0.4 * (2 / 3) * 0.5) && near(q.zones[0].w, 0.272 * (2 / 3)) && near(q.zones[0].x, 0.75);
+      const qp = { pos: { x: 0.75, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0 };
       q.start(qp);
       const z = q.zones[0];
-      const qa = (x, touches) => { qp.pos = { x, y: 0.5 }; qp.touches = touches; q.update(0.033, qp, (t += 33)); return !z.warn; };
+      const qa = (x, touches) => { qp.pos = { x, y: 0.5 }; qp.touches = touches; q.update(0.033, qp, (t += 33)); return !q.zones[0].warn; };
       const inEdge = qa(z.x + z.w / 2 + ME_R * 0.2, 1);  // 가운데가 박스 밖 0.2r: 원의 37%가 안 -> 안
       const outFar = qa(z.x + z.w / 2 + ME_R * 0.9, 2);  // 거의 다 밖 -> 경고, 터치 안 셈
-      check('PL3 quick hands box (80% size); the puck circle counts as inside while 30% of it is in the box', preview && near(z.y, 0.25) && near(z.h, 0.2) && inEdge && !outFar && q.stats.touches === 1,
-        { preview, inEdge, outFar, touches: q.stats.touches, z });
+      // 고른 시간(기본 60초)이 지나면 6시(아래 가운데) -> 9시(왼쪽) 박스로 (세로는 경기장 비율 A 대비)
+      const spots = [];
+      for (const sec of [61, 121]) { q.elapsed = sec - 0.05; q.update(0.1, qp, (t += 100)); spots.push([q.quickSet, +q.zones[0].x.toFixed(2), +(q.zones[0].y / 0.5).toFixed(2)]); }
+      check("PL3 quick hands: 3 sets at 3, 6 and 9 o'clock (2/3 box); the puck circle counts as inside while 30% of it is in the box",
+        preview && near(z.y, 0.25) && inEdge && !outFar && q.stats.touches === 1 && q.stats.sets[0] === 1 && q.limit === 180 && q.running
+        && JSON.stringify(spots) === JSON.stringify([[1, 0.5, 0.75], [2, 0.25, 0.5]]), { preview, inEdge, outFar, touches: q.stats.touches, sets: q.stats.sets, z, spots });
 
       // 반응 타겟: 평면 경기장 안(세로 0~A)에 나타나고, 30% 겹치면 통과
       const r = new Game(null); r.plane = { A: 0.5, flip: false }; r.setMode('reaction');
@@ -1455,6 +1470,128 @@
       check('PLC camera placement check: 50 cm -> raise, 80 cm -> minimum (do not go lower), 1.2 m -> good, 2 m on the TV -> room to lower; beside the TV (1 m to the side) 1.2 m -> good, 50 cm -> raise',
         plc.map((x) => x.verdict).join() === 'raise,minimum,good,room,good,raise', plc);
     }
+    // ROI) 영역만 잘라 읽기: 게임 영역이 화면보다 작으면 그 영역만 카메라 영상에서 잘라 더 촘촘히 읽는다 (읽는 픽셀 수는 예전 화면 전체만큼).
+    //      좌표·면적은 예전처럼 처리 해상도 단위. 흰 바닥 검사와 화면 전체 읽기는 매 프레임 하지 않는다 (보정·미리보기에서 필요할 때만)
+    {
+      const big = document.createElement('canvas'); big.width = 1280; big.height = 720;
+      const bctx = big.getContext('2d');
+      const k = 240 / 1280; // 처리 px / 카메라 px (세로도 135/720 = 같은 비율)
+      const drawBig = (px, py, r) => {
+        bctx.fillStyle = '#5b6170'; bctx.fillRect(0, 0, 1280, 720);
+        bctx.fillStyle = '#eceae4'; bctx.fillRect(384, 216, 512, 288); // 가운데 흰 판 = 게임 영역 (화면의 40%×40%)
+        if (px != null) { bctx.fillStyle = '#111827'; bctx.beginPath(); bctx.arc(px, py, r, 0, Math.PI * 2); bctx.fill(); }
+      };
+      const at = (cam) => cam * k - 0.5; // 카메라 px 자리 -> 처리 좌표 (픽셀 번호 기준: 가운데가 +0.5)
+      const quad = [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]];
+      const sR = { ...settings, floorMode: 'manual', manualQuad: quad, puckModel: { r: 17, g: 24, b: 39, area: Math.PI * (12 * k) ** 2 }, stickModel: null };
+      const vr = new Vision(240); vr.mirror = false; vr.setSourceSize(1280, 720);
+      drawBig(640, 360, 12);
+      let rr = vr.process(big, sR);
+      const roi = vr.roi;
+      check('ROI1 small area read at ~2x within the old pixel budget; no white-floor pass, no full-frame read',
+        roi && roi.sx >= 2 && roi.sx <= 3 && roi.W * roi.H <= 240 * 135 && roi.x0 <= 72 && roi.x1 >= 168 && !vr._whiteValid && vr._frame === null,
+        roi && { W: roi.W, H: roi.H, sx: roi.sx, x0: roi.x0, x1: roi.x1, white: vr._whiteValid, full: !!vr._frame });
+      check('ROI2 puck position and size still in processing units (sub-pixel)', rr.puck && Math.abs(rr.puck.x - at(640)) < 0.2 && Math.abs(rr.puck.y - at(360)) < 0.2 && Math.abs(rr.puck.area / (Math.PI * (12 * k) ** 2) - 1) < 0.25, rr.puck);
+      // 작은 퍽(처리 해상도에서 지름 약 2px)을 1 카메라 px 씩 옮기며: 매번 잡고, 평균 오차가 화면 전체를 240px 로 읽을 때보다 작다
+      const sweep = (v, s) => { let n = 0, e = 0; for (let i = 0; i < 24; i++) { const x = 560 + i * 7.3, y = 330 + i * 2.1; drawBig(x, y, 6); const p = v.process(big, s).puck; if (p && Math.hypot(p.x - at(x), p.y - at(y)) < 3) { n++; e += Math.hypot(p.x - at(x), p.y - at(y)); } } return { n, e: e / Math.max(1, n) }; };
+      const sTiny = { ...sR, puckModel: { r: 17, g: 24, b: 39, area: Math.PI * (6 * k) ** 2 } };
+      const vFull = new Vision(240); vFull.mirror = false; vFull.setSourceSize(1280, 720);
+      const vTiny = new Vision(240); vTiny.mirror = false; vTiny.setSourceSize(1280, 720);
+      const roiRun = sweep(vTiny, sTiny), fullRun = sweep(vFull, { ...sTiny, manualQuad: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+      check('ROI3 tiny puck tracked at every step, smaller error than reading the whole screen', roiRun.n === 24 && roiRun.e < 0.15 && roiRun.e < fullRun.e * 0.7, { roi: roiRun, full: fullRun, fullScale: vFull.roi?.sx });
+      // 거울 모드: 잘라 읽는 자리도 좌우가 뒤집힌다
+      const vm = new Vision(240); vm.mirror = true; vm.setSourceSize(1280, 720);
+      drawBig(520, 400, 12);
+      rr = vm.process(big, sR);
+      check('ROI4 mirrored camera: area cut from the mirrored side', rr.puck && Math.abs(rr.puck.x - at(1280 - 520)) < 0.25 && Math.abs(rr.puck.y - at(400)) < 0.25, rr.puck);
+      // 화면 전체가 영역이면 예전과 똑같이 240×135 로 한 번만 읽고, 그것을 보정용 화면 전체로도 쓴다
+      const vw = new Vision(240); vw.mirror = false; vw.setSourceSize(1280, 720);
+      vw.process(big, { ...sR, manualQuad: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+      check('ROI5 whole-screen area: read once at the processing size (x1), reused as the full frame', vw.roi.sx === 1 && vw.roi.W === 240 && vw.roi.H === 135 && vw._frame && vw._frame.width === 240, { sx: vw.roi.sx, W: vw.roi.W, H: vw.roi.H });
+      // 게임 중 진짜 퍽 덮기(바닥색): 화면 전체를 다시 그리지 않고 읽은 영역에서
+      drawBig(640, 360, 12); rr = vr.process(big, sR);
+      const ring = vr.ringColor(rr.puck.x, rr.puck.y, 2.25 * 2.2, 2.25 * 3.4);
+      check('ROI6 floor colour around the puck comes from the area read (no full-frame draw)', ring && ring.r > 225 && ring.g > 225 && vr._frame === null, { ring, full: !!vr._frame });
+      // 보정(가운데 원)·설정 미리보기는 필요할 때 화면 전체를 처리 해상도로 그려 쓴다
+      const cs = vr.autoCalibSample();
+      check('ROI7 calibration draws the full frame on demand and still finds the puck', cs.status === 'ok' && Math.abs(cs.cx - at(640)) < 1 && Math.abs(cs.cy - at(360)) < 1 && vr._frame && vr._frame.width === 240 && vr._frame.height === 135, { status: cs.status, cx: cs.cx, cy: cs.cy });
+      const img = new ImageData(240, 135);
+      const painted = vr.paintMaskPreview(img, false);
+      const pi = (Math.round(at(360)) * 240 + Math.round(at(640))) * 4, ci = (10 * 240 + 10) * 4;
+      check('ROI8 settings preview: puck pixels red, outside the area greyed camera image', painted && img.data[pi] === 232 && img.data[pi + 1] === 38 && img.data[ci] !== 232 && img.data[ci + 3] === 255, { painted, puck: [...img.data.slice(pi, pi + 4)], corner: [...img.data.slice(ci, ci + 4)] });
+      // 흰 바닥 자동 모드(예전 설정)는 예전처럼 화면 전체를 읽고 흰 바닥 검사를 한다
+      const va = new Vision(240); va.mirror = false; va.setSourceSize(1280, 720);
+      va.process(big, { ...sR, floorMode: 'auto', manualQuad: null });
+      check('ROI9 auto white-floor mode still scans the whole frame', va._whiteValid && va.roi.sx === 1 && va.roi.W === 240, { white: va._whiteValid, sx: va.roi.sx });
+      // 덩어리 좌표 환산: 배율 2, 영역 왼쪽 위 (10,20)에서 가로 4~5·세로 6~7 의 2×2 픽셀 = 처리 1 px (12, 23), 배율 1은 그대로
+      const c2 = liftComp({ area: 4, sx: 4 * 4.5, sy: 4 * 6.5, sxx: 2 * (16 + 25), syy: 2 * (36 + 49), sxy: 4.5 * 6.5 * 4, minx: 4, maxx: 5, miny: 6, maxy: 7, bxsum: 9, bxn: 2 }, { ax: 10 + 0.25 - 0.5, ay: 20 + 0.25 - 0.5, ex: 10, ey: 20, ix: 0.5, iy: 0.5, a2: 0.25 });
+      const c1 = liftComp({ area: 3, sx: 3 * 5, sy: 3 * 7, sxx: 75 + 2, syy: 147, sxy: 105, minx: 4, maxx: 6, miny: 7, maxy: 7, bxsum: 15, bxn: 3 }, { ax: 10, ay: 20, ex: 10, ey: 20, ix: 1, iy: 1, a2: 1 });
+      check('ROI10 blob coordinates lifted to processing units (x2) and unchanged at x1',
+        Math.abs(c2.area - 1) < 1e-9 && Math.abs(c2.cx - 12) < 1e-9 && Math.abs(c2.cy - 23) < 1e-9 && c2.maxx - c2.minx + 1 === 1 && Math.abs(c2.bxsum / c2.bxn - 12) < 1e-9 &&
+        c1.area === 3 && c1.cx === 15 && c1.cy === 27 && c1.minx === 14 && c1.maxx === 16 && c1.maxy === 27 && c1.bxsum === 45, { c2, c1 });
+    }
+    // FPS) 카메라 프레임 자동 조절
+    {
+      // 직접 연결 카메라: 60을 다 인식하면 그대로, 1초 36개 미만이 4초 이어지면 30으로 (카메라가 60을 못 내면 손대지 않음), 내린 뒤엔 그대로
+      const ra = new CameraRateAuto();
+      let got = []; for (let t = 0; t <= 6000; t += 1000) got.push(ra.update(t, 60, 55));
+      const keep = got.every((x) => x === null) && ra.target === 60;
+      got = []; for (let t = 0; t <= 6000; t += 1000) got.push(ra.update(10000 + t, 60, 28));
+      const lowered = got.indexOf(30) === 4 && ra.target === 30 && ra.lowered && ra.update(20000, 30, 60) === null;
+      const rb = new CameraRateAuto(); let cam30 = null; for (let t = 0; t <= 8000; t += 1000) cam30 = cam30 || rb.update(t, 30, 20);
+      const rc = new CameraRateAuto(); rc.update(0, 60, 20); rc.update(1000, 60, 20); rc.update(2000, 60, 58); let blip = null; for (let t = 3000; t <= 5000; t += 1000) blip = blip || rc.update(t, 60, 20);
+      check('FPS1 direct camera auto: keeps 60 when this device keeps up, drops to 30 after 4s of < 36 frames/s, leaves 30fps cameras and short dips alone',
+        keep && lowered && cam30 === null && blip === null && rc.target === 60, { got, lowered, cam30, blip });
+
+      // 휴대폰 연결: 높음(60)으로 시작 -> 통신 한계 두 번이면 낮음 (금방 실패했으니 기다림 20->40초) -> 멀쩡히 40초면 다시 높음 -> 곧 또 실패하면 80초
+      const good = { fps: 58, short: 720, capShort: 720, capFps: 60, limit: 'none', loss: 0 };
+      const bw = { ...good, limit: 'bandwidth', short: 360 };
+      const st = newLinkState(0, 'auto');
+      const seq = [];
+      seq.push(st.level, linkStep(st, bw, 2000), linkStep(st, bw, 4000)); // 처음 6초는 보지 않음
+      seq.push(linkStep(st, bw, 8000), linkStep(st, bw, 10000));          // 두 번째에 낮춤
+      const low1 = st.level, backoff1 = st.backoff;
+      seq.push(linkStep(st, { ...good, fps: 30 }, 12000), linkStep(st, { ...good, fps: 30 }, 32000), linkStep(st, { ...good, fps: 30 }, 52000)); // 40초 멀쩡 -> 높음
+      const high2 = st.level;
+      linkStep(st, bw, 60000); linkStep(st, bw, 62000);                    // 10초 만에 다시 실패
+      const backoff2 = st.backoff;
+      check('FPS2 phone link starts at 60fps, drops to 30 after two strained checks, retries after a calm wait that doubles after each quick failure',
+        seq[0] === 'high' && seq.slice(1, 3).every((x) => x === null) && seq[3] === null && seq[4] === 'low' && low1 === 'low' && backoff1 === 40000 &&
+        seq[5] === null && seq[6] === null && seq[7] === 'high' && high2 === 'high' && st.level === 'low' && backoff2 === 80000, { seq, backoff1, backoff2 });
+
+      // 낮음에서 통신이 계속 빠듯하면(해상도 깎임) 다시 올리지 않고, 손실이 크거나 휴대폰 처리가 모자라도(cpu) 낮춘다
+      const s2 = newLinkState(0, 'auto'); s2.level = 'low';
+      let up = null; for (let t = 0; t <= 60000; t += 2000) up = up || linkStep(s2, { ...good, fps: 30, short: 540 }, t);
+      const s3 = newLinkState(0, 'auto'); linkStep(s3, { ...good, loss: 0.08 }, 7000); const lossDrop = linkStep(s3, { ...good, loss: 0.08 }, 9000);
+      const s4 = newLinkState(0, 'auto'); linkStep(s4, { ...good, limit: 'cpu' }, 7000); const cpuDrop = linkStep(s4, { ...good, limit: 'cpu' }, 9000);
+      // 카메라가 60을 못 찍으면 바로 낮음, 고정 모드는 그대로
+      const s5 = newLinkState(0, 'auto'); const camLow = linkStep(s5, { ...good, capFps: 30, fps: 30 }, 2000);
+      const s6 = newLinkState(0, '60'); const fixed60 = [linkStep(s6, bw, 8000), linkStep(s6, bw, 10000), linkStep(s6, bw, 12000)];
+      const s7 = newLinkState(0, '30');
+      let fixed30 = null; for (let t = 0; t <= 60000; t += 2000) fixed30 = fixed30 || linkStep(s7, good, t);
+      check('FPS3 phone link: stays at 30 while the network is tight, drops on loss or phone CPU limit, 30fps cameras stay low, fixed modes hold',
+        up === null && lossDrop === 'low' && cpuDrop === 'low' && camLow === 'low' && fixed60.every((x) => x === null) && s6.level === 'high' && fixed30 === null && s7.level === 'low' &&
+        LINK_LEVELS.high.fps === 60 && LINK_LEVELS.low.fps === 30, { up, lossDrop, cpuDrop, camLow, fixed60, fixed30 });
+
+      // 통계 뽑기: 보낸 영상(outbound-rtp)·받는 쪽 손실(remote-inbound-rtp)·카메라 설정. 없는 값은 null
+      const rep = new Map([
+        ['o', { type: 'outbound-rtp', kind: 'video', framesPerSecond: 59, frameWidth: 1280, frameHeight: 720, qualityLimitationReason: 'none' }],
+        ['r', { type: 'remote-inbound-rtp', kind: 'video', fractionLost: 0.01 }],
+        ['a', { type: 'outbound-rtp', kind: 'audio', framesPerSecond: 1 }],
+      ]);
+      const smp = linkSample(rep, { getSettings: () => ({ width: 720, height: 1280, frameRate: 60 }) });
+      const empty = linkSample(new Map(), null);
+      check('FPS4 link sample reads sent fps, short side, camera, limit reason and loss (missing values are null)',
+        smp.fps === 59 && smp.short === 720 && smp.capShort === 720 && smp.capFps === 60 && smp.limit === 'none' && smp.loss === 0.01 &&
+        Object.values(empty).every((v) => v === null), { smp, empty });
+
+      // 설정: 잠깐 있던 camFps 저장값을 옮긴다 (30 고른 사람만 30 고정, 나머지 자동), 이상한 값은 자동
+      const m30 = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), camFps: 30 });
+      const m60 = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), camFps: 60 });
+      const bad = sanitizeSettings({ ...structuredClone(DEFAULT_SETTINGS), camRate: 'fast' });
+      check('FPS5 camera frame setting: default auto, old 30 kept as fixed 30, old 60 becomes auto',
+        DEFAULT_SETTINGS.camRate === 'auto' && m30.camRate === '30' && !('camFps' in m30) && m60.camRate === 'auto' && bad.camRate === 'auto', { m30: m30.camRate, m60: m60.camRate, bad: bad.camRate });
+    }
     // SEC) 규칙 파일(firestore.rules)과 앱이 같은 약속을 쓰는지: 게임이 만드는 모든 랭킹 키가 규칙의 쓰기 허용 모양에 맞고(어긋나면
     //      그 모드 기록이 거절됨) 이상한 키는 안 맞는다. 규칙의 '나이대 → 가장 많은 나이' 표가 화면(community.js)과 같다
     {
@@ -1586,7 +1723,8 @@
       const r6 = v6.process(sc.cv, s6);
       let pIn = 0, pP = 0, pS = 0, bIn = 0, bS = 0, bP = 0;
       for (let y = 0; y < v6.PH; y++) for (let x = 0; x < v6.PW; x++) {
-        const i = y * v6.PW + x;
+        const i = v6._roiIndex(x, y); // 마스크는 읽은 영역(ROI) 해상도로 담긴다
+        if (i < 0) continue;
         if (Math.hypot(x - sc.P.x * k, y - sc.P.y * ky) <= sc.P.r * k - 1) { pIn++; if (v6.puckMask[i]) pP++; if (v6.stickMask[i]) pS++; }
         if (x >= sc.B.x0 * k + 1 && x <= sc.B.x1 * k - 1 && y >= sc.B.y0 * ky + 1 && y <= sc.B.y1 * ky - 1) { bIn++; if (v6.stickMask[i]) bS++; if (v6.puckMask[i]) bP++; }
       }
@@ -1691,8 +1829,8 @@
       ];
       const bad = cases.filter(([ko, en]) => tr(ko) !== en).map(([ko]) => [ko, tr(ko)]);
       check('L3 dictionary, patterns and segment-wise translation', bad.length === 0, bad);
-      const camMsg = tr('카메라 권한이 거부되었습니다. (NotAllowedError: Permission denied)\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.');
-      check('L3 multi-line camera help is fully translated', !/[가-힣]/.test(camMsg) && camMsg.includes('(NotAllowedError: Permission denied)') && camMsg.includes('\n'), camMsg);
+      const camMsg = tr('카메라 권한이 거부되었습니다.\n주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.');
+      check('L3 multi-line camera help is fully translated', !/[가-힣]/.test(camMsg) && camMsg.startsWith('Camera permission was denied.\n') && !camMsg.includes('Error'), camMsg);
       // DOM: 새로 들어온 글자·속성도 따라가며 번역, 사용자가 쓴 글(data-ugc)은 그대로, 한국어로 돌리면 원문 복원
       const box = document.createElement('div');
       box.innerHTML = '<p id="l-a">설정</p><input id="l-b" placeholder="가입 코드"><b id="l-c" data-ugc>설정</b><span id="l-d"></span>';

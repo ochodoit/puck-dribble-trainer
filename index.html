@@ -19,15 +19,16 @@
   <!-- 검색 정보: tools/build-site.mjs 가 tools/site-content.mjs 로 채운다 (직접 고치지 말 것) -->
   <!-- seo:start -->
   <title>퍽 드리블 트레이너 — 카메라로 하는 하키 스틱핸들링 훈련 게임</title>
-  <meta name="description" content="휴대폰·아이패드·노트북 카메라가 퍽과 스틱을 인식하는 무료 하키 스틱핸들링 훈련 게임. 앱 설치 없이 브라우저에서 아케이드·8자 드리블·와이드 드리블 등 7가지 게임으로 집에서 연습하세요." />
+  <meta name="description" content="카메라가 퍽을 따라가는 무료 하키 스틱핸들링 게임. 앱 설치 없이 휴대폰·아이패드·노트북으로, 7가지 게임으로 집에서 연습하세요." />
   <link rel="canonical" href="https://puck-trainer.com/" />
   <link rel="alternate" hreflang="ko" href="https://puck-trainer.com/" />
   <link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/" />
   <link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/" />
+  <link rel="alternate" type="application/rss+xml" href="https://puck-trainer.com/rss.xml" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="퍽 드리블 트레이너" />
   <meta property="og:title" content="퍽 드리블 트레이너 — 집에서 하는 하키 스틱핸들링 게임" />
-  <meta property="og:description" content="휴대폰·아이패드·노트북 카메라가 퍽과 스틱을 인식하는 무료 하키 스틱핸들링 훈련 게임. 앱 설치 없이 브라우저에서 아케이드·8자 드리블·와이드 드리블 등 7가지 게임으로 집에서 연습하세요." />
+  <meta property="og:description" content="카메라가 퍽을 따라가는 무료 하키 스틱핸들링 게임. 앱 설치 없이 휴대폰·아이패드·노트북으로, 7가지 게임으로 집에서 연습하세요." />
   <meta property="og:url" content="https://puck-trainer.com/" />
   <meta property="og:image" content="https://puck-trainer.com/icons/og-image.png" />
   <meta property="og:image:width" content="1200" />
@@ -37,7 +38,7 @@
   <meta property="og:locale:alternate" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="퍽 드리블 트레이너 — 집에서 하는 하키 스틱핸들링 게임" />
-  <meta name="twitter:description" content="휴대폰·아이패드·노트북 카메라가 퍽과 스틱을 인식하는 무료 하키 스틱핸들링 훈련 게임. 앱 설치 없이 브라우저에서 아케이드·8자 드리블·와이드 드리블 등 7가지 게임으로 집에서 연습하세요." />
+  <meta name="twitter:description" content="카메라가 퍽을 따라가는 무료 하키 스틱핸들링 게임. 앱 설치 없이 휴대폰·아이패드·노트북으로, 7가지 게임으로 집에서 연습하세요." />
   <meta name="twitter:image" content="https://puck-trainer.com/icons/og-image.png" />
   <meta name="google-site-verification" content="YQj_GaA3rFU0ha0gGZaFWCM3gz7MWWwLLTVLIjkQLMc" />
   <meta name="msvalidate.01" content="5A21EE30137A77A9FB261F99EBCD09D8" />
@@ -51,6 +52,125 @@
 </head>
 <body>
   <main id="app">
+    <!-- 시작 화면을 게임 화면보다 먼저 둔다: 검색엔진·AI 크롤러가 소개(제목·한 줄 설명)를 버튼 글자보다 먼저 읽게. 겹침 순서는 .panel 의 z-index 로 정해져 화면은 같다 -->
+    <!-- 시작 화면 -->
+    <div id="splash" class="panel splash">
+      <div class="splash-inner">
+        <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
+        <p id="lang-hint" class="lang-hint hidden" data-ugc><a href="/en/" data-lang="en" lang="en">English version →</a></p>
+        <div class="masthead"><span>iPad · Phone · Laptop</span></div>
+        <h1 class="lockup"><span class="lockup-ko" data-ugc>퍽 드리블 트레이너</span>Puck Dribble<span class="lockup-script"> Trainer</span></h1>
+        <picture>
+          <source srcset="icons/hero-art.webp" type="image/webp" />
+          <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="스틱과 퍽 일러스트" decoding="async" />
+        </picture>
+        <p class="lead">하키 스틱이 게임 컨트롤러로. 집에서 카메라로 하는 무료 스틱핸들링 게임</p>
+        <button id="btn-camera" class="btn btn-primary btn-big">카메라 시작</button>
+        <!-- 카메라 없이 체험 (누구나): 마우스 포인터나 손가락이 곧 퍽. 기록·랭킹·출석에는 안 들어감 -->
+        <div id="trial-start" class="trial-start">
+          <button id="btn-mouse" class="btn btn-trial">카메라 없이 체험하기</button>
+          <p class="trial-start-note">마우스나 손가락으로 퍽을 움직여요 · 기록은 저장되지 않아요</p>
+        </div>
+        <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
+        <div id="remote-start" class="remote-start">
+          <button id="btn-remote" class="btn btn-remote">휴대폰 카메라로 시작 (QR 연결)</button>
+          <p class="remote-start-note">휴대폰과 이 기기가 같은 Wi-Fi에 연결되어 있어야 합니다</p>
+        </div>
+        <p id="splash-error" class="error hidden"></p>
+        <div id="splash-diag" class="diag hidden">
+          <label>카메라 선택 <select id="diag-camera"></select></label>
+          <div class="row" style="justify-content:center">
+            <button type="button" id="btn-retry-camera" class="btn btn-primary">다시 시도</button>
+            <button type="button" id="btn-copy-diag" class="btn btn-ghost">진단 정보 복사</button>
+          </div>
+          <pre id="diag-info" class="diag-info hidden"></pre>
+        </div>
+        <!-- 바로가기 만들기 (src/install.js): 크롬·엣지는 설치 창, 아이폰·맥 사파리·파이어폭스·앱 안 브라우저는 방법 안내. 아이콘으로 열었으면 숨김 -->
+        <div id="install-card" class="install-card hidden">
+          <button type="button" id="btn-install" class="btn btn-install" aria-expanded="false" aria-controls="install-help">바로가기 만들기</button>
+          <p class="install-note">아이콘을 누르면 주소 입력 없이 바로 열려요 · 한 번 연 뒤에는 인터넷이 끊겨도 열려요</p>
+          <div id="install-help" class="install-help hidden" aria-live="polite"></div>
+        </div>
+        <p class="start-note">로그인하지 않으면 게스트로 시작합니다 (랭킹 미등록)</p>
+        <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
+        <div id="invite-card" class="invite-card hidden" role="status">
+          <b id="invite-title"></b>
+          <span id="invite-sub"></span>
+        </div>
+        <!-- 로그인 / 회원가입 -->
+        <div id="auth-card" class="auth-card hidden">
+          <div id="auth-logged" class="auth-logged hidden">
+            <span id="auth-who"></span>
+            <button type="button" id="btn-admin" class="btn btn-ghost hidden">운영자</button>
+            <button type="button" id="btn-me-splash" class="btn btn-ghost">내 정보</button>
+            <button type="button" id="btn-logout" class="btn btn-ghost">로그아웃</button>
+          </div>
+          <form id="auth-form" autocomplete="off">
+            <div class="auth-tabs" id="auth-tabs">
+              <button type="button" class="tab active" data-tab="login">로그인</button>
+              <button type="button" class="tab" data-tab="register">회원가입</button>
+            </div>
+            <div class="auth-grid">
+              <p class="upgrade-id-only hidden auth-hint">이제 로그인은 아이디로 합니다. 아이디와 새 비밀번호를 만들어 주세요. 별명과 기록은 그대로예요. <span class="muted">예전 계정:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
+              <p class="upgrade-pw-only hidden auth-hint">임시 비밀번호로 로그인했어요. 나만 아는 새 비밀번호를 정해야 시작할 수 있어요. <span class="muted">아이디:</span> <b id="auth-temp-id" data-ugc></b></p>
+              <label id="auth-id-label">아이디<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="예: puckking07" required /></label>
+              <label>비밀번호<input id="auth-pin" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" autocomplete="current-password" placeholder="8자 이상, 영문+숫자" required /></label>
+              <label class="new-pw hidden">비밀번호 확인<input id="auth-pin2" type="password" maxlength="64" autocomplete="new-password" placeholder="비밀번호를 한 번 더" /></label>
+              <label class="reg-only hidden">플레이어 별명<input id="auth-nick" type="text" maxlength="12" placeholder="예: 번개손" /></label>
+              <label class="reg-only hidden">가입 코드<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="예: K7MP-Q2XD" /></label>
+              <label class="reg-only hidden">국가<select id="auth-country"></select></label>
+              <label class="reg-only hidden">팀 이름<input id="auth-team" type="text" maxlength="20" placeholder="예: 서울 유스" /></label>
+              <label class="reg-only hidden">나이<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="예: 11" /></label>
+              <label class="reg-only hidden">등번호 (선택)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="예: 87" /></label>
+              <div class="field reg-only hidden"><span id="auth-stick-label">스틱</span>
+                <div id="auth-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="auth-stick-label">
+                  <button type="button" role="radio" aria-checked="false" data-stick="L">레프트 (L)</button>
+                  <button type="button" role="radio" aria-checked="false" data-stick="R">라이트 (R)</button>
+                </div>
+              </div>
+            </div>
+            <p class="reg-only hidden auth-hint">아이디: 4~20자, 영문 소문자로 시작, 공개 안 됨 · 별명: 랭킹에 공개되니 실명은 피하세요 · 비밀번호: 8자 이상, 영문+숫자</p>
+            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 한 판을 끝내 보세요. 결과 화면에 가입 방법이 나와요.</p>
+            <p class="login-only auth-hint muted">예전에 별명과 숫자 6자리로 가입했다면 별명과 그 비밀번호로 로그인하세요. 아이디를 한 번 새로 만들게 됩니다.</p>
+            <div class="login-only auth-forgot">
+              <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">비밀번호를 잊었어요</button>
+              <div id="auth-forgot-box" class="forgot-box hidden">
+                <p>가입할 때 메일 주소를 받지 않아서 비밀번호 찾기 메일은 보낼 수 없어요. 공식 인스타그램으로 DM을 보내 주세요.</p>
+                <ol class="forgot-steps">
+                  <li>DM에 아이디(모르면 별명), 팀 이름, 나이, 스틱(L/R), 가입한 때(대략)를 적어 주세요.</li>
+                  <li>운영자가 확인한 뒤 임시 비밀번호를 DM으로 보내 드려요.</li>
+                  <li>임시 비밀번호로 로그인하면 바로 새 비밀번호를 정하게 됩니다.</li>
+                </ol>
+                <div id="auth-forgot-dm" class="guest-dm"></div>
+                <p class="muted">어린이 회원은 보호자가 대신 보내 주세요. 운영자는 DM으로 비밀번호를 먼저 묻지 않아요.</p>
+              </div>
+            </div>
+            <p id="auth-error" class="error hidden"></p>
+            <div class="row" style="justify-content:center">
+              <button type="submit" id="auth-submit" class="btn btn-primary">로그인</button>
+              <button type="button" id="auth-guest" class="btn btn-ghost">게스트로 시작 (랭킹 미등록)</button>
+              <button type="button" id="auth-cancel" class="btn btn-ghost upgrade-only hidden">로그아웃</button>
+            </div>
+          </form>
+          <p id="auth-store-note" class="muted"></p>
+        </div>
+        <details class="howto">
+          <summary>처음이라면 — 사용 방법</summary>
+          <ol class="tips">
+            <li><span><b>세우기</b> — 기기를 1~1.5m 높이에 세워 바닥을 비스듬히 내려다보게 둡니다.</span></li>
+            <li><span><b>영역</b> — 네 모서리를 끌어 바닥에 맞춥니다.</span></li>
+            <li><span><b>퍽 등록</b> — 퍽(공·뚜껑도 OK)을 가운데 원에 3초 둡니다.</span></li>
+            <li><span><b>움직여 보기</b> — 네 모서리 표적에 퍽을 가져가 봅니다.</span></li>
+            <li><span><b>시작</b> — 게임을 고르고 퍽을 원에 3초 두면 시작합니다.</span></li>
+          </ol>
+        </details>
+        <p class="about">퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.</p>
+        <nav class="site-links" aria-label="안내 페이지"><a href="/guide/">사용 가이드</a><a href="/games/">7가지 게임</a><a href="/faq/">자주 묻는 질문</a><a href="/compare/">다른 앱과 비교</a></nav>
+        <p class="analytics-note">방문·플레이 통계를 위해 Google 애널리틱스를 씁니다. 별명·나이 같은 개인정보는 보내지 않습니다.</p>
+        <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>무단 복제·배포 금지</span></p>
+      </div>
+    </div>
+
     <!-- 카메라 영상 + 오버레이 -->
     <section id="stage">
       <div id="view" class="view">
@@ -166,114 +286,6 @@
       </nav>
     </section>
 
-    <!-- 시작 화면 -->
-    <div id="splash" class="panel splash">
-      <div class="splash-inner">
-        <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
-        <p id="lang-hint" class="lang-hint hidden" data-ugc><a href="/en/" data-lang="en" lang="en">English version →</a></p>
-        <div class="masthead"><span>iPad · Phone · Laptop</span></div>
-        <h1 class="lockup">Puck Dribble<span class="lockup-script"> Trainer</span></h1>
-        <picture>
-          <source srcset="icons/hero-art.webp" type="image/webp" />
-          <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="스틱과 퍽 일러스트" decoding="async" />
-        </picture>
-        <p class="lead">퍽을 읽는 스틱 핸들링 게임. 당신의 실력을 보여주세요</p>
-        <button id="btn-camera" class="btn btn-primary btn-big">카메라 시작</button>
-        <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
-        <div id="remote-start" class="remote-start">
-          <button id="btn-remote" class="btn btn-remote">휴대폰 카메라로 시작 (QR 연결)</button>
-          <p class="remote-start-note">휴대폰과 이 기기가 같은 Wi-Fi에 연결되어 있어야 합니다</p>
-        </div>
-        <button id="btn-mouse" class="btn btn-mouse hidden" title="테스트 관리자 전용">마우스로 시작 (카메라 없이)</button>
-        <p id="splash-error" class="error hidden"></p>
-        <div id="splash-diag" class="diag hidden">
-          <label>카메라 선택 <select id="diag-camera"></select></label>
-          <div class="row" style="justify-content:center">
-            <button type="button" id="btn-retry-camera" class="btn btn-primary">다시 시도</button>
-            <button type="button" id="btn-copy-diag" class="btn btn-ghost">진단 정보 복사</button>
-          </div>
-          <pre id="diag-info" class="diag-info"></pre>
-        </div>
-        <p class="start-note">로그인하지 않으면 게스트로 시작합니다 (랭킹 미등록)</p>
-        <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
-        <div id="invite-card" class="invite-card hidden" role="status">
-          <b id="invite-title"></b>
-          <span id="invite-sub"></span>
-        </div>
-        <!-- 로그인 / 회원가입 -->
-        <div id="auth-card" class="auth-card hidden">
-          <div id="auth-logged" class="auth-logged hidden">
-            <span id="auth-who"></span>
-            <button type="button" id="btn-admin" class="btn btn-ghost hidden">운영자</button>
-            <button type="button" id="btn-me-splash" class="btn btn-ghost">내 정보</button>
-            <button type="button" id="btn-logout" class="btn btn-ghost">로그아웃</button>
-          </div>
-          <form id="auth-form" autocomplete="off">
-            <div class="auth-tabs" id="auth-tabs">
-              <button type="button" class="tab active" data-tab="login">로그인</button>
-              <button type="button" class="tab" data-tab="register">회원가입</button>
-            </div>
-            <div class="auth-grid">
-              <p class="upgrade-id-only hidden auth-hint">이제 로그인은 아이디로 합니다. 아이디와 새 비밀번호를 만들어 주세요. 별명과 기록은 그대로예요. <span class="muted">예전 계정:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
-              <p class="upgrade-pw-only hidden auth-hint">임시 비밀번호로 로그인했어요. 나만 아는 새 비밀번호를 정해야 시작할 수 있어요. <span class="muted">아이디:</span> <b id="auth-temp-id" data-ugc></b></p>
-              <label id="auth-id-label">아이디<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="예: puckking07" required /></label>
-              <label>비밀번호<input id="auth-pin" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" autocomplete="current-password" placeholder="8자 이상, 영문+숫자" required /></label>
-              <label class="new-pw hidden">비밀번호 확인<input id="auth-pin2" type="password" maxlength="64" autocomplete="new-password" placeholder="비밀번호를 한 번 더" /></label>
-              <label class="reg-only hidden">플레이어 별명<input id="auth-nick" type="text" maxlength="12" placeholder="예: 번개손" /></label>
-              <label class="reg-only hidden">가입 코드<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="예: K7MP-Q2XD" /></label>
-              <label class="reg-only hidden">국가<select id="auth-country"></select></label>
-              <label class="reg-only hidden">팀 이름<input id="auth-team" type="text" maxlength="20" placeholder="예: 서울 유스" /></label>
-              <label class="reg-only hidden">나이<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="예: 11" /></label>
-              <label class="reg-only hidden">등번호 (선택)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="예: 87" /></label>
-              <div class="field reg-only hidden"><span id="auth-stick-label">스틱</span>
-                <div id="auth-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="auth-stick-label">
-                  <button type="button" role="radio" aria-checked="false" data-stick="L">레프트 (L)</button>
-                  <button type="button" role="radio" aria-checked="false" data-stick="R">라이트 (R)</button>
-                </div>
-              </div>
-            </div>
-            <p class="reg-only hidden auth-hint">아이디는 로그인에만 쓰고 공개되지 않아요 (4~20자, 영문 소문자로 시작, 영문·숫자·_). 별명은 랭킹에 공개되니 실명 대신 쓰고, 아이디와 다르게 정하세요. 비밀번호는 8자 이상, 영문과 숫자를 함께 넣으세요.</p>
-            <p class="reg-only hidden auth-hint">정회원은 가입 코드로 가입합니다. 코드가 없으면 게스트로 플레이하고, 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요.</p>
-            <p class="login-only auth-hint muted">예전에 별명과 숫자 6자리로 가입했다면 별명과 그 비밀번호로 로그인하세요. 아이디를 한 번 새로 만들게 됩니다.</p>
-            <div class="login-only auth-forgot">
-              <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">비밀번호를 잊었어요</button>
-              <div id="auth-forgot-box" class="forgot-box hidden">
-                <p>가입할 때 메일 주소를 받지 않아서 비밀번호 찾기 메일은 보낼 수 없어요. 공식 인스타그램으로 DM을 보내 주세요.</p>
-                <ol class="forgot-steps">
-                  <li>DM에 아이디(모르면 별명), 팀 이름, 나이, 스틱(L/R), 가입한 때(대략)를 적어 주세요.</li>
-                  <li>운영자가 확인한 뒤 임시 비밀번호를 DM으로 보내 드려요.</li>
-                  <li>임시 비밀번호로 로그인하면 바로 새 비밀번호를 정하게 됩니다.</li>
-                </ol>
-                <div id="auth-forgot-dm" class="guest-dm"></div>
-                <p class="muted">어린이 회원은 보호자가 대신 보내 주세요. 운영자는 DM으로 비밀번호를 먼저 묻지 않아요.</p>
-              </div>
-            </div>
-            <p id="auth-error" class="error hidden"></p>
-            <div class="row" style="justify-content:center">
-              <button type="submit" id="auth-submit" class="btn btn-primary">로그인</button>
-              <button type="button" id="auth-guest" class="btn btn-ghost">게스트로 시작 (랭킹 미등록)</button>
-              <button type="button" id="auth-cancel" class="btn btn-ghost upgrade-only hidden">로그아웃</button>
-            </div>
-          </form>
-          <p id="auth-store-note" class="muted"></p>
-        </div>
-        <details class="howto">
-          <summary>처음이라면 — 사용 방법</summary>
-          <ol class="tips">
-            <li><span><b>세우기</b> — 휴대폰·아이패드·노트북을 거치대에 세워 1~1.5m 높이에서 바닥을 비스듬히 내려다보게 둡니다. 너무 낮으면(50cm 이하) 먼 쪽에서 퍽을 놓칩니다.</span></li>
-            <li><span><b>영역</b> — 네 모서리를 끌어 바닥에 맞춥니다. 다음부터는 맞춰 둔 영역을 그대로 씁니다.</span></li>
-            <li><span><b>퍽 등록</b> — 공·뚜껑·퍽 무엇이든 가운데 원 안에 3초 두면 인식됩니다. 바닥과 색이 확실히 다를수록 정확합니다.</span></li>
-            <li><span><b>움직여 보기</b> — 퍽을 네 모서리 표적에 가져가 끝까지 잘 잡히는지 확인한 뒤 게임을 고릅니다.</span></li>
-            <li><span><b>시작</b> — 등록된 퍽을 원 안에 3초 두면 손대지 않고 시작합니다. 휴대폰을 TV에 연결해도 됩니다.</span></li>
-          </ol>
-        </details>
-        <p class="about">퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.</p>
-        <nav class="site-links" aria-label="안내 페이지"><a href="/guide/">사용 가이드</a><a href="/games/">7가지 게임</a><a href="/faq/">자주 묻는 질문</a></nav>
-        <p class="analytics-note">방문·플레이 통계를 위해 Google 애널리틱스를 씁니다. 별명·나이 같은 개인정보는 보내지 않습니다.</p>
-        <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>무단 복제·배포 금지</span></p>
-      </div>
-    </div>
-
     <!-- 모드 선택 -->
     <div id="panel-mode" class="panel modal hidden">
       <div class="modal-card">
@@ -323,7 +335,7 @@
           <label class="switch"><input type="checkbox" id="set-mirror" checked /><span>좌우 반전(거울 모드)</span></label>
           <label class="switch"><input type="checkbox" id="set-sound" checked /><span>효과음</span></label>
           <label class="switch"><input type="checkbox" id="set-autoStart" checked /><span>핸즈프리 시작 (퍽을 원 안에 3초)</span></label>
-          <label class="switch"><input type="checkbox" id="set-flipDepth" checked /><span>카메라 쪽으로 밀면 화면 위로 (와이드 드리블·퀵 핸즈 제외)</span></label>
+          <label class="switch"><input type="checkbox" id="set-reverseDepth" /><span>위아래 반대로 (와이드 드리블 제외)</span></label>
           <label>조작 대상
             <select id="set-controller">
               <option value="puck">퍽</option>
@@ -350,7 +362,7 @@
         <details class="settings-adv">
           <summary>인식 세부 조정 (퍽이 잘 안 잡힐 때만)</summary>
           <div class="settings-grid">
-            <p class="adv-intro">퍽·스틱을 보정에서 등록하면 허용 오차는 자동으로 맞춰집니다. 미리보기에서 빨간색이 퍽으로, 초록색이 스틱으로 인식되는 곳이에요. 퍽만 빨갛게 칠해지면 그대로 두세요.</p>
+            <p class="adv-intro">보정에서 퍽·스틱을 등록하면 자동으로 맞춰집니다. 미리보기의 빨강은 퍽, 초록은 스틱이에요. 퍽만 빨가면 그대로 두세요.</p>
             <!-- 인식 미리보기: 인식에 쓰는 영상 위에 퍽·스틱으로 잡힌 픽셀을 칠한다 (설정 창 안에서만 — 게임 화면은 가리지 않음) -->
             <figure class="mask-preview"><canvas id="mask-preview" aria-hidden="true"></canvas><figcaption>인식 미리보기 · 빨강 퍽 · 초록 스틱 · 동그라미 = 퍽으로 고른 자리</figcaption></figure>
             <label>퍽 색 허용 오차 <output id="out-puckTol"></output>
@@ -368,6 +380,16 @@
                 <option value="400">최고 (400px, 퍽이 작게 보일 때)</option>
               </select>
               <small class="hint">퍽이 작거나 멀리 보이면 높이세요 (처리가 조금 무거워짐). 아주 작은 퍽은 등록할 때 자동으로 400이 됩니다</small>
+              <small class="hint">게임 영역이 화면보다 작으면 영역만 잘라 그만큼 더 촘촘히 읽어요 (최대 3배)</small>
+              <small class="hint" id="proc-live"></small>
+            </label>
+            <label>카메라 프레임
+              <select id="set-camRate">
+                <option value="auto">자동 (기본)</option>
+                <option value="60">항상 60fps</option>
+                <option value="30">항상 30fps (어두운 곳)</option>
+              </select>
+              <small class="hint">자동: 기기와 Wi-Fi 상태에 맞춰 60·30fps를 알아서 바꿔요. 화면이 어둡거나 자글거리면 30으로 고정하세요</small>
             </label>
           </div>
         </details>
@@ -409,7 +431,7 @@
             </div>
           </div>
         </div>
-        <p class="muted">팁: 퍽은 바닥과, 스틱 테이프는 퍽·바닥과 다른 색(주황·파랑)일수록 잘 잡혀요. 카메라는 1~1.5m 높이에서 비스듬히 내려다보게 두세요.</p>
+        <p class="muted">팁: 퍽은 바닥과 다른 색, 스틱 테이프는 퍽·바닥과 다른 색(주황·파랑)이 잘 잡혀요.</p>
       </div>
     </div>
 
@@ -428,7 +450,7 @@
             <p id="remote-status" class="remote-status" role="status">연결 준비 중…</p>
           </div>
         </div>
-        <p class="muted remote-note">휴대폰은 1~1.5m 높이에서 바닥을 비스듬히 내려다보게, 이 화면 옆에 두세요. 연결되는 동안 휴대폰 화면을 켜 두세요.</p>
+        <p class="muted remote-note">휴대폰을 이 화면 옆 1~1.5m 높이에 두고, 연결되는 동안 휴대폰 화면을 켜 두세요.</p>
       </div>
     </div>
 
@@ -599,7 +621,7 @@
         </section>
         <section class="adm-sec">
           <h3>1회용 코드</h3>
-          <p class="muted">SNS 플레이 인증(올린 영상 링크)을 DM으로 확인한 게스트에게 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
+          <p class="muted">DM으로 가입 코드를 요청한 게스트(보호자)에게 코드(또는 링크)를 보냅니다. 한 사람만 쓸 수 있습니다.</p>
           <div class="adm-row">
             <input id="adm-one-note" type="text" maxlength="60" placeholder="메모 (예: 인스타 아이디)" aria-label="메모" />
             <button type="button" id="adm-one" class="btn btn-primary">만들기</button>
@@ -619,10 +641,10 @@
         </section>
         <section class="adm-sec">
           <h3>게스트 안내</h3>
-          <p class="muted">게스트의 결과 화면에 나오는 정회원 코드 받는 방법입니다. 정회원 친구의 초대 링크로 가입하거나, 플레이 영상을 SNS에 올리고 그 링크를 공식 인스타 DM으로 보내도록 안내합니다.</p>
+          <p class="muted">게스트의 결과 화면에 나오는 정회원 가입 방법입니다. 공개 가입 코드(위에서 만든 오픈베타 코드)를 넣어 두면 결과 화면에 [정회원 가입하기] 버튼이 나오고, 마감일이 지나거나 인원이 차면 저절로 사라집니다. 비워 두면 정회원 친구의 초대 링크와 공식 인스타 DM 문의만 안내합니다.</p>
           <div class="adm-row">
             <label>공식 인스타 계정<input id="adm-sns" type="text" maxlength="60" placeholder="예: puck.official" /></label>
-            <label>해시태그<input id="adm-hashtag" type="text" maxlength="40" placeholder="예: 퍽드리블챌린지" /></label>
+            <label>공개 가입 코드<input id="adm-join-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="오픈베타 코드 (비우면 끔)" /></label>
             <button type="button" id="adm-save-config" class="btn">저장</button>
           </div>
         </section>

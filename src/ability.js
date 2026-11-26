@@ -7,7 +7,7 @@ import { dayKey, keyInfo } from './activity.js';
 
 /** 육각형 꼭짓점 순서 (위에서부터 시계 방향). key = 기록이 없을 때 기준을 볼 기본 랭킹 키 */
 export const ABILITIES = [
-  { id: 'speed', name: '스피드', mode: 'quick', key: 'quick' },
+  { id: 'speed', name: '스피드', mode: 'quick', key: 'quick@60' },
   { id: 'react', name: '반응', mode: 'reaction', key: 'reaction' },
   { id: 'control', name: '컨트롤', mode: 'figure8', key: 'figure8' },
   { id: 'wide', name: '와이드', mode: 'wide', key: 'wide@60' },

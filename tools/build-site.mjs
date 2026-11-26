@@ -2,13 +2,14 @@
 //   - index.html 의 <!-- seo:start --> ~ <!-- seo:end --> (제목·설명·canonical·hreflang·공유 미리보기·구조화 데이터·소유 확인)
 //   - en/index.html : 영어 첫 화면. index.html 을 영어 사전(src/i18n-en.js)으로 미리 번역해 둔 것
 //     (자바스크립트를 돌리지 않는 검색·AI 크롤러도 영어 내용을 본다. 앱은 주소로 언어를 정한다)
-//   - guide/ games/ faq/ (+ en/…) 안내 페이지, sitemap.xml, robots.txt, llms.txt, 404.html, 구글 소유 확인 파일
+//   - guide/ games/ faq/ (+ en/…) 안내 페이지, sitemap.xml, rss.xml, robots.txt, llms.txt, 404.html, 구글 소유 확인 파일
+//     (rss.xml 은 네이버 서치어드바이저 '요청 > RSS 제출'용. 네이버는 사이트맵과 RSS 를 따로 받는다), IndexNow 키 파일
 // 사용: node tools/build-site.mjs          파일 쓰기
 //       node tools/build-site.mjs --check  저장소의 파일이 최신인지 확인 (다르면 실패 — 테스트에서 씀)
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SITE, VERIFY, SAME_AS, DEF, NAME, HOME, GAMES, PAGES, UI } from './site-content.mjs';
+import { SITE, UPDATED, VERIFY, SAME_AS, DEF, NAME, HOME, GAMES, PAGES, UI } from './site-content.mjs';
 import { icon, cameraDiagram, heightChart, puckSwatch } from './guide-art.mjs';
 
 export const ROOT = normalize(join(fileURLToPath(import.meta.url), '..', '..'));
@@ -38,6 +39,7 @@ function seoHead({ lang, slug = '', title, description, ogTitle, ld, extra = [] 
     `<link rel="canonical" href="${url(pathOf(lang, slug))}" />`,
     ...LANGS.map((l) => `<link rel="alternate" hreflang="${l}" href="${url(pathOf(l, slug))}" />`),
     `<link rel="alternate" hreflang="x-default" href="${url(pathOf('ko', slug))}" />`,
+    `<link rel="alternate" type="application/rss+xml" href="${url('/rss.xml')}" />`,
     `<meta property="og:type" content="website" />`,
     `<meta property="og:site_name" content="${esc(NAME[lang])}" />`,
     `<meta property="og:title" content="${esc(t)}" />`,
@@ -154,6 +156,8 @@ async function englishHome(koHtml) {
   h = h.replace('<html lang="ko">', '<html lang="en">');
   // 영어판은 /en/ 아래에 있으므로 상대 주소(style.css, src/…, icons/…)가 첫 화면과 같은 곳을 가리키게
   h = h.replace('<meta charset="UTF-8" />', '<meta charset="UTF-8" />\n  <base href="/" />');
+  // 제목(h1) 안의 한국어 이름은 영어판에 넣지 않는다 (영어판 제목은 로고의 Puck Dribble Trainer)
+  h = h.replace(/<span class="lockup-ko" data-ugc>[^<]*<\/span>/, '');
   h = translateHtml(h, tr);
   // 안내 페이지 링크는 영어판으로, 언어 안내는 한국어 쪽으로
   for (const p of PAGES) h = h.split(`href="${pathOf('ko', p.slug)}"`).join(`href="${pathOf('en', p.slug)}"`);
@@ -169,6 +173,11 @@ const FONTS = 'https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=F
 function block(b) {
   if (typeof b === 'string') return `<p>${md(b)}</p>`;
   const [tag, items] = b;
+  // 표: ['table', { caption, head: [...], rows: [[...], ...] }] — 행의 첫 칸은 행 제목(th)
+  if (tag === 'table') {
+    const { caption, head, rows } = items;
+    return `<div class="table-wrap"><table>${caption ? `<caption>${md(caption)}</caption>` : ''}<thead><tr>${head.map((x) => `<th scope="col">${md(x)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x, i) => (i === 0 ? `<th scope="row">${md(x)}</th>` : `<td>${md(x)}</td>`)).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
   return `<${tag}>${items.map((x) => `<li>${md(x)}</li>`).join('')}</${tag}>`;
 }
 
@@ -291,13 +300,14 @@ function notFound() {
   return shell('ko', { head, body });
 }
 
-// ---------- sitemap·robots·llms ----------
+// ---------- sitemap·rss·robots·llms ----------
 function sitemap() {
   const slugs = ['', ...PAGES.map((p) => p.slug)];
   const rows = [];
   for (const slug of slugs) for (const lang of LANGS) {
     rows.push(`  <url>
     <loc>${url(pathOf(lang, slug))}</loc>
+    <lastmod>${UPDATED[slug]}</lastmod>
 ${LANGS.map((l) => `    <xhtml:link rel="alternate" hreflang="${l}" href="${url(pathOf(l, slug))}" />`).join('\n')}
     <xhtml:link rel="alternate" hreflang="x-default" href="${url(pathOf('ko', slug))}" />
   </url>`);
@@ -306,6 +316,41 @@ ${LANGS.map((l) => `    <xhtml:link rel="alternate" hreflang="${l}" href="${url(
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
 ${rows.join('\n')}
 </urlset>
+`;
+}
+
+/**
+ * RSS 2.0: 네이버 서치어드바이저 '요청 > RSS 제출'에 내는 피드. 페이지 하나가 글 하나 (한국어 먼저, 영어 다음).
+ * 날짜는 UPDATED (한국 시간 오전 9시) — 빌드할 때마다 바뀌지 않게 고정값만 쓴다
+ */
+function rss() {
+  const slugs = ['', ...PAGES.map((p) => p.slug)];
+  const info = (lang, slug) => (slug ? PAGES.find((p) => p.slug === slug)[lang] : HOME[lang]);
+  const date = (d) => new Date(`${d}T09:00:00+09:00`).toUTCString();
+  const items = [];
+  for (const lang of LANGS) for (const slug of slugs) {
+    const i = info(lang, slug), link = url(pathOf(lang, slug));
+    items.push(`    <item>
+      <title>${esc(i.title)}</title>
+      <link>${link}</link>
+      <guid isPermaLink="true">${link}</guid>
+      <description>${esc(i.description)}</description>
+      <pubDate>${date(UPDATED[slug])}</pubDate>
+    </item>`);
+  }
+  const latest = Object.values(UPDATED).sort().at(-1);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>${esc(NAME.ko)}</title>
+    <link>${url('/')}</link>
+    <atom:link href="${url('/rss.xml')}" rel="self" type="application/rss+xml" />
+    <description>${esc(DEF.ko)}</description>
+    <language>ko</language>
+    <lastBuildDate>${date(latest)}</lastBuildDate>
+${items.join('\n')}
+  </channel>
+</rss>
 `;
 }
 
@@ -354,10 +399,12 @@ export async function buildSite(root = ROOT) {
   files['en/index.html'] = await englishHome(koHtml);
   for (const page of PAGES) for (const lang of LANGS) files[`${pathOf(lang, page.slug).slice(1)}index.html`] = contentPage(lang, page);
   files['sitemap.xml'] = sitemap();
+  files['rss.xml'] = rss();
   files['robots.txt'] = robots();
   files['llms.txt'] = llms();
   files['404.html'] = notFound();
   files[VERIFY.googleFile] = `google-site-verification: ${VERIFY.googleFile}`;
+  files[`${VERIFY.indexnow}.txt`] = VERIFY.indexnow; // IndexNow 키 파일 (tools/indexnow.mjs)
   return files;
 }
 

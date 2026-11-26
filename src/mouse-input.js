@@ -1,7 +1,7 @@
-// 테스트 관리자용 마우스 입력: 카메라 대신 마우스(또는 터치) 포인터를 퍽으로 쓴다.
+// 카메라 없이 체험(누구나, 운영자 테스트 포함): 카메라 대신 마우스 포인터나 손가락(터치)을 퍽으로 쓴다.
 // 화면 어디를 가리키든 그 자리에 내 퍽이 보이도록, 지금 화면(모드 선택·결과·게임 종류)에 맞춰
 // 추적 좌표(u,v)를 거꾸로 계산해 Tracker 에 넣는다.
-import { dodgeField } from './render.js';
+import { dodgeField, FLOOR_MODES } from './render.js';
 
 export const MOUSE_SRC = { width: 1280, height: 720 };
 
@@ -23,15 +23,17 @@ const inv = (val, a, b) => (b === a ? 0.5 : (val - a) / (b - a));
 
 /**
  * 포인터 위치 -> 추적 좌표 {u, v}
- * ctx: { view, canvas, modeList, choiceTrack, modeOpen, resultOpen, game, topInset }
+ * ctx: { view, canvas, modeList, choiceTrack, modeOpen, resultOpen, game, topInset, cursorFlip, puckFlip, floorMap, PW, PH }
+ * cursorFlip: 모드 선택 커서가 v를 뒤집어 쓰는지. puckFlip: 바닥 위 화면에서 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리는 중
+ * (퀵 핸즈·반응 타겟) — 커서 자리에 퍽이 보이도록 거꾸로 읽는다
  */
 export function pointerToUV(px, py, ctx) {
   const { view, canvas, game } = ctx;
   if (ctx.modeOpen && ctx.modeList) {
-    // 모드 선택: 커서가 카드 목록 위 포인터 자리에 오도록 (main 은 flipDepth 면 v를 뒤집어 쓴다)
+    // 모드 선택: 커서가 카드 목록 위 포인터 자리에 오도록 (main 은 cursorFlip 이면 v를 뒤집어 쓴다)
     const r = ctx.modeList.getBoundingClientRect();
     const vv = clamp01((py - r.top) / r.height);
-    return { u: clamp01((px - r.left) / r.width), v: ctx.flipDepth ? 1 - vv : vv };
+    return { u: clamp01((px - r.left) / r.width), v: ctx.cursorFlip ? 1 - vv : vv };
   }
   if (ctx.resultOpen && ctx.choiceTrack) {
     const r = ctx.choiceTrack.getBoundingClientRect();
@@ -44,8 +46,8 @@ export function pointerToUV(px, py, ctx) {
     const a = game.arcade, z0 = a.toZone(0, 0), z1 = a.toZone(1, 1);
     return { u: clamp01(inv(nx, z0.x, z1.x)), v: clamp01(inv(ny * a.aspect, z0.y, z1.y)) };
   }
-  if ((game.running && game.mode.id !== 'arcade') || game.mode.id === 'free') {
-    // 평면 경기장(아케이드를 뺀 모든 게임 · 자유 연습은 코스 편집 중에도): 캔버스 안 경기장 사각형 기준
+  if ((game.running && !FLOOR_MODES.has(game.mode.id)) || game.mode.id === 'free') {
+    // 평면 경기장(흰 판: 퍽 피하기·8자 드리블·자유 연습 — 자유 연습은 코스 편집 중에도): 캔버스 안 경기장 사각형 기준
     const f = dodgeField(canvas.width, canvas.height, ctx.topInset);
     const fx = (f.x / canvas.width) * vr.width + vr.left, fy = (f.y / canvas.height) * vr.height + vr.top;
     const fw = (f.w / canvas.width) * vr.width, fh = (f.h / canvas.height) * vr.height;
@@ -53,9 +55,10 @@ export function pointerToUV(px, py, ctx) {
     const p0 = game.toPlane(0, 0), p1 = game.toPlane(1, 1);
     return { u: clamp01(inv(X, p0.x, p1.x)), v: clamp01(inv(Y, p0.y, p1.y)) };
   }
-  // 그 밖(대기 중 가운데 원): 바닥 = 수동으로 맞춘 네 모서리(있으면), 없으면 화면 전체
-  if (ctx.floorMap) { const [u, v] = ctx.floorMap.toUV(nx * ctx.PW, ny * ctx.PH); return { u: clamp01(u), v: clamp01(v) }; }
-  return { u: clamp01(nx), v: clamp01(ny) };
+  // 그 밖(바닥 위 게임: 와이드·퀵 핸즈·반응 타겟 · 대기 중 가운데 원): 카메라 화면 좌표 그대로
+  // (내 퍽을 위아래 반대 자리에 그리는 중이면 거꾸로). 바닥 = 수동으로 맞춘 네 모서리(있으면), 없으면 화면 전체
+  const [u, v] = ctx.floorMap ? ctx.floorMap.toUV(nx * ctx.PW, ny * ctx.PH) : [nx, ny];
+  return { u: clamp01(u), v: clamp01(ctx.puckFlip ? 1 - v : v) };
 }
 
 /** 카메라 영상 처리 결과 대신 쓰는 가짜 결과: 화면 전체가 바닥, 퍽은 포인터 자리 */

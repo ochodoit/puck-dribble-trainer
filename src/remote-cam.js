@@ -86,14 +86,77 @@ function lowLatency(receiver) {
   try { receiver.playoutDelayHint = 0; } catch { /* 미지원 */ }
 }
 
-/** 보내는 쪽: 화질보다 프레임 수 우선 (퍽 움직임이 끊기지 않게), 같은 Wi-Fi 기준 넉넉한 비트레이트 */
-async function tuneSender(sender) {
+/**
+ * 휴대폰이 보내는 영상 단계: 높음 = 60fps·8Mbps (빠른 드리블), 낮음 = 30fps·4Mbps (예전 그대로).
+ * 같은 공유기에 휴대폰은 Wi-Fi, 노트북·데스크탑은 Wi-Fi 또는 랜선이면 보통 높음이 되고, Wi-Fi 가 붐비거나 휴대폰이 버거우면 낮음
+ */
+export const LINK_LEVELS = { high: { fps: 60, bitrate: 8_000_000 }, low: { fps: 30, bitrate: 4_000_000 } };
+
+/** 보내는 쪽: 화질보다 프레임 수 우선 (퍽 움직임이 끊기지 않게), 단계별 초당 프레임·비트레이트 상한 */
+async function tuneSender(sender, level = 'low') {
+  const L = LINK_LEVELS[level] || LINK_LEVELS.low;
   try {
     const p = sender.getParameters();
     p.degradationPreference = 'maintain-framerate';
-    if (p.encodings?.[0]) { p.encodings[0].maxBitrate = 4_000_000; p.encodings[0].maxFramerate = 30; }
+    if (p.encodings?.[0]) { p.encodings[0].maxBitrate = L.bitrate; p.encodings[0].maxFramerate = L.fps; }
     await sender.setParameters(p);
   } catch { /* 미지원이면 브라우저 기본값 */ }
+}
+
+/**
+ * 휴대폰 연결 자동 조절 상태. mode: 'auto' | '60' | '30' (노트북 설정 '카메라 프레임'을 연결되면 받아 온다)
+ * 처음에는 높음으로 시작한다 (좋은 Wi-Fi 면 바로 60)
+ */
+export function newLinkState(now, mode = 'auto') {
+  return { mode, level: mode === '30' ? 'low' : 'high', at: now, bad: 0, goodSince: null, backoff: 20000 };
+}
+
+/**
+ * 2초마다 보내는 쪽 통계 s 로 단계를 정한다. 바꿔야 할 단계('high'|'low')를 돌려주고, 그대로면 null.
+ * s: { fps: 실제로 보낸 초당 프레임, short: 보낸 영상의 짧은 변, capShort: 카메라 영상의 짧은 변, capFps: 카메라 초당 프레임,
+ *      limit: 화질을 깎은 까닭('none'|'bandwidth'|'cpu'|'other'), loss: 받는 쪽이 잃은 비율 0~1 } — 모르는 값은 null
+ *  - 높음: 통신·휴대폰 처리가 모자라 화질을 깎거나, 45프레임도 못 보내거나, 해상도가 70% 아래로 줄거나, 5% 넘게 잃는 일이
+ *    두 번(4초) 이어지면 낮춘다. 단계를 바꾼 뒤 6초는 보지 않는다 (처음 화질이 올라오는 동안)
+ *  - 낮음: 멀쩡한 상태가 backoff(처음 20초) 동안 이어지면 다시 높여 본다. 높인 지 30초 안에 또 낮아지면 backoff 두 배 (최대 5분)
+ *  - 카메라가 60을 못 찍으면(capFps < 45) 낮음 그대로. 고정('60'·'30')이면 그 단계 그대로
+ */
+export function linkStep(st, s, now) {
+  const set = (level) => { st.level = level; st.at = now; st.bad = 0; st.goodSince = null; return level; };
+  const fixed = st.mode === '60' ? 'high' : st.mode === '30' ? 'low' : null;
+  if (fixed) return st.level !== fixed ? set(fixed) : null;
+  if (s.capFps && s.capFps < 45) return st.level !== 'low' ? set('low') : null;
+  const shrunk = (k) => s.short && s.capShort && s.short < s.capShort * k;
+  if (st.level === 'high') {
+    if (now - st.at < 6000) return null;
+    const bad = s.limit === 'bandwidth' || s.limit === 'cpu' || (s.fps != null && s.fps < 45) || shrunk(0.7) || (s.loss != null && s.loss > 0.05);
+    st.bad = bad ? st.bad + 1 : 0;
+    if (st.bad < 2) return null;
+    st.backoff = now - st.at < 30000 ? Math.min(st.backoff * 2, 300000) : 20000;
+    return set('low');
+  }
+  const ok = (s.limit == null || s.limit === 'none') && !shrunk(0.9) && !(s.fps != null && s.fps < 26) && !(s.loss != null && s.loss > 0.02);
+  if (!ok) { st.goodSince = null; return null; }
+  if (st.goodSince == null) st.goodSince = now;
+  return now - st.goodSince >= st.backoff ? set('high') : null;
+}
+
+/** 보내는 쪽 WebRTC 통계에서 linkStep 이 보는 값만 뽑는다 (브라우저마다 없는 값은 null) */
+export function linkSample(report, track) {
+  let out = null, rin = null;
+  report.forEach((s) => {
+    if (s.type === 'outbound-rtp' && (s.kind === 'video' || s.mediaType === 'video')) out = s;
+    else if (s.type === 'remote-inbound-rtp' && (s.kind === 'video' || s.mediaType === 'video')) rin = s;
+  });
+  const cs = track?.getSettings?.() || {};
+  const short = out && out.frameWidth && out.frameHeight ? Math.min(out.frameWidth, out.frameHeight) : null;
+  return {
+    fps: out?.framesPerSecond ?? null,
+    short,
+    capShort: cs.width && cs.height ? Math.min(cs.width, cs.height) : null,
+    capFps: cs.frameRate || null,
+    limit: out?.qualityLimitationReason ?? null,
+    loss: rin?.fractionLost ?? null,
+  };
 }
 
 /**
@@ -105,7 +168,8 @@ export function boostBitrate(sdp, startKbps = 2500) {
   const video = new Set();
   for (const l of lines) { const m = /^a=rtpmap:(\d+) (VP8|VP9|H264|AV1)\/90000/i.exec(l); if (m) video.add(m[1]); }
   const has = new Set(lines.filter((l) => l.startsWith('a=fmtp:')).map((l) => l.slice(7).split(' ')[0]));
-  const params = `x-google-start-bitrate=${startKbps};x-google-min-bitrate=800;x-google-max-bitrate=4000`;
+  // 상한은 높은 단계(60fps·8Mbps)까지 열어 둔다: 실제 상한은 단계마다 tuneSender 가 정한다
+  const params = `x-google-start-bitrate=${startKbps};x-google-min-bitrate=800;x-google-max-bitrate=${LINK_LEVELS.high.bitrate / 1000}`;
   const out = [];
   for (let l of lines) {
     const f = /^a=fmtp:(\d+) /.exec(l);
@@ -255,20 +319,52 @@ export function estimateDelay(s) {
  * 상태(onState): 'camera' 카메라 켜는 중 · 'waiting' 화면 기기의 제안을 기다림 · 'connecting' · 'connected' ·
  *                'lost' 끊김(화면 기기가 새 제안을 쓰면 자동으로 다시) · 'nocode' 코드 없음 · 'expired' 시간 지남 ·
  *                'busy' 다른 휴대폰이 이미 연결됨 · 'error'(두 번째 인자 = 오류)
- * onCommand(msg): 화면 기기가 보낸 명령 ({ t: 'flip' } 카메라 전환)
+ * onCommand(msg): 화면 기기가 보낸 명령 ({ t: 'flip' } 카메라 전환). { t: 'rate', mode } 는 여기서 처리한다 (setRate)
+ * 보내는 영상: 연결되면 2초마다 통계를 보고 60fps·8Mbps <-> 30fps·4Mbps 를 스스로 고른다 (linkStep)
  */
 export class RemotePhone {
   constructor(signal, { rtcConfig = RTC_CONFIG, onState, onCommand } = {}) {
     Object.assign(this, { signal, rtcConfig, onState, onCommand });
     this.gen = null; this.pc = null; this.dc = null; this.sender = null; this.stream = null; this.facing = 'environment';
     this.state = 'idle'; this._busy = false; this._last = undefined;
+    this.rateMode = 'auto'; // 노트북 설정 '카메라 프레임' ('auto' | '60' | '30')
+    this.link = null;       // 자동 조절 상태 (연결될 때마다 새로, 높음부터)
+  }
+
+  /** 카메라에 바라는 화질: 30 고정이면 30 (어두운 곳에서 더 밝게), 아니면 60 (보내는 프레임은 단계마다 tuneSender 가 줄인다) */
+  _captureFps() { return this.rateMode === '30' ? 30 : 60; }
+
+  /** 노트북에서 받은 '카메라 프레임' 설정: 단계를 바로 다시 정하고, 30 고정을 켜거나 끌 때는 카메라 촬영 프레임도 바꾼다 */
+  async setRate(mode) {
+    if (!['auto', '60', '30'].includes(mode) || mode === this.rateMode) return;
+    const capBefore = this._captureFps();
+    this.rateMode = mode;
+    const t = this.stream?.getVideoTracks()[0];
+    if (t?.applyConstraints && capBefore !== this._captureFps()) {
+      try { await t.applyConstraints({ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: this._captureFps() } }); } catch { /* 그대로 */ }
+    }
+    if (this.sender && this.pc?.connectionState === 'connected') {
+      this.link = newLinkState(performance.now(), mode);
+      await tuneSender(this.sender, this.link.level);
+      this._sendInfo();
+    }
+  }
+
+  /** 2초마다: 보내는 쪽 통계로 단계를 정해 바뀌면 적용하고 노트북에 알린다 */
+  async _rateTick(pc) {
+    if (this.pc !== pc || !this.sender || !this.link) return;
+    let rep;
+    try { rep = await pc.getStats(); } catch { return; }
+    if (this.pc !== pc || !this.link) return;
+    const next = linkStep(this.link, linkSample(rep, this.stream?.getVideoTracks()[0]), performance.now());
+    if (next) { await tuneSender(this.sender, next); this._sendInfo(); }
   }
 
   /** 카메라 켜기 (이미 연결돼 있으면 보내는 영상만 바꾼다: 다시 연결할 필요 없음) */
   async startCamera(facing = this.facing) {
     // iOS 는 카메라를 한 번에 하나만 열 수 있으므로 먼저 끈다
     this.stream?.getTracks().forEach((t) => t.stop());
-    const video = { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    const video = { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: this._captureFps() } };
     this.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
     const track = this.stream.getVideoTracks()[0];
     try { track.contentHint = 'motion'; } catch { /* 미지원 */ }
@@ -283,6 +379,7 @@ export class RemotePhone {
 
   close() {
     this.unwatch?.();
+    clearInterval(this._rateT);
     if (this.pc) { try { this.pc.close(); } catch { /* 이미 닫힘 */ } }
     this.pc = null;
     this.stream?.getTracks().forEach((t) => t.stop());
@@ -309,7 +406,8 @@ export class RemotePhone {
     const seen = this._seq;
     if (this.pc) { try { this.pc.close(); } catch { /* 이미 닫힘 */ } }
     const pc = this.pc = new RTCPeerConnection(this.rtcConfig);
-    this.gen = d.gen; this.sender = null;
+    this.gen = d.gen; this.sender = null; this.link = null;
+    clearInterval(this._rateT);
     this._set('connecting');
     pc.ondatachannel = (e) => {
       const dc = this.dc = e.channel;
@@ -317,13 +415,21 @@ export class RemotePhone {
       dc.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.t === 'ping') dc.send(JSON.stringify({ t: 'pong', at: m.at }));
+        else if (m.t === 'rate') this.setRate(m.mode);
         else this.onCommand?.(m);
       };
     };
     pc.onconnectionstatechange = () => {
       if (this.pc !== pc) return;
       const s = pc.connectionState;
-      if (s === 'connected' && this.sender) tuneSender(this.sender);
+      if (s === 'connected' && this.sender) {
+        // 처음 연결(또는 잠깐 끊겼다 돌아옴): 지금 단계로 맞추고 2초마다 다시 본다
+        if (!this.link) this.link = newLinkState(performance.now(), this.rateMode);
+        tuneSender(this.sender, this.link.level);
+        clearInterval(this._rateT);
+        this._rateT = setInterval(() => this._rateTick(pc), 2000);
+        this._sendInfo();
+      }
       if (s === 'failed' || s === 'disconnected' || s === 'closed') this._set('lost');
       else if (s === 'connected' && this.dc?.readyState === 'open') this._set('connected');
     };
@@ -354,6 +460,8 @@ export class RemotePhone {
   _sendInfo() {
     const t = this.stream?.getVideoTracks()[0];
     const s = t?.getSettings() || {};
-    if (this.dc?.readyState === 'open') this.dc.send(JSON.stringify({ t: 'info', facing: this.facing, w: s.width || 0, h: s.height || 0 }));
+    // fps: 지금 보내는 단계 (60·30), mode: 자동/고정 — 노트북 설정 창에 보인다
+    const fps = this.link ? LINK_LEVELS[this.link.level].fps : null;
+    if (this.dc?.readyState === 'open') this.dc.send(JSON.stringify({ t: 'info', facing: this.facing, w: s.width || 0, h: s.height || 0, fps, mode: this.rateMode }));
   }
 }

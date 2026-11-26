@@ -1,4 +1,28 @@
 // 카메라 제어 (getUserMedia)
+
+/** 카메라에 바라는 화질: 1280×720, 초당 fps 프레임 (모두 'ideal' — 못 맞추면 가장 가까운 것으로) */
+export const cameraConstraints = (fps = 60) => ({ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: fps } });
+
+/**
+ * 직접 연결한 카메라의 초당 프레임 자동 조절 ('카메라 프레임: 자동').
+ * 60을 바라고 켜되(카메라가 못 내면 카메라가 알아서 30), 이 기기가 60프레임을 다 인식하지 못하면
+ * (1초에 인식한 프레임이 36개도 안 되는 일이 4초 이어짐: 처리가 느리거나, 화면이 저전력 모드로 30만 그리거나) 카메라를 30으로 내린다.
+ * 남는 프레임은 어차피 버려지고 기기만 뜨거워지기 때문. 내린 뒤에는 카메라를 다시 켤 때까지 30 (자꾸 바꾸면 화면이 잠깐씩 끊긴다)
+ */
+export class CameraRateAuto {
+  constructor() { this.reset(); }
+  reset() { this.target = 60; this.badSince = null; this.lowered = false; }
+  /** 1초마다: cam = 카메라가 보내는 fps (모르면 0), done = 그 1초에 인식한 프레임 수. 카메라를 바꿀 fps 를 돌려준다 (그대로면 null) */
+  update(now, cam, done) {
+    if (this.target !== 60 || !(cam >= 45)) { this.badSince = null; return null; }
+    if (done >= Math.max(36, cam * 0.6)) { this.badSince = null; return null; }
+    if (this.badSince == null) this.badSince = now;
+    if (now - this.badSince < 4000) return null;
+    this.target = 30; this.lowered = true;
+    return 30;
+  }
+}
+
 export class Camera {
   constructor(videoEl) {
     this.video = videoEl;
@@ -12,11 +36,13 @@ export class Camera {
 
   /**
    * facing: 'user'(전면, 화면을 보며 플레이) | 'environment'(후면)
+   * fps: 바라는 초당 프레임 (기본 60: 빠른 드리블도 덜 끊기게). 'ideal' 이라 카메라가 못 내면 되는 만큼(보통 30)으로 열린다
    * 지정 장치 -> 방향 기준 -> 아무 카메라 순으로 재시도하고, 각 시도는 15초 안에 응답이 없으면 실패로 처리.
    */
-  async start(deviceId = '', facing = 'user') {
+  async start(deviceId = '', facing = 'user', fps = 60) {
     this.stop();
-    const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    this.attached = false;
+    const base = cameraConstraints(fps);
     const attempts = [];
     if (deviceId) attempts.push({ ...base, deviceId: { exact: deviceId } });
     attempts.push({ ...base, facingMode: { ideal: facing } });
@@ -55,6 +81,7 @@ export class Camera {
    */
   async attach(stream, timeoutMs = 15000) {
     this.stop();
+    this.attached = true;
     this.stream = stream;
     this.deviceId = '';
     this.video.srcObject = stream;
@@ -64,6 +91,20 @@ export class Camera {
     }), timeoutMs);
     try { await this.video.play(); } catch { /* muted+playsinline */ }
     return { width: this.video.videoWidth, height: this.video.videoHeight };
+  }
+
+  /** 카메라가 실제로 보내는 초당 프레임 (모르면 0) */
+  frameRate() {
+    const t = this.stream?.getVideoTracks?.()[0];
+    const f = t?.getSettings?.().frameRate;
+    return Number.isFinite(f) && f > 0 ? f : 0;
+  }
+
+  /** 켜진 카메라의 초당 프레임만 바꾼다 (다시 켜지 않고). 휴대폰 카메라 연결(받은 영상)은 그쪽에서 정하므로 그대로 */
+  async setFrameRate(fps) {
+    const t = this.stream?.getVideoTracks?.()[0];
+    if (this.attached || !t?.applyConstraints) return false;
+    try { await t.applyConstraints(cameraConstraints(fps)); return true; } catch { return false; }
   }
 
   stop() {
@@ -97,11 +138,10 @@ function platformHint() {
   return { isMac, isWin, isIOS, isAndroid, isSafari };
 }
 
-/** 오류 이름 + 플랫폼별 해결 순서 */
+/** 오류 이름 + 플랫폼별 해결 순서 (NotFoundError 같은 기술 코드는 화면에 안 쓰고, '진단 정보 복사'에만 들어감) */
 export function describeCameraError(err) {
   const name = err?.name || '';
   const p = platformHint();
-  const detail = `(${name || 'Error'}${err?.message ? ': ' + err.message : ''})`;
   if (!window.isSecureContext) {
     return '카메라는 HTTPS(또는 localhost)에서만 사용할 수 있습니다.\n배포된 주소(https://)로 열거나, README의 HTTPS 개발 서버 안내를 참고하세요.';
   }
@@ -111,16 +151,16 @@ export function describeCameraError(err) {
       : '주소창 왼쪽의 자물쇠(또는 카메라) 아이콘 > 카메라 "허용"으로 바꾸고 새로고침하세요.';
     const os = p.isWin ? '\nWindows: 설정 > 개인 정보 및 보안 > 카메라에서 "카메라 액세스"와 "앱이 카메라에 액세스하도록 허용"을 켜세요 (데스크톱 앱 항목에 브라우저 포함).'
       : p.isMac ? '\nmacOS: 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 사용 중인 브라우저를 켜세요.' : '';
-    return `카메라 권한이 거부되었습니다. ${detail}\n${steps}${os}`;
+    return `카메라 권한이 거부되었습니다.\n${steps}${os}`;
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-    return `연결된 카메라를 찾지 못했습니다. ${detail}\n노트북 카메라 가림막(프라이버시 셔터)이나 Fn 카메라 끄기 키가 눌려 있지 않은지, 장치 관리자에서 카메라가 사용 중지되지 않았는지 확인하세요.`;
+    return '연결된 카메라를 찾지 못했습니다.';
   }
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError' || name === 'TimeoutError') {
-    return `카메라를 열 수 없습니다. 다른 프로그램이 카메라를 쓰고 있을 가능성이 큽니다. ${detail}\nZoom·Teams·카카오톡·카메라 앱·OBS 등을 완전히 종료하고(트레이 아이콘까지), 브라우저의 다른 탭에서 카메라를 쓰고 있지 않은지 확인한 뒤 "다시 시도"를 누르세요.${p.isWin ? '\n그래도 안 되면 Windows 설정 > 개인 정보 및 보안 > 카메라에서 접근을 켜고, 브라우저를 완전히 껐다 켜세요.' : ''}`;
+    return `카메라를 열 수 없습니다. 다른 프로그램이 카메라를 쓰고 있을 가능성이 큽니다.\nZoom·Teams·카카오톡·카메라 앱·OBS 등을 완전히 종료하고(트레이 아이콘까지), 브라우저의 다른 탭에서 카메라를 쓰고 있지 않은지 확인한 뒤 "다시 시도"를 누르세요.${p.isWin ? '\n그래도 안 되면 Windows 설정 > 개인 정보 및 보안 > 카메라에서 접근을 켜고, 브라우저를 완전히 껐다 켜세요.' : ''}`;
   }
   if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
-    return `선택한 카메라를 쓸 수 없습니다. ${detail}\n아래 목록에서 다른 카메라를 고른 뒤 다시 시도하세요.`;
+    return `선택한 카메라를 쓸 수 없습니다.\n아래 목록에서 다른 카메라를 고른 뒤 다시 시도하세요.`;
   }
-  return `카메라를 시작할 수 없습니다. ${detail}\n아래 목록에서 카메라를 직접 고르거나, 브라우저를 Chrome/Edge 최신 버전으로 바꿔 보세요.`;
+  return `카메라를 시작할 수 없습니다.\n아래 목록에서 카메라를 직접 고르거나, 브라우저를 Chrome/Edge 최신 버전으로 바꿔 보세요.`;
 }

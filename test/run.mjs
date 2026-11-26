@@ -158,6 +158,11 @@ const skipSetup = async (page, touch = false) => {
   const fpsNum = parseInt(fps, 10);
   console.log(`${fpsNum > 0 ? 'PASS' : 'FAIL'} app processing frames (${fps.trim()})`);
   if (!(fpsNum > 0)) failed = true;
+  // 화면 칩: 초당 인식 프레임 + 프레임당 인식 시간. 카메라에는 60fps 를 바란다 (가짜 카메라는 되는 만큼)
+  const cam = await page.evaluate(() => { const t = document.querySelector('#video').srcObject?.getVideoTracks()[0]; const c = t?.getConstraints().frameRate; return { want: typeof c === 'number' ? c : c?.ideal, got: t?.getSettings().frameRate }; });
+  const chipOk = /^\d+ fps · \d+(\.\d)?ms$/.test(fps.trim()) && cam.want === 60 && cam.got > 0;
+  console.log(`${chipOk ? 'PASS' : 'FAIL'} fps chip shows processing time, camera asked for 60fps (${fps.trim()}, ${JSON.stringify(cam)})`);
+  if (!chipOk) failed = true;
   await page.click('#btn-mode');
   // 게임 시간 3분 선택 -> 타이머 3:00, 다시 1분
   await page.click('#time-seg button[data-min="3"]');
@@ -211,14 +216,18 @@ const skipSetup = async (page, touch = false) => {
   const gridOk = grid.n === 9 && grid.mid === 'mode-wait' && /mode-community/.test(grid.last) && /커뮤니티/.test(grid.lastText) && grid.cards === 8 && grid.cols === 3;
   console.log(`${gridOk ? 'PASS' : 'FAIL'} mode grid 3x3 with empty center and community in cell 9 (${JSON.stringify(grid)})`);
   if (!gridOk) failed = true;
-  // 모드 창의 '설정'(닫기 왼쪽): 모드 창 위에 설정 창, 닫으면 모드 창으로
+  // 모드 창 머리의 '퍽·스틱 등록'·'설정'(닫기 왼쪽): 각각 모드 창 위에 보정 창·설정 창을 열고, 닫으면 모드 창으로
   const modeBtns = await page.evaluate(() => [...document.querySelectorAll('#panel-mode .head-actions .btn')].map((b) => b.textContent.trim()).join(','));
+  await page.click('#btn-mode-calib');
+  const calibOverMode = await page.evaluate(() => !document.querySelector('#panel-calib').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
+  await page.click('[data-close="panel-calib"]');
+  const calibBack = await page.evaluate(() => document.querySelector('#panel-calib').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
   await page.click('#btn-mode-settings');
   const overMode = await page.evaluate(() => !document.querySelector('#panel-settings').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
   await page.click('[data-close="panel-settings"]');
   const backMode = await page.evaluate(() => document.querySelector('#panel-settings').classList.contains('hidden') && !document.querySelector('#panel-mode').classList.contains('hidden'));
-  const modeSetOk = modeBtns === '설정,닫기' && overMode && backMode;
-  console.log(`${modeSetOk ? 'PASS' : 'FAIL'} mode window has Settings left of Close; settings opens over it and closing returns to the modes (${JSON.stringify({ modeBtns, overMode, backMode })})`);
+  const modeSetOk = modeBtns === '퍽·스틱 등록,설정,닫기' && calibOverMode && calibBack && overMode && backMode;
+  console.log(`${modeSetOk ? 'PASS' : 'FAIL'} mode window has Register puck/stick and Settings left of Close; each opens over it and closing returns to the modes (${JSON.stringify({ modeBtns, calibOverMode, calibBack, overMode, backMode })})`);
   if (!modeSetOk) failed = true;
   // 자유 연습(8번 칸) 선택 -> 코스 편집: 번호 3, 1을 끌어다 놓기 -> 저장, 번호 순서 정렬
   await page.click('#mode-list > :nth-child(8)');
@@ -230,6 +239,11 @@ const skipSetup = async (page, touch = false) => {
   const courseOk = course.saved.length === 2 && course.game.join(',') === '1,3' && course.inField === 2 && course.inTray === 8 && Math.abs(course.saved.find((p) => p.n === 3).x - 0.75) < 0.03;
   console.log(`${courseOk ? 'PASS' : 'FAIL'} course builder: drag numbers onto the field (${JSON.stringify(course.game)}, field ${course.inField}, tray ${course.inTray})`);
   if (!courseOk) failed = true;
+  // 자유 연습은 퍽 피하기처럼 흰 평면 판: 배경 투명도는 0 고정(잠김), 퍽 투명도만 조절
+  const freeVis = await page.evaluate(() => { document.querySelector('#btn-settings').click(); const r = { bgLocked: document.querySelector('#set-bgTransparency').disabled, puckLocked: document.querySelector('#set-puckTransparency').disabled, wash: window.__puckTrainer.game.arcade.wash }; document.querySelector('[data-close="panel-settings"]').click(); return r; });
+  const freeVisOk = freeVis.bgLocked && !freeVis.puckLocked && freeVis.wash === 1;
+  console.log(`${freeVisOk ? 'PASS' : 'FAIL'} free practice is a white flat board: background locked at 0, puck transparency adjustable ${JSON.stringify(freeVis)}`);
+  if (!freeVisOk) failed = true;
   // 트레이로 되돌리면 삭제
   await dragPt(3, 0.5, 0.02);
   const afterRemove = await page.evaluate(() => window.__puckTrainer.game.course.points.map((p) => p.n).join(','));
@@ -393,10 +407,18 @@ const skipSetup = async (page, touch = false) => {
   await page.waitForTimeout(300);
   // 인식 미리보기: 설정 창 안에서 인식 해상도 그대로 그려지고, 쓰이지 않는 바닥 밝기·채도 칸과 화면 마스크 스위치는 없다
   const adv = await page.evaluate(() => { const c = document.querySelector('#mask-preview'), d = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data; return { w: c.width, pw: window.__puckTrainer.vision.PW, drawn: d[3] === 255, gone: !document.querySelector('#set-whiteV') && !document.querySelector('#set-whiteC') && !document.querySelector('#set-debug'), hints: document.querySelectorAll('.settings-adv .hint').length }; });
-  const advOk = adv.w === adv.pw && adv.drawn && adv.gone && adv.hints === 3;
+  const advOk = adv.w === adv.pw && adv.drawn && adv.gone && adv.hints === 6;
   console.log(`${advOk ? 'PASS' : 'FAIL'} detection fine-tuning: live preview inside settings, hint per control, unused floor sliders removed (${JSON.stringify(adv)})`);
   if (!advOk) failed = true;
+  // 인식 세부 조정에 지금 인식 상태(fps·ms·영역을 읽는 해상도)가 바로 보인다
+  const live = (await page.textContent('#proc-live')).trim();
+  const liveOk = /^인식 \d+ fps, 프레임당 [\d.]+ms( · 카메라 \d+ fps)? · 영역 \d+×\d+px로 읽음 \(×\d\.\d\d\)$/.test(live);
+  console.log(`${liveOk ? 'PASS' : 'FAIL'} settings show live detection speed and area read size (${live})`);
+  if (!liveOk) failed = true;
   await page.selectOption('#set-procWidth', '320');
+  const rateDefault = await page.inputValue('#set-camRate');
+  await page.selectOption('#set-camRate', '30');
+  const fps30 = await page.evaluate(async () => { await new Promise((r) => setTimeout(r, 200)); const c = document.querySelector('#video').srcObject?.getVideoTracks()[0].getConstraints().frameRate; return typeof c === 'number' ? c : c?.ideal; });
   await page.selectOption('#set-controller', 'stick');
   await page.click('[data-close="panel-settings"]');
   await page.waitForTimeout(400);
@@ -416,7 +438,9 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#btn-start');
   await page.click('[data-close="panel-result"]');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('puck-trainer.settings.v1')));
-  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 ? 'PASS' : 'FAIL'} webcam settings persisted`);
+  const camOk = rateDefault === 'auto' && saved.camRate === '30' && fps30 === 30;
+  console.log(`${saved.floorMode === 'manual' && saved.procWidth === 320 && camOk ? 'PASS' : 'FAIL'} webcam settings persisted (camera frame ${rateDefault} -> ${saved.camRate}, camera fps ${fps30})`);
+  if (!(saved.floorMode === 'manual' && saved.procWidth === 320 && camOk)) failed = true;
   // 기록 등록 + 랭킹 패널: 게임이 끝까지 진행된 결과를 흉내내어 onEnd 호출
   await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 17, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 17]] }); });
   await page.waitForSelector('#result-rank:not(.hidden)');
@@ -435,15 +459,36 @@ const skipSetup = async (page, touch = false) => {
   // 로그아웃 후 로그인
   await page.click('#btn-settings'); await page.click('#btn-settings-logout'); await page.click('[data-close="panel-settings"]');
   const loggedOut = await page.evaluate(() => !window.__puckTrainer.account.current());
-  // 게스트 결과: 정회원이었다면 몇 위 + 인스타 플레이 인증 안내 + 공식 계정 DM 버튼 (운영자가 저장한 안내)
+  // 게스트 결과: 정회원이었다면 몇 위 + 친구 초대 / 보호자가 공식 계정 DM으로 코드 요청 (SNS 영상 조건 없음)
   await page.evaluate(() => localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ hashtag: '퍽챌린지', snsAccount: 'puck.official' })));
-  await page.evaluate(() => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: 9, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', 9]] }); });
+  const guestEnd = (score) => page.evaluate((s) => { const g = window.__puckTrainer.game; g.setMode('wide'); g.onEnd({ mode: g.mode, score: s, reason: 'time', elapsed: 180, limit: 180, seconds: 60, rankKey: 'wide@60', items: [['점수', s]] }); }, score);
+  const guestBox = () => page.evaluate(() => ({ text: document.querySelector('#result-guest').textContent, dm: document.querySelector('#guest-dm')?.getAttribute('href') || '', join: !!document.querySelector('#guest-join'), rank: !document.querySelector('#result-rank').classList.contains('hidden') }));
+  await guestEnd(9);
   await page.waitForSelector('#result-guest:not(.hidden)');
-  const guest = await page.evaluate(() => ({ text: document.querySelector('#result-guest').textContent, dm: document.querySelector('#guest-dm')?.getAttribute('href') || '', rank: !document.querySelector('#result-rank').classList.contains('hidden') }));
-  const guestOk = guest.text.includes('정회원이었다면 지금 전체 2위 / 2명') && guest.text.includes('#퍽챌린지 @puck.official') && guest.text.includes('보호자와 함께') && guest.text.includes('DM') && guest.dm === 'https://ig.me/m/puck.official' && !guest.rank;
-  console.log(`${guestOk ? 'PASS' : 'FAIL'} guest result: would-be rank + share play on Instagram, DM the official account for a code (${guest.dm} ${guest.text.slice(0, 60)}…)`);
+  const guest = await guestBox();
+  const guestOk = guest.text.includes('정회원이었다면 지금 전체 2위 / 2명') && guest.text.includes('보호자가 공식 인스타 DM으로 가입 코드를 요청') && guest.text.includes('보호자와 함께')
+    && !/SNS|영상|#퍽챌린지/.test(guest.text) && guest.dm === 'https://ig.me/m/puck.official' && !guest.join && !guest.rank;
+  console.log(`${guestOk ? 'PASS' : 'FAIL'} guest result: would-be rank + invite link or a parent DMs the official account for a code, no social video required (${guest.dm} ${guest.text.slice(0, 60)}…)`);
   if (!guestOk) failed = true;
   await page.click('[data-close="panel-result"]');
+  // 공개 가입 코드(오픈베타)를 걸면 결과 화면에 [정회원 가입하기] -> 회원가입 칸이 열리고 코드가 채워짐. 1회용 코드를 걸면 버튼이 안 나옴
+  await page.evaluate(() => localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ snsAccount: 'puck.official', joinCode: 'BETA2026' })));
+  await guestEnd(8);
+  await page.waitForSelector('#guest-join');
+  const joinBox = await guestBox();
+  await page.click('#guest-join');
+  await page.waitForSelector('#panel-login:not(.hidden)');
+  const joinForm = await page.evaluate(() => ({ result: !document.querySelector('#panel-result').classList.contains('hidden'), tab: document.querySelector('.auth-tabs .tab.active')?.dataset.tab, code: document.querySelector('#auth-code').value }));
+  await page.click('[data-close="panel-login"]');
+  await page.evaluate(() => { window.__puckTrainer.account._putCode('ONEUSE22', { type: 'one', maxUses: 1, expiresAt: null }); localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ snsAccount: 'puck.official', joinCode: 'ONEUSE22' })); });
+  await guestEnd(7);
+  await page.waitForFunction(() => !document.querySelector('#result-guest').classList.contains('hidden') && document.querySelector('#guest-dm'));
+  const oneBox = await guestBox();
+  await page.click('[data-close="panel-result"]');
+  await page.evaluate(() => { localStorage.setItem('puck-trainer.site.v1', JSON.stringify({ snsAccount: 'puck.official' })); const k = 'puck-trainer.codes.v1', c = JSON.parse(localStorage.getItem(k)); delete c.ONEUSE22; localStorage.setItem(k, JSON.stringify(c)); }); // 아래 운영자 코드 목록 수가 그대로이게
+  const guestJoinOk = joinBox.join && joinBox.text.includes('지금은 누구나 정회원으로 가입할 수 있어요') && !joinBox.dm && !joinForm.result && joinForm.tab === 'register' && joinForm.code === 'BETA-2026' && !oneBox.join && !!oneBox.dm;
+  console.log(`${guestJoinOk ? 'PASS' : 'FAIL'} guest result: public open-beta code shows [Join as a member], which opens sign-up with the code filled; a one-time code is never shown (${JSON.stringify({ joinForm, one: oneBox.join })})`);
+  if (!guestJoinOk) failed = true;
   // 운영자 화면 (관리자 별명): 1회용 코드 만들기 -> 목록, 끄기
   await page.evaluate(async () => { const a = window.__puckTrainer.account; await a.register({ loginId: 'opsadmin', password: 'ops12345', nick: 'test123', country: 'KR', team: 'Ops', age: 30, code: 'BETA2026' , stick: 'L' }); });
   await page.click('#btn-settings');
@@ -570,8 +615,9 @@ const skipSetup = async (page, touch = false) => {
   const extBefore = await page.evaluate(() => {
     const ths = [...document.querySelectorAll('.mem-table thead th')];
     const cell = (nick, i) => document.querySelector(`#mem-rows tr[data-nick="${nick}"] td:nth-child(${i})`)?.textContent.trim();
+    const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return { head: ths.map((t) => t.textContent.trim()), align: ths.map((t) => getComputedStyle(t).textAlign).join(), bolt: cell('번개손', 7), admin: cell('test123', 7),
-      btn: document.querySelector('#mem-ext-go').disabled, date: document.querySelector('#mem-ext-date').value, sel: document.querySelector('#mem-sel').textContent };
+      btn: document.querySelector('#mem-ext-go').disabled, date: document.querySelector('#mem-ext-date').value, today, min: document.querySelector('#mem-ext-date').min, sel: document.querySelector('#mem-sel').textContent };
   });
   await page.click('#mem-rows tr[data-nick="번개손"] .mem-pick input');
   const pick1 = await page.evaluate(() => ({ closed: document.querySelector('#panel-member').classList.contains('hidden'), sel: document.querySelector('#mem-sel').textContent,
@@ -601,7 +647,8 @@ const skipSetup = async (page, touch = false) => {
   const md = extKey.slice(5).replace('-', '.');
   const extOk = extBefore.head.length === 11 && extBefore.head[6] === '남은 일수' && extBefore.head[10] === '총 훈련 시간'
     && extBefore.align === 'center,left,left,left,left,left,right,left,right,right,right' && /^\d+일 ~\d\d\.\d\d$/.test(extBefore.bolt) && /^\d+일 ~\d\d\.\d\d$/.test(extBefore.admin)
-    && extBefore.btn && extBefore.date > extKey.slice(0, 4) && extBefore.sel === '선택한 회원 없음'
+    // 달력 기본값은 오늘 뒤의 날(한 달 뒤), 오늘보다 앞은 못 고름. 예전엔 '연도 > 올해'처럼 비교해서 연말(40일 뒤가 다음 해)이면 틀렸다
+    && extBefore.btn && /^\d{4}-\d\d-\d\d$/.test(extBefore.date) && extBefore.date > extBefore.today && extBefore.min === extBefore.today && extBefore.sel === '선택한 회원 없음'
     && pick1.closed && pick1.sel === '1명 선택' && pick1.picked && pick1.all && !pick1.btn && sel2 === '2명 선택'
     && extAsk.includes(`1명의 이용 기간을 ${extKey.replace(/-/g, '.')}까지로 늘립니다.`) && extAsk.includes('이미 그 뒤까지인 1명은 그대로입니다.')
     && extAfter.ok && extAfter.coupon === 'ext' && extAfter.bolt === `40일 ~${md}` && extAfter.tag.includes(`연장 ~${md}`) && extAfter.admin === extBefore.admin
@@ -945,13 +992,72 @@ const skipSetup = async (page, touch = false) => {
   const errText = await page.textContent('#splash-error');
   const diag = await page.textContent('#diag-info');
   const options = await page.$$eval('#diag-camera option', (o) => o.length);
-  const ok = errText.includes('다른 프로그램') && diag.includes('NotReadableError') && diag.includes('시도 기록') && options >= 2;
-  console.log(`${ok ? 'PASS' : 'FAIL'} camera failure shows diagnostics (${options - 1} device(s), ${errText.trim().slice(0, 40)}…)`);
+  const diagHidden = await page.$eval('#diag-info', (e) => e.classList.contains('hidden')); // 기술 정보는 화면에 안 보이고 복사로만
+  const ok = errText.includes('다른 프로그램') && !errText.includes('NotReadableError') && diagHidden && diag.includes('NotReadableError') && diag.includes('시도 기록') && options >= 2;
+  console.log(`${ok ? 'PASS' : 'FAIL'} camera failure shows a plain message, camera list and retry; technical details only in the copy (${options - 1} device(s), ${errText.trim().slice(0, 40)}…)`);
   if (!ok) failed = true;
   // 재시도(4번째 호출부터 성공) -> 앱 시작
   await page.click('#btn-retry-camera');
   await page.waitForFunction(() => document.querySelector('#splash').classList.contains('hidden'), null, { timeout: 10000 });
   console.log('PASS retry after failure starts the camera');
+  await context.close();
+}
+
+// ---- 4-1) 카메라가 아예 없을 때: '연결된 카메라를 찾지 못했습니다.' 한 줄만, 진단 상자는 숨김 ----
+{
+  const context = await newCtx({ viewport: { width: 1180, height: 820 }, permissions: ['camera'] });
+  await context.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => { const e = new Error('Requested device not found'); e.name = 'NotFoundError'; return Promise.reject(e); };
+    navigator.mediaDevices.enumerateDevices = async () => [];
+  });
+  const page = await context.newPage();
+  await page.goto(`${base}/index.html`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.click('#auth-guest');
+  await page.waitForSelector('#splash-error:not(.hidden)', { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('#diag-info').textContent.length > 0); // 진단(복사용)까지 끝난 뒤
+  const errText = (await page.textContent('#splash-error')).trim();
+  const boxHidden = await page.$eval('#splash-diag', (e) => e.classList.contains('hidden'));
+  const ok = errText === '연결된 카메라를 찾지 못했습니다.' && boxHidden;
+  console.log(`${ok ? 'PASS' : 'FAIL'} no camera: one plain line, no diagnostics box (${errText}, box hidden ${boxHidden})`);
+  if (!ok) failed = true;
+  await context.close();
+}
+
+// ---- 4-2) 카메라 없이 체험 (누구나): 손가락이 퍽, 세로 휴대폰은 세로 판, 기록·자랑 없이 '카메라로 하기' 안내 ----
+{
+  const context = await newCtx({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/index.html`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.waitForSelector('#trial-start:not(.hidden)');
+  const note = await page.textContent('#trial-start');
+  await page.tap('#btn-mouse');
+  await page.waitForSelector('#panel-mode:not(.hidden)');
+  const started = await page.evaluate(() => ({ trial: window.__puckTrainer.app.mouseMode, splash: document.querySelector('#splash').classList.contains('hidden') }));
+  const card = page.locator('#mode-list .mode-card', { hasText: /아케이드/ }).first();
+  await card.tap();
+  await page.tap('#btn-start');
+  await page.waitForFunction(() => window.__puckTrainer.game.running);
+  const vb = await page.locator('#view').boundingBox();
+  for (const [x, y] of [[0.3, 0.7], [0.6, 0.8], [0.5, 0.75]]) { await page.touchscreen.tap(vb.x + vb.width * x, vb.y + vb.height * y); await page.waitForTimeout(80); }
+  const play = await page.evaluate(() => ({ has: window.__puckTrainer.mouse.has, state: window.__puckTrainer.tracker.state, portrait: document.querySelector('#view').getBoundingClientRect().height > document.querySelector('#view').getBoundingClientRect().width }));
+  await page.evaluate(() => window.__puckTrainer.game.stop('time'));
+  await page.waitForSelector('#panel-result:not(.hidden)');
+  await page.waitForSelector('#btn-trial-camera');
+  const res = await page.evaluate(() => ({ rank: document.querySelector('#result-rank').textContent, share: document.querySelector('#result-share').classList.contains('hidden'), guest: document.querySelector('#result-guest').classList.contains('hidden') }));
+  const ok = note.includes('기록은 저장되지 않아요') && started.trial && started.splash && play.has && play.state !== 'lost' && play.portrait
+    && res.rank.includes('체험 기록은 저장되지 않아요') && res.share && res.guest && errors.length === 0;
+  console.log(`${ok ? 'PASS' : 'FAIL'} camera-free trial: anyone can start it, a finger moves the puck on a portrait board, the result offers the camera instead of saving or sharing (${JSON.stringify({ ...started, ...play, ...res, errors })})`);
+  if (!ok) failed = true;
+  // 카메라로 하기 -> 첫 화면으로 돌아옴 (체험 끝)
+  await Promise.all([page.waitForNavigation(), page.tap('#btn-trial-camera')]);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  const back = await page.evaluate(() => !window.__puckTrainer.app.mouseMode && !document.querySelector('#splash').classList.contains('hidden'));
+  console.log(`${back ? 'PASS' : 'FAIL'} 'play with camera' after a trial goes back to the start screen`);
+  if (!back) failed = true;
   await context.close();
 }
 
@@ -1302,6 +1408,14 @@ const skipSetup = async (page, touch = false) => {
   await page.waitForSelector('#panel-mode:not(.hidden)', { timeout: 3000 });
   const done = await page.evaluate(() => ({ setup: window.__puckTrainer.app.setup, cls: document.querySelector('#app').classList.contains('setting-up'), bar: document.querySelector('#test-bar').classList.contains('hidden') }));
   ok(/퍽이 안 보여요/.test(lostHint) && counts.join(',') === '0 / 4,1 / 4,2 / 4,3 / 4,4 / 4' && done.setup === null && !done.cls && done.bar, 'test step: lost-puck hint, four corner targets count up, then the mode window opens', JSON.stringify({ lostHint, counts, done }));
+  // 시작 준비 직후 모드 창: 마지막 표적(왼쪽 앞) 자리 = 아케이드 카드 위. 가운데 칸(puck)에 한 번 두기 전에는 퍽으로 고르지 않는다
+  // (카드를 벗어났다 돌아와 2초 넘게 있어도 아케이드가 골라져 시작되지 않음). 가운데 칸에 오면 그때부터 고를 수 있다
+  const need0 = await page.evaluate(() => ({ need: document.querySelector('#mode-list .mode-wait').classList.contains('need'), flag: window.__puckTrainer.app.modeNeedCenter }));
+  await forceUV(0.3, 0.85); await tick(400); await forceUV(0.16, 0.85); await tick(2600);
+  const stay = await page.evaluate(() => ({ open: !document.querySelector('#panel-mode').classList.contains('hidden'), running: window.__puckTrainer.game.running, hold: window.__puckTrainer.app.modePick?.hold || 0 }));
+  await forceUV(0.5, 0.5); await tick(300);
+  const armed = await page.evaluate(() => ({ flag: window.__puckTrainer.app.modeNeedCenter, need: document.querySelector('#mode-list .mode-wait').classList.contains('need') }));
+  ok(need0.need && need0.flag && stay.open && !stay.running && stay.hold === 0 && !armed.flag && !armed.need, 'after setup the mode window waits: the puck picks no card until it visits the middle (puck) square', JSON.stringify({ need0, stay, armed }));
   // 난이도: 모드 창 제목 줄에서 고르면 HUD·결과·랭킹 키가 난이도별로 나뉜다 (아케이드·퍽 피하기만)
   await page.tap('#level-seg [data-level="hard"]');
   const lv = await page.evaluate(() => ({ set: window.__puckTrainer.settings.difficulty, game: window.__puckTrainer.game.difficulty, active: document.querySelector('#level-seg .active')?.dataset.level, saved: JSON.parse(localStorage.getItem('puck-trainer.settings.v1')).difficulty }));
@@ -1337,6 +1451,128 @@ const skipSetup = async (page, touch = false) => {
   ok(calibFit, 'calibration panel buttons stay inside the card on a phone in landscape');
   await page.tap('[data-close="panel-calib"]');
   ok(errors.length === 0, 'setup/difficulty: no console errors', errors.join(' | '));
+  await context.close();
+}
+
+// ---- 8) 바로가기 만들기 + 오프라인 실행 (src/install.js, sw.js) ----
+{
+  const { installKind, swAllowed, isMobileUa } = await import('../src/install.js');
+  const UA = {
+    iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1',
+    macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
+    macChrome: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    winFirefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+    androidFirefox: 'Mozilla/5.0 (Android 14; Mobile; rv:133.0) Gecko/133.0 Firefox/133.0',
+    kakaoAndroid: 'Mozilla/5.0 (Linux; Android 14; SM-S921N Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.135 Mobile Safari/537.36;KAKAOTALK 2610420',
+    kakaoIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 KAKAOTALK 10.8.5',
+    samsung: 'Mozilla/5.0 (Linux; Android 14; SM-S921N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36',
+  };
+  const kinds = {
+    iphone: installKind(UA.iphone, 5, true), ipadDesktop: installKind(UA.macSafari, 5, false), macSafari: installKind(UA.macSafari, 0, false),
+    macChrome: installKind(UA.macChrome, 0, true), winFirefox: installKind(UA.winFirefox, 0, false), androidFirefox: installKind(UA.androidFirefox, 5, false),
+    kakaoAndroid: installKind(UA.kakaoAndroid, 5, false), kakaoIos: installKind(UA.kakaoIos, 5, false), samsung: installKind(UA.samsung, 5, true),
+  };
+  const want = { iphone: 'ios', ipadDesktop: 'ios', macSafari: 'mac', macChrome: 'prompt', winFirefox: 'drag', androidFirefox: 'android', kakaoAndroid: 'inapp', kakaoIos: 'inapp', samsung: 'prompt' };
+  const sw = [swAllowed(new URL('https://puck-trainer.com/')), swAllowed(new URL('https://www.puck-trainer.com/en/')), swAllowed(new URL('http://127.0.0.1:8000/')), swAllowed(new URL('http://127.0.0.1:8000/?sw=1')),
+    swAllowed(new URL('https://192.168.0.5:8443/')), swAllowed(new URL('https://copy.example.com/')), swAllowed(new URL('http://puck-trainer.com/'))];
+  const mob = [isMobileUa(UA.iphone), isMobileUa(UA.macSafari, 5), isMobileUa(UA.macSafari, 0), isMobileUa(UA.winFirefox), isMobileUa(UA.samsung)];
+  const ok0 = JSON.stringify(kinds) === JSON.stringify(want) && sw.join() === 'true,true,false,true,false,false,false' && mob.join() === 'true,true,false,false,true';
+  console.log(`${ok0 ? 'PASS' : 'FAIL'} install: how to add a shortcut on each browser (install prompt / iPhone share / Mac Dock / drag / app-in-app), service worker only on the official https address or ?sw=1 ${JSON.stringify({ kinds, sw, mob })}`);
+  if (!ok0) failed = true;
+}
+{
+  // 크롬·엣지: 설치 창이 준비되면(beforeinstallprompt) 버튼이 보이고, 누르면 설치 창, 설치하면 버튼이 사라진다
+  const context = await newCtx({ viewport: { width: 1180, height: 820 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  const before = await page.evaluate(() => document.querySelector('#install-card').classList.contains('hidden'));
+  await page.evaluate(() => {
+    window.__prompts = 0;
+    const e = new Event('beforeinstallprompt', { cancelable: true });
+    e.prompt = async () => { window.__prompts++; };
+    e.userChoice = Promise.resolve({ outcome: 'accepted', platform: 'web' });
+    window.dispatchEvent(e);
+  });
+  const shown = await page.evaluate(() => ({ visible: !document.querySelector('#install-card').classList.contains('hidden'), label: document.querySelector('#btn-install').textContent }));
+  await page.click('#btn-install');
+  await page.waitForFunction(() => document.querySelector('#install-card').classList.contains('hidden'));
+  const after = await page.evaluate(() => ({ prompts: window.__prompts, help: document.querySelector('#install-help').classList.contains('hidden') }));
+  const ok1 = before && shown.visible && shown.label === '바탕화면에 바로가기 만들기' && after.prompts === 1 && after.help && !errors.length;
+  console.log(`${ok1 ? 'PASS' : 'FAIL'} install (Chrome/Edge): button waits for the browser's install prompt, opens it, and hides once installed ${JSON.stringify({ before, ...shown, ...after, errors })}`);
+  if (!ok1) failed = true;
+  await context.close();
+}
+{
+  // 아이폰(영어 화면): 설치 창이 없으니 버튼을 누르면 공유 → 홈 화면에 추가 방법이 영어로 나온다
+  const context = await newCtx({ locale: 'en-US', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${base}/en/`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  await page.waitForSelector('#install-card:not(.hidden)');
+  const label = await page.textContent('#btn-install');
+  await page.tap('#btn-install');
+  await page.waitForSelector('#install-help:not(.hidden) li');
+  const steps = await page.$$eval('#install-help li', (l) => l.map((x) => x.textContent));
+  const exp = await page.getAttribute('#btn-install', 'aria-expanded');
+  const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  const miss = await page.evaluate(() => [...window.__puckTrainer.i18n.missing]);
+  const ok2 = label === 'Add to home screen' && steps.length === 3 && /Share/.test(steps[0]) && /Add to Home Screen/.test(steps[1]) && exp === 'true' && noOverflow && !miss.length && !errors.length;
+  console.log(`${ok2 ? 'PASS' : 'FAIL'} install (iPhone, English): the button shows the Share > Add to Home Screen steps in English ${JSON.stringify({ label, steps, exp, noOverflow, miss, errors })}`);
+  if (!ok2) failed = true;
+  await context.close();
+}
+{
+  // 오프라인: 공식 주소처럼 서비스 워커를 켜고(?sw=1) 한 번 연 뒤, 서버를 꺼도 첫 화면이 열리고 체험 게임이 시작된다.
+  // 저장 안 된 페이지는 '인터넷 연결이 필요해요' 안내. 이 검사만 자기 서버를 쓴다 (꺼야 하니까. Firebase 설정은 null 로)
+  const srv = http.createServer(async (req, res) => {
+    const path = decodeURIComponent(req.url.split('?')[0]);
+    if (path === '/src/firebase-config.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); return res.end('export const firebaseConfig = null;\n'); }
+    const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path);
+    if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
+    try { const data = await readFile(file); res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream' }); res.end(data); } catch { res.writeHead(404); res.end('not found'); }
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const b2 = `http://127.0.0.1:${srv.address().port}`;
+  const context = await browser.newContext({ locale: 'ko-KR', viewport: { width: 1180, height: 820 } });
+  await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await context.route(/gstatic\.com\/firebasejs/, (r) => r.abort());
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${b2}/?sw=1`);
+  await page.waitForFunction(() => window.__puckTrainer?.account);
+  // 서비스 워커가 페이지를 맡고 첫 화면 파일을 다 저장할 때까지 기다린다 (최대 15초)
+  let saved = 0;
+  for (let i = 0; i < 60 && !saved; i++) {
+    saved = await page.evaluate(async () => {
+      if (!navigator.serviceWorker.controller) return 0;
+      const c = await caches.open('puck-trainer-v1');
+      const need = ['/', '/style.css', '/src/main.js', '/src/install.js', '/src/game.js', '/src/i18n-en.js', '/manifest.webmanifest'];
+      const got = await Promise.all(need.map((p) => c.match(location.origin + p)));
+      return got.every(Boolean) ? (await c.keys()).length : 0;
+    }).catch(() => 0);
+    if (!saved) await page.waitForTimeout(250);
+  }
+  srv.close(); srv.closeAllConnections();
+  const down = await page.request.get(`${b2}/`).then(() => 'up', () => 'down');
+  await page.goto(`${b2}/?sw=1&c=TEST-CODE`);
+  await page.waitForFunction(() => window.__puckTrainer?.account, null, { timeout: 10000 }).catch(() => {});
+  const off = await page.evaluate(() => ({ h1: document.querySelector('h1')?.textContent || '', app: !!window.__puckTrainer, ctrl: !!navigator.serviceWorker.controller }));
+  let trial = false;
+  if (off.app) {
+    await page.click('#btn-mouse');
+    trial = await page.waitForSelector('#panel-mode:not(.hidden)', { timeout: 5000 }).then(() => true, () => false);
+  }
+  const res404 = await page.goto(`${b2}/compare/`);
+  const offlinePage = { status: res404?.status(), text: await page.textContent('h1').catch(() => '') };
+  const ok3 = saved > 10 && down === 'down' && off.app && off.ctrl && /퍽 드리블 트레이너/.test(off.h1) && trial && offlinePage.status === 503 && /인터넷 연결이 필요해요/.test(offlinePage.text) && !errors.length;
+  console.log(`${ok3 ? 'PASS' : 'FAIL'} offline: after one visit the service worker keeps the app, so with the server off the first screen (even with ?c=…) opens and a camera-free game starts; an unsaved page says it needs the internet ${JSON.stringify({ saved, down, ...off, trial, offlinePage, errors })}`);
+  if (!ok3) failed = true;
   await context.close();
 }
 

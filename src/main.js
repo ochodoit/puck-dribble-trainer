@@ -1,13 +1,13 @@
 // 앱 오케스트레이션: 카메라 -> 영상처리 -> 추적 -> 게임 -> 렌더/HUD
 import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨터가 아니면 여기서 멈춤 (복제 사이트·iframe 막기)
-import { Camera, describeCameraError } from './camera.js';
+import { Camera, CameraRateAuto, describeCameraError } from './camera.js';
 import { Vision, AutoCalibrator, colorsTooClose } from './vision.js';
 import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
 import { placementCheck } from './placement.js';
 import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
 import { C, rgba } from './theme.js';
-import { Renderer, dodgeField } from './render.js';
+import { Renderer, dodgeField, FLOOR_MODES, FLOOR_FLIP_MODES } from './render.js';
 import { Sfx } from './audio.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, loadScores, saveBest, clearScores } from './storage.js';
 import { createAccountStore, COUNTRIES, AGE_GROUPS, countryLabel, jerseyLabel, isAdmin, normCode, codeLabel, codeError, codeStatus, memberBadge, memberNoLabel, instaId, instaDmLink, betaState, isActiveMember, FEEDBACK_MAX, LAPSED, stickLabel, LOTTERY_WINNERS, lotteryPool, drawLottery, couponUntil, passName, EXT_PASS } from './account.js';
@@ -23,6 +23,7 @@ import { createCommunityStore, courseSig, betterRecord, boardOf, bragKey, postAg
 import { initCommunity } from './community-ui.js';
 import { memberStats } from './stats.js';
 import { initAnalytics, track } from './analytics.js';
+import { initInstall } from './install.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -46,20 +47,22 @@ const els = {
 
 const settings = loadSettings();
 const camera = new Camera(els.video);
+const camRateAuto = new CameraRateAuto(); // '카메라 프레임: 자동' — 이 기기가 60을 다 인식하지 못하면 30으로
 const vision = new Vision(settings.procWidth);
 const tracker = new Tracker();
 const stickBridge = new StickBridge(); // 스틱이 퍽을 가린 동안 블레이드로 퍽 자리를 잇는다 (스틱 지정 시)
 const sfx = new Sfx();
 const game = new Game(sfx);
+game.onModeChange = () => applyDepthDirection(); // 앞뒤 방향은 게임마다 다르다 (depthFlip) — 모드를 바꾸는 즉시
 const renderer = new Renderer(els.overlay);
-const mouse = new MouseInput(); // 테스트 관리자: 카메라 없이 마우스로 플레이
+const mouse = new MouseInput(); // 카메라 없이 체험: 마우스 포인터나 손가락이 퍽 (누구나)
 
 const app = {
   started: false,
   lastResult: null,
   calibTarget: null,      // 'puck' | 'stick' | null
   versus: null,           // { names:[a,b], scores:[], current:0 }
-  fps: 0, frames: 0, fpsAt: 0,
+  fps: 0, frames: 0, fpsAt: 0, procMs: 0, // 초당 인식 프레임, 프레임당 인식 시간(ms)
   lastVideoTime: -1,
   hudAt: 0,
   account: null,      // 계정 저장소 (local | firebase)
@@ -93,6 +96,7 @@ if (!redirecting) init(); // 예전에 고른 다른 언어 주소로 옮겨 가
 
 function init() {
   initAnalytics(); // 방문·플레이 통계 (공식 주소에서만, 개인정보 없이)
+  initInstall(); // 바로가기 만들기 버튼 + 오프라인 실행 (서비스 워커, 공식 주소에서만)
   initI18n();
   bindLangButtons(document, pickLang);
   showLangHint();
@@ -225,7 +229,7 @@ async function showInvite() {
   else if (ok) { title = '정회원 초대 코드예요'; sub = line('가입하면 바로 정회원이 됩니다', until); }
   else {
     title = info.status === 'expired' ? '마감된 링크예요' : info.status === 'error' ? codeError('error') : info.status === 'full' ? (info.type === 'beta' ? '오픈베타 인원이 다 찼어요' : codeError('full', info)) : '쓸 수 없는 코드예요';
-    sub = '정회원 친구에게 초대 링크를 받거나, 게스트로 플레이하고 결과 화면의 안내대로 플레이 인증을 하면 코드를 받을 수 있어요';
+    sub = '정회원 친구에게 초대 링크를 받거나, 게스트로 한 판을 끝내고 결과 화면의 가입 방법을 보세요';
   }
   $('#invite-title').textContent = title;
   $('#invite-sub').textContent = sub;
@@ -427,7 +431,7 @@ async function submitResult(result) {
   $('#result-guest').classList.add('hidden');
   const u = app.account?.current();
   if (result.mode.id === 'free' || result.reason === 'manual' || app.versus) return;
-  if (app.mouseMode) { els.resultRank.textContent = '마우스 모드 기록은 랭킹에 올라가지 않습니다'; els.resultRank.classList.remove('hidden'); return; }
+  if (app.mouseMode) { renderTrialNotice(); return; }
   if (!u) { renderGuestNotice(result); return; }
   if (lapsedNow()) { renderGuestNotice(result, true); return; }
   try {
@@ -452,7 +456,10 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&am
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
 /**
- * 게스트 결과 화면: 정회원이었다면 몇 위였을지 + 인스타 플레이 인증 후 DM으로 정회원 코드를 받는 방법.
+ * 게스트 결과 화면: 정회원이었다면 몇 위였을지 + 정회원이 되는 방법 (SNS에 영상을 올리라는 조건은 없음).
+ *   - 운영자가 공개 가입 코드(오픈베타 코드)를 걸어 두었고 아직 쓸 수 있으면 [정회원 가입하기] (가입 칸을 열고 코드를 채움).
+ *     마감일이 지나거나 인원이 차면 저절로 아래 안내로 돌아간다
+ *   - 그 밖에는 정회원 친구의 초대 링크, 또는 보호자가 공식 인스타 DM으로 가입 코드 요청
  * lapsed: 베타가 끝나 정회원이 유지되지 않은 계정 (기록이 랭킹에 안 올라감 + DM 문의)
  */
 async function renderGuestNotice(result, lapsed = false) {
@@ -463,8 +470,9 @@ async function renderGuestNotice(result, lapsed = false) {
     app.account.wouldRank(key, result.score).catch(() => null),
     app.account.getSiteConfig().catch(() => ({})),
   ]);
+  const join = !lapsed && cfg.joinCode ? await app.account.checkCode(cfg.joinCode).catch(() => null) : null;
+  const canJoin = join?.status === 'ok' && join.type === 'beta';
   if (app.lastResult !== result || (!lapsed && app.account.current())) return; // 그새 다음 게임이 끝났거나 로그인함
-  const tag = String(cfg.hashtag || '').trim().replace(/^#+/, '');
   const sns = instaId(cfg.snsAccount);
   const html = [];
   if (lapsed) {
@@ -472,17 +480,32 @@ async function renderGuestNotice(result, lapsed = false) {
     html.push('<p>이번 기록은 랭킹에 올라가지 않아요. 정회원 등급은 공식 인스타 DM으로 문의해 주세요.</p>');
   } else {
     if (r) html.push(`<p class="guest-rank"><b>정회원이었다면 지금 전체 ${r.rank}위 / ${r.total}명</b></p>`);
-    html.push('<details class="guest-how"><summary>정회원이 되려면</summary>');
-    html.push('<p>정회원 친구에게 초대 링크를 받으면 바로 가입할 수 있어요.</p>');
-    html.push('<p>또는 플레이 영상을 SNS(인스타 등)에 올리고, 올린 게시물 링크를 공식 인스타 DM으로 보내 주세요. 확인되면 정회원 가입 코드를 DM으로 보내 드려요.</p>');
-    if (tag || sns) html.push(`<p class="guest-tags" data-ugc>${[tag && `#${esc(tag)}`, sns && `@${esc(sns)}`].filter(Boolean).join(' ')}</p>`);
-    html.push('<p class="muted">보호자와 함께 해 주세요 · 얼굴 없이 판과 퍽만 나와도 괜찮아요 · 비공개 계정이면 영상이나 캡처를 DM에 함께 보내 주세요</p>');
-    html.push('</details>');
+    if (canJoin) {
+      html.push('<p>지금은 누구나 정회원으로 가입할 수 있어요.</p>');
+      html.push('<div class="guest-dm"><button type="button" class="btn btn-primary" id="guest-join">정회원 가입하기</button></div>');
+      html.push('<p class="muted">보호자와 함께 가입해 주세요</p>');
+    } else {
+      html.push('<details class="guest-how"><summary>정회원이 되려면</summary>');
+      html.push('<p>정회원 친구에게 초대 링크를 받으면 바로 가입할 수 있어요.</p>');
+      if (sns) html.push('<p>초대 링크가 없으면 보호자가 공식 인스타 DM으로 가입 코드를 요청해 주세요.</p>');
+      html.push('<p class="muted">보호자와 함께 해 주세요</p>');
+      html.push('</details>');
+    }
   }
-  if (sns) html.push(`<div class="guest-dm"><a class="btn btn-primary" id="guest-dm" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span></div>`);
-  if (!lapsed) html.push('<p class="muted">받은 코드는 첫 화면 회원가입의 가입 코드 칸에 넣으세요.</p>');
+  if (sns && !canJoin) html.push(`<div class="guest-dm"><a class="btn btn-primary" id="guest-dm" href="${esc(instaDmLink(sns))}" target="_blank" rel="noopener">인스타 DM 보내기</a> <span data-ugc>@${esc(sns)}</span></div>`);
+  if (!lapsed && !canJoin) html.push('<p class="muted">받은 코드는 첫 화면 회원가입의 가입 코드 칸에 넣으세요.</p>');
   box.innerHTML = html.join('');
+  if (canJoin) $('#guest-join').addEventListener('click', () => openJoin(join.code));
   box.classList.remove('hidden');
+}
+
+/** 게스트 결과 화면의 [정회원 가입하기]: 결과 창을 닫고 회원가입 칸을 열어 공개 가입 코드를 채운다 */
+function openJoin(code) {
+  close(els.panelResult);
+  openLogin();
+  setAuthTab('register');
+  $('#auth-code').value = codeLabel(code);
+  track('join_click', { from: 'result' });
 }
 
 // =============== 내 정보 ===============
@@ -506,7 +529,7 @@ function setupMe() {
 }
 function openMe() { if (meUI) meUI.open(); }
 
-/** 출석: 로그인한 채로 플레이 화면을 연 날 (하루 한 번만 기록. 마우스 테스트 모드는 제외) */
+/** 출석: 로그인한 채로 플레이 화면을 연 날 (하루 한 번만 기록. 카메라 없이 체험은 제외) */
 function noteAttendance() {
   const u = app.account?.current();
   if (!u || !app.started || app.mouseMode || app.attendedDay === `${u.id}:${dayKey()}`) return;
@@ -525,9 +548,16 @@ function recordPlay(result) {
   }).then(() => { app.attendedDay = `${u.id}:${dayKey()}`; }).catch(() => {});
 }
 
-/** 방문·플레이 통계(GA4)에 한 판: 게임 이름·회원/게스트·끝까지 했는지·플레이 초·점수 (마우스 테스트와 3초 미만은 빼고) */
+/**
+ * 방문·플레이 통계(GA4)에 한 판: 게임 이름·회원/게스트·끝까지 했는지·플레이 초·점수 (3초 미만은 빼고).
+ * 카메라 없이 체험한 판은 진짜 판 수에 섞이지 않게 trial_game 으로 따로 센다 (운영자 테스트는 안 셈)
+ */
 function trackPlay(result) {
-  if (app.mouseMode || !(result.elapsed >= 3)) return;
+  if (!(result.elapsed >= 3)) return;
+  if (app.mouseMode) {
+    if (!isAdmin(app.account?.current())) track('trial_game', { mode: result.mode.name, completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed) });
+    return;
+  }
   track('game_end', {
     mode: result.mode.name, member: app.account?.current() ? 'member' : 'guest',
     completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed), score: Math.round(Number(result.score) || 0),
@@ -576,7 +606,13 @@ function setupAdmin() {
   $('#adm-save-config').addEventListener('click', () => adminDo(async () => {
     const raw = $('#adm-sns').value.trim(), sns = instaId(raw);
     if (raw && !sns) throw new Error('인스타 계정 아이디를 확인하세요 (영문·숫자·밑줄·점)');
-    app.site = await app.account.setSiteConfig({ hashtag: $('#adm-hashtag').value.trim().replace(/^#+/, ''), snsAccount: sns });
+    const joinCode = normCode($('#adm-join-code').value);
+    if (joinCode) { // 공개 가입 코드: 지금 쓸 수 있는 오픈베타 코드만 (1회용·친구 초대 코드를 걸면 첫 사람만 가입하고 끝남)
+      const info = await app.account.checkCode(joinCode);
+      if (info.status !== 'ok') throw new Error(codeError(info.status, info));
+      if (info.type !== 'beta') throw new Error('공개 가입 코드에는 오픈베타 코드만 넣을 수 있어요');
+    }
+    app.site = await app.account.setSiteConfig({ snsAccount: sns, joinCode: joinCode || null });
     app.adminConfigLoaded = false;
     toast('게스트 안내를 저장했습니다');
   }));
@@ -793,7 +829,7 @@ async function renderAdmin() {
     $('#adm-init').classList.toggle('hidden', m.ready);
     if (!app.adminConfigLoaded) {
       const cfg = await a.getSiteConfig();
-      $('#adm-hashtag').value = cfg.hashtag || ''; $('#adm-sns').value = cfg.snsAccount || '';
+      $('#adm-join-code').value = cfg.joinCode ? codeLabel(cfg.joinCode) : ''; $('#adm-sns').value = cfg.snsAccount || '';
       $('#adm-beta-end').value = cfg.betaEndsAt ? ymd(cfg.betaEndsAt) : '';
       app.adminConfigLoaded = true;
     }
@@ -873,7 +909,7 @@ function bindUI() {
     toast(settings.invisible ? '투명 모드 — 플레이 중 내 퍽이 보이지 않습니다. 손의 감각으로만 피하세요' : '투명 모드 끔');
   });
   $('#set-autoStart').addEventListener('change', (e) => { settings.autoStart = e.target.checked; app.idleHold = 0; persist(); });
-  $('#set-flipDepth').addEventListener('change', (e) => { settings.flipDepth = e.target.checked; applyDepthDirection(); persist(); });
+  $('#set-reverseDepth').addEventListener('change', (e) => { settings.reverseDepth = e.target.checked; applyDepthDirection(); persist(); });
   $$('.btn-close').forEach((b) => b.addEventListener('click', () => close($('#' + b.dataset.close))));
 
   // 모드/대결
@@ -901,6 +937,7 @@ function bindUI() {
     }
   }
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
+  $('#set-camRate').addEventListener('change', (e) => { settings.camRate = e.target.value; applyCamRate(); persist(); });
   $('#set-controller').addEventListener('change', (e) => {
     settings.controller = e.target.value; persist(); tracker.reset();
     if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
@@ -943,7 +980,7 @@ function bindUI() {
   // 바닥 수동 핸들
   bindFloorHandles();
 
-  window.addEventListener('resize', layout);
+  window.addEventListener('resize', () => { if (app.mouseMode) applyMouseSource(); layout(); });
   if (screen.orientation?.addEventListener) screen.orientation.addEventListener('change', () => setTimeout(layout, 200));
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (game.running) game.stop('manual'); app.wasHidden = true; }
@@ -984,16 +1021,26 @@ function toggleFullscreen() {
   else if (doc.exitFullscreen) doc.exitFullscreen().catch(() => {});
 }
 
-// =============== 테스트 관리자: 마우스 모드 (카메라 없이) ===============
-// 첫 화면 보조 버튼: 휴대폰 카메라(QR 연결)는 모두에게 보이고(누르면 로그인 확인), 마우스 모드는 운영자만
+// =============== 카메라 없이 체험 (마우스·터치, 누구나) ===============
+// 처음 온 사람이 카메라·퍽 없이 먼저 해 보게: 마우스 포인터나 손가락이 곧 퍽 (src/mouse-input.js).
+// 기록·랭킹·출석에는 안 들어가고, 결과 화면에서 카메라로 해 보라고 권한다. 운영자 테스트도 같은 모드를 쓴다.
+// 첫 화면 보조 버튼: 체험과 휴대폰 카메라(QR 연결)는 모두에게 보인다(QR 은 누르면 로그인 확인)
 function refreshMouseButton() {
   const onSplash = !els.btnCamera.classList.contains('hidden') && !app.started;
-  $('#btn-mouse').classList.toggle('hidden', !(onSplash && isAdmin(app.account?.current())));
+  $('#trial-start').classList.toggle('hidden', !onSplash);
   $('#remote-start').classList.toggle('hidden', !onSplash);
 }
 
+/** 체험 화면 비율: 세로로 든 휴대폰이면 세로(9:16), 아니면 가로(16:9). 카메라 영상처럼 화면을 채우고, 돌리면 따라 바뀐다 */
+function applyMouseSource() {
+  const portrait = innerHeight > innerWidth;
+  const w = portrait ? MOUSE_SRC.height : MOUSE_SRC.width, h = portrait ? MOUSE_SRC.width : MOUSE_SRC.height;
+  if (vision.srcW === w && vision.srcH === h) return;
+  vision.setSourceSize(w, h);
+  els.view.style.aspectRatio = `${w} / ${h}`;
+}
+
 function startMouse() {
-  if (!isAdmin(app.account?.current())) { toast('관리자 계정으로 로그인해야 합니다'); return; }
   sfx.unlock();
   sfx.enabled = settings.sound;
   app.mouseMode = true;
@@ -1001,8 +1048,7 @@ function startMouse() {
   vision.mirror = false;
   els.view.classList.remove('mirror');
   els.view.classList.add('mouse-mode');
-  vision.setSourceSize(MOUSE_SRC.width, MOUSE_SRC.height);
-  els.view.style.aspectRatio = `${MOUSE_SRC.width} / ${MOUSE_SRC.height}`;
+  applyMouseSource();
   layout();
   els.splash.classList.add('hidden');
   $('#splash-diag').classList.add('hidden');
@@ -1011,6 +1057,15 @@ function startMouse() {
   app.lastFrameAt = clockNow();
   requestAnimationFrame(loop);
   openModeAfterStart();
+  if (!isAdmin(app.account?.current())) track('trial_start', { input: matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse' });
+  toast('체험 모드 · 마우스나 손가락이 퍽이에요. 기록은 저장되지 않아요', 4000);
+}
+
+/** 체험 결과 화면: 기록은 저장 안 됨 + 카메라로 해 보기 (첫 화면으로 = 새로고침, 로그인은 그대로) */
+function renderTrialNotice() {
+  els.resultRank.innerHTML = '체험 기록은 저장되지 않아요. 카메라로 진짜 퍽을 움직여 보세요! <button type="button" class="btn btn-primary" id="btn-trial-camera">카메라로 하기</button>';
+  els.resultRank.classList.remove('hidden');
+  $('#btn-trial-camera').addEventListener('click', () => { track('trial_to_camera'); location.reload(); });
 }
 
 // =============== 휴대폰 카메라 (QR 연결, 로그인한 회원) ===============
@@ -1084,6 +1139,8 @@ function cancelRemote() {
 
 function onRemoteState(s, err) {
   if (err) console.error(err);
+  // 연결되면 '카메라 프레임' 설정을 휴대폰에 알린다 (자동이면 휴대폰이 Wi-Fi 상태를 보고 60·30을 고른다)
+  if (s === 'connected') remote?.host.send({ t: 'rate', mode: settings.camRate });
   if (!app.started) {
     const msg = {
       preparing: ['연결 준비 중…'],
@@ -1179,7 +1236,10 @@ function onOrientationFlip(oldAr, newAr) {
 
 function onRemoteMessage(m) {
   // 휴대폰 카메라를 바꾸면 영상 크기가 바뀔 수 있다 (loop 가 알아서 맞춘다)
-  if (m.t === 'info') app.remoteFacing = m.facing;
+  if (m.t === 'info') {
+    app.remoteFacing = m.facing;
+    app.remoteLink = { fps: m.fps || 0, mode: m.mode || 'auto' }; // 휴대폰이 지금 보내는 단계 (설정 창에 보인다)
+  }
 }
 
 window.addEventListener('pagehide', () => { if (remote) remote.host.close(); });
@@ -1221,21 +1281,21 @@ function beginTestSetup() {
   quietCalibReset();
   setSetup('test');
   // meas: 카메라 위치 점검용 — 표적에 닿았을 때 퍽 크기(먼 쪽·가까운 쪽), 먼 쪽 절반에 있는 동안 놓친 영상 수
-  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, doneAt: 0, advice: null, lastV: null, frameAt: -1,
+  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, lastV: null, frameAt: -1,
     meas: { far: [], near: [], farFrames: 0, farMissed: 0 } };
   $('#test-hint').textContent = '퍽을 네 모서리 표적에';
   paintTest();
 }
 
 /**
- * 카메라 위치 점검 결과 -> 안내 글 (짧게: 3/3 막대, 길게: 모드 창 위 안내).
+ * 카메라 위치 점검 결과 -> 안내 글 (모드 창 위 안내).
  * 높이세요 / 지금이 최소(더 낮추지 말 것) / 좋아요 / 여유 있음(화면을 가리면 조금 낮춰도 됨)
  */
 const PLACEMENT_ADVICE = {
-  raise: ['먼 쪽이 작게 보여요 · 카메라를 더 높이', '준비 완료 · 먼 쪽 바닥에서 퍽이 작게 보여요. 카메라를 더 높이(1~1.5m) 두고 영역을 다시 맞추면 더 정확해요'],
-  minimum: ['잘 잡혀요 · 지금 높이가 최소예요', '준비 완료 · 전체가 잡혀요. 지금 높이가 최소라 더 낮추지 마세요 (높일수록 더 정확해요)'],
-  good: ['잘 잡혀요 · 카메라 위치 좋아요', '준비 완료 · 카메라 위치 좋아요. 게임을 고르세요'],
-  room: ['아주 잘 잡혀요 · 높이 여유 있음', '준비 완료 · 아주 잘 보여요. 카메라가 화면(TV)을 가리면 조금 낮춰도 돼요'],
+  raise: '준비 완료 · 먼 쪽 바닥에서 퍽이 작게 보여요. 카메라를 더 높이(1~1.5m) 두고 영역을 다시 맞추면 더 정확해요',
+  minimum: '준비 완료 · 전체가 잡혀요. 지금 높이가 최소라 더 낮추지 마세요 (높일수록 더 정확해요)',
+  good: '준비 완료 · 카메라 위치 좋아요. 게임을 고르세요',
+  room: '준비 완료 · 아주 잘 보여요. 카메라가 화면(TV)을 가리면 조금 낮춰도 돼요',
 };
 
 /** 지금 영역·등록된 퍽으로 카메라 위치 점검 (measured: 3/3 에서 잰 값, 없으면 어림만). 마우스 모드·미등록이면 null */
@@ -1255,10 +1315,6 @@ function paintTest() {
 function updateSetupTest(dt, now) {
   const t = app.test; if (!t) return;
   app.calib.active = false; app.idleHold = 0;
-  if (t.doneAt) {
-    if (now >= t.doneAt) { finishSetup(); toast(t.advice ? t.advice[1] : '준비 완료 · 게임을 고르세요', t.advice ? 6000 : 2500); }
-    return;
-  }
   const seen = tracker.state === 'tracked' && !!tracker.pos;
   t.lostFor = seen ? 0 : t.lostFor + dt;
   if (seen) t.lastV = tracker.pos.y;
@@ -1278,11 +1334,12 @@ function updateSetupTest(dt, now) {
     }
   }
   if (t.targets.every((g) => g.hit)) {
-    // 네 모서리 모두 잡힘 -> 카메라 높이 점검 결과를 잠깐 보여 주고 모드 창으로
+    // 네 모서리 모두 잡힘 -> 바로 모드 창 (카메라 높이 점검 결과는 모드 창 위 안내로)
     const pc = checkPlacement(t.meas);
-    t.advice = pc ? PLACEMENT_ADVICE[pc.verdict] : null;
-    t.doneAt = now + (t.advice ? 1800 : 900); sfx.target();
-    $('#test-hint').textContent = t.advice ? t.advice[0] : '잘 잡혀요!';
+    const advice = pc ? PLACEMENT_ADVICE[pc.verdict] : null;
+    sfx.target();
+    finishSetup();
+    toast(advice || '준비 완료 · 게임을 고르세요', advice ? 6000 : 2500);
     return;
   }
   const farLost = t.meas.farFrames > 40 && t.meas.farMissed / t.meas.farFrames > 0.35 && t.lastV != null && t.lastV < 0.35;
@@ -1296,9 +1353,14 @@ function finishSetup() {
   openModeAfterStart();
 }
 
-/** 시작 준비가 끝나면: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다 */
+/**
+ * 시작 준비가 끝나면: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다.
+ * 이때 퍽은 마지막 표적(바닥 모서리) 자리에 있어 커서가 모서리 카드(아케이드 등) 위에 놓이므로,
+ * 퍽으로 고르기는 가운데 칸(puck)에 한 번 둔 뒤에야 켠다 (modeNeedCenter) — 아케이드가 저절로 골라져 시작되지 않게
+ */
 function openModeAfterStart() {
   app.afterStart = true;
+  app.modeNeedCenter = true;
   renderModeList();
   open(els.panelMode);
 }
@@ -1334,12 +1396,13 @@ async function startCamera() {
   }
 }
 
-/** 카메라 실패 진단: 감지된 장치 목록 + 선택 재시도 + 환경 정보 */
+/** 카메라 실패 진단: 감지된 장치 목록 + 선택 재시도. 환경 정보는 화면에 안 보이고 '진단 정보 복사'로만 (카메라가 하나도 없으면 상자째 숨김) */
 async function showCameraDiagnostics(err) {
   const box = $('#splash-diag'), sel = $('#diag-camera'), info = $('#diag-info');
-  box.classList.remove('hidden');
   let devices = [];
   try { devices = await camera.listDevices(); } catch { /* ignore */ }
+  box.classList.toggle('hidden', !devices.length);
+  info.classList.add('hidden');
   sel.innerHTML = '<option value="">자동 선택</option>';
   devices.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `카메라 ${i + 1} (권한 허용 후 이름 표시)`; sel.appendChild(o); });
   if (settings.cameraId && devices.some((d) => d.deviceId === settings.cameraId)) sel.value = settings.cameraId;
@@ -1357,12 +1420,12 @@ async function showCameraDiagnostics(err) {
   if (!sel.dataset.bound) {
     sel.dataset.bound = '1';
     $('#btn-retry-camera').addEventListener('click', () => { settings.cameraId = sel.value; persist(); els.splashError.classList.add('hidden'); startCamera(); });
-    $('#btn-copy-diag').addEventListener('click', async () => { try { await navigator.clipboard.writeText(info.textContent); toast('진단 정보를 복사했습니다'); } catch { toast('복사 실패: 아래 내용을 직접 선택해 복사하세요'); } });
+    $('#btn-copy-diag').addEventListener('click', async () => { try { await navigator.clipboard.writeText(info.textContent); toast('진단 정보를 복사했습니다'); } catch { info.classList.remove('hidden'); toast('복사 실패: 아래 내용을 직접 선택해 복사하세요'); } });
   }
 }
 
 async function flipCamera() {
-  if (app.mouseMode) { toast('마우스 모드에서는 카메라를 쓰지 않습니다'); return; }
+  if (app.mouseMode) { toast('체험 모드에서는 카메라를 쓰지 않아요'); return; }
   if (app.remoteMode) { remote?.host.send({ t: 'flip' }); toast('휴대폰 카메라를 전환합니다'); return; }
   if (game.running) game.stop('manual');
   settings.facing = settings.facing === 'user' ? 'environment' : 'user';
@@ -1387,7 +1450,8 @@ async function requestWakeLock() {
 }
 
 async function startStream() {
-  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing);
+  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing, settings.camRate === '30' ? 30 : 60);
+  camRateAuto.reset();
   if (facing === 'user' || facing === 'environment') settings.facing = facing;
   const track = camera.stream.getVideoTracks()[0];
   track.addEventListener('ended', () => { app.cameraLost = true; toast('카메라 연결이 끊겼습니다. 설정에서 카메라를 다시 선택하세요.', 6000); if (game.running) game.stop('manual'); });
@@ -1423,7 +1487,7 @@ function layout() {
     const hud = $('#hud').getBoundingClientRect();
     renderer.topInset = clamp((hud.bottom - rect.top) / rect.height, 0, 0.4);
     const f = dodgeField(renderer.canvas.width, renderer.canvas.height, renderer.topInset);
-    game.plane = { A: f.h / f.w, flip: settings.flipDepth };
+    game.plane = { A: f.h / f.w, flip: depthFlip() };
     // 자유 연습 코스 편집 영역(DOM)을 캔버스의 평면 경기장에 맞춤
     const cw = renderer.canvas.width, chh = renderer.canvas.height, cf = $('#course-field');
     cf.style.left = `${(f.x / cw) * 100}%`; cf.style.top = `${(f.y / chh) * 100}%`;
@@ -1437,6 +1501,61 @@ function layout() {
 function applyMirror() {
   vision.mirror = settings.mirror;
   els.view.classList.toggle('mirror', settings.mirror);
+}
+
+/** 들어온 카메라 프레임 하나 인식: 걸린 시간(ms, 부드럽게 평균)과 초당 처리 프레임(fps)을 화면 칩에 보이려고 잰다 */
+function processFrame(video) {
+  const t0 = performance.now();
+  const r = vision.process(video, settings);
+  const ms = performance.now() - t0;
+  app.procMs = app.procMs ? app.procMs + (ms - app.procMs) * 0.1 : ms;
+  countFrame();
+  return r;
+}
+
+/** 초당 처리 프레임 수: 1초마다 그동안 처리한 프레임 수 (게임 시계가 아닌 실제 시간으로 — 설정 창이 열려 멈춘 동안에도) */
+function countFrame() {
+  const t = performance.now();
+  app.frames++;
+  if (t - app.fpsAt >= 1000) {
+    // 1.5초 안쪽 구간만 '이 기기가 따라가는 속도'로 믿는다 (창이 열려 멈췄던 구간 제외)
+    app.fpsFresh = t - app.fpsAt < 1500;
+    app.fps = t - app.fpsAt < 2000 ? Math.round((app.frames * 1000) / (t - app.fpsAt)) : app.frames;
+    app.frames = 0; app.fpsAt = t;
+  }
+}
+
+/** '카메라 프레임' 설정 적용: 직접 연결 카메라는 바로 바꾸고, 휴대폰 카메라 연결이면 휴대폰에 알린다 (휴대폰이 Wi-Fi 상태를 보고 정함) */
+function applyCamRate() {
+  camRateAuto.reset();
+  app.fpsFresh = false;
+  if (app.remoteMode) remote?.host.send({ t: 'rate', mode: settings.camRate });
+  else if (!app.mouseMode) camera.setFrameRate(settings.camRate === '30' ? 30 : 60);
+}
+
+/** 자동: 1초마다 이 기기가 카메라 프레임을 따라가는지 보고, 60을 다 인식하지 못하면 카메라를 30으로 (게임 중 화면만 볼 때 — 설정 창 미리보기는 빼고) */
+function autoCameraRate(now) {
+  if (!app.fpsFresh) return;
+  app.fpsFresh = false;
+  if (settings.camRate !== 'auto' || app.remoteMode || app.mouseMode) return;
+  const next = camRateAuto.update(now, camera.frameRate(), app.fps);
+  if (next) camera.setFrameRate(next);
+}
+
+/** 화면 칩: '58 fps · 3.1ms' + 마우스를 올리면 카메라가 보내는 fps, 영역을 읽는 해상도 */
+function fpsChipText() {
+  if (app.frozenWarned || app.cameraLost) return '영상 없음';
+  if (app.mouseMode || !(app.procMs > 0)) return `${app.fps} fps`;
+  return `${app.fps} fps · ${app.procMs < 10 ? app.procMs.toFixed(1) : Math.round(app.procMs)}ms`;
+}
+
+function fpsChipTitle() {
+  const r = vision.roi, cam = camera.frameRate();
+  const parts = [`인식 ${app.fps} fps, 프레임당 ${app.procMs ? app.procMs.toFixed(1) : '-'}ms`];
+  if (app.remoteMode && app.remoteLink?.fps) parts.push(app.remoteLink.mode === 'auto' ? `휴대폰 연결 ${app.remoteLink.fps}fps (Wi-Fi 상태에 맞춰 자동)` : `휴대폰 연결 ${app.remoteLink.fps}fps (고정)`);
+  else if (cam) parts.push(camRateAuto.lowered && settings.camRate === 'auto' ? `카메라 ${Math.round(cam)} fps (이 기기에 맞춰 자동으로 낮춤)` : `카메라 ${Math.round(cam)} fps`);
+  if (r) parts.push(`영역 ${r.W}×${r.H}px로 읽음 (×${r.sx.toFixed(2)})`);
+  return parts.join(' · ');
 }
 
 // =============== 메인 루프 ===============
@@ -1469,11 +1588,11 @@ function loop(raw) {
   if (!app.mouseMode && video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
     app.lastFrameAt = now;
-    if (app.frozenWarned) { app.frozenWarned = false; toast('카메라 영상이 다시 들어옵니다'); }
-    result = vision.process(video, settings);
+    // 연결이 끊긴 뒤 늦게 들어온 마지막 프레임으로 '끊겼습니다' 안내를 덮지 않게 (다시 이어지면 따로 알림)
+    if (app.frozenWarned) { app.frozenWarned = false; if (!app.cameraLost) toast('카메라 영상이 다시 들어옵니다'); }
+    result = processFrame(video);
     app.lastVision = result;
-    app.frames++;
-    if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
+    autoCameraRate(performance.now());
 
     // 조작 대상(퍽 또는 스틱 블레이드) 측정값 -> 정규화 바닥 좌표
     const m = result.floor.mapping;
@@ -1511,6 +1630,7 @@ function loop(raw) {
   updateCourseUI();
   const modeOpen = !els.panelMode.classList.contains('hidden');
   if (!modeOpen && app.modePick) { app.modePick = null; $('#mode-cursor').classList.add('hidden'); }
+  if (!modeOpen) app.modeNeedCenter = false; // 시작 준비 직후의 '가운데 칸 먼저'는 그 모드 창에서만
   if (app.calib.manual) updateAutoCalibration(dt);
   else if (app.setup === 'test') updateSetupTest(dt, now);
   else if (!els.panelCommunity.classList.contains('hidden')) pauseIdle(); // 글을 읽고 쓰는 동안은 핸즈프리 시작을 멈춘다
@@ -1534,7 +1654,7 @@ function loop(raw) {
  * 게임 종료 후 선택 (결과 화면이 떠 있는 동안): 퍽을 왼쪽 영역에 2초 두면 한 번 더, 오른쪽 영역에 두면 모드 선택.
  * 결과 창이 카메라를 가리므로 창 안의 트랙에 퍽의 좌우 위치를 점으로 보여준다.
  */
-/** 마우스 모드 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이어도 마지막 자리를 유지) */
+/** 체험(마우스·터치) 한 프레임: 포인터 -> 추적 좌표 -> Tracker (커서가 화면 밖이거나 손가락을 떼도 마지막 자리를 유지) */
 function stepMouse(now) {
   let meas = null;
   // 마우스 모드도 카메라와 같이 네 모서리로 정한 바닥을 쓴다 (게임은 모두 평면 경기장이라 맵이 비틀리지 않음).
@@ -1544,7 +1664,9 @@ function stepMouse(now) {
   if (mouse.has) {
     meas = pointerToUV(mouse.x, mouse.y, {
       floorMap, PW: vision.PW, PH: vision.PH,
-      view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, flipDepth: settings.flipDepth,
+      view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, cursorFlip: !settings.reverseDepth,
+      // 퀵 핸즈·반응 타겟 화면: 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리므로 커서도 그 자리로 (대기 중 가운데 원은 진짜 자리)
+      puckFlip: renderer.view === 'floor' && FLOOR_FLIP_MODES.has(game.mode.id) && game.plane.flip,
       modeList: els.modeList, modeOpen: !els.panelMode.classList.contains('hidden'),
       choiceTrack: $('#choice-track'), resultOpen: !els.panelResult.classList.contains('hidden'),
     });
@@ -1552,8 +1674,7 @@ function stepMouse(now) {
   app.lastVision = mouseVisionResult(vision.PW, vision.PH, meas, floorMap);
   vision.useArea(app.lastVision.floor.mapping, { area: 0, widthM: settings.floorWidthM }); // 마우스: 등록된 퍽 크기 대신 영역 폭으로
   app.lastFrameAt = now;
-  app.frames++;
-  if (now - app.fpsAt > 1000) { app.fps = app.frames; app.frames = 0; app.fpsAt = now; }
+  countFrame();
   // 마우스는 튀지 않으므로 이상치 게이트를 거치지 않게 매 프레임 새로 획득한 것처럼 넣는다
   if (meas && tracker.pos) {
     const dt = tracker.lastTime ? Math.max(1e-3, Math.min(0.1, (now - tracker.lastTime) / 1000)) : 1 / 60;
@@ -1626,13 +1747,20 @@ function updateResultChoice(dt) {
  * 모드 선택 화면을 퍽으로 고르기: 퍽의 (좌우, 앞뒤) 위치를 카드 목록 위의 빨간 커서로 옮기고,
  * 카드 안쪽에 2초 머물면 그 모드를 선택한다(테두리 근처는 어느 카드도 아님). 창이 열릴 때 커서가 올라가 있던 카드는 한 번 벗어났다가 다시 와야 한다
  * (결과 화면에서 퍽을 오른쪽에 둔 채 넘어왔을 때 엉뚱한 카드가 바로 선택되는 것을 방지).
+ * 시작 준비 직후(modeNeedCenter)에는 퍽을 가운데 칸(puck)에 한 번 둔 뒤에야 고른다 (가운데 칸이 빨갛게 표시되고 안내가 바뀜)
  */
+const PICK_HINT = '퍽을 카드 가운데에 2초 두면 선택';
+const PICK_HINT_CENTER = '퍽을 가운데(puck) 칸에 두었다가 카드에 2초';
 function updateModeChoice(dt) {
   const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
   $('#btn-replace-puck').classList.add('hidden');
   const cursor = $('#mode-cursor');
   const enabled = settings.autoStart;
-  $('#mode-pick-hint').classList.toggle('hidden', !enabled);
+  const hintEl = $('#mode-pick-hint'), waitCell = $('#mode-list .mode-wait');
+  hintEl.classList.toggle('hidden', !enabled);
+  const hintKey = app.modeNeedCenter ? 'center' : 'card';
+  if (hintEl.dataset.k !== hintKey) { hintEl.dataset.k = hintKey; hintEl.textContent = app.modeNeedCenter ? PICK_HINT_CENTER : PICK_HINT; }
+  waitCell?.classList.toggle('need', enabled && !!app.modeNeedCenter);
   if (!app.modePick) app.modePick = { key: null, hold: 0, tick: -1, armAt: performance.now() + 800, blocked: undefined };
   const mp = app.modePick;
   const cards = $$('#mode-list .mode-card');
@@ -1640,7 +1768,7 @@ function updateModeChoice(dt) {
   let idx = null;
   if (tracked) {
     const r = els.modeList.getBoundingClientRect();
-    const u = clamp(tracker.pos.x, 0, 1), v = clamp(settings.flipDepth ? 1 - tracker.pos.y : tracker.pos.y, 0, 1);
+    const u = clamp(tracker.pos.x, 0, 1), v = clamp(!settings.reverseDepth ? 1 - tracker.pos.y : tracker.pos.y, 0, 1); // 기본: 카메라 쪽으로 밀면 커서가 위로
     const cx = r.left + u * r.width, cy = r.top + v * r.height;
     cursor.style.left = `${cx}px`; cursor.style.top = `${cy}px`;
     cursor.classList.remove('hidden');
@@ -1648,8 +1776,9 @@ function updateModeChoice(dt) {
     idx = hit >= 0 ? hit : null;
     if (mp.blocked === undefined) mp.blocked = idx;               // 열릴 때 올라가 있던 카드
     else if (mp.blocked !== null && idx !== mp.blocked) mp.blocked = null; // 한 번 벗어나면 해제
+    if (app.modeNeedCenter && waitCell && inCardCore(waitCell.getBoundingClientRect(), cx, cy)) app.modeNeedCenter = false; // 가운데 칸에 왔으면 이제 고를 수 있음
   } else cursor.classList.add('hidden');
-  const armed = performance.now() >= mp.armAt;
+  const armed = performance.now() >= mp.armAt && !app.modeNeedCenter;
   const key = tracked && armed && idx !== null && idx !== mp.blocked ? idx : null;
   const fire = stepDwell(mp, key, dt, CHOICE_HOLD_S);
   const pct = Math.min(100, (mp.hold / CHOICE_HOLD_S) * 100);
@@ -1922,7 +2051,7 @@ function updateHud(force) {
   }
   els.hudScore.textContent = String(game.score);
   els.hudLives.textContent = game.running && game.mode.timed && game.hits > 0 ? `충돌 ${game.hits}` : '';
-  if (game.mode.stages) els.hudLives.textContent = `훈련 ${game.stage + 1}/${game.mode.stages}`;
+  if (game.mode.stages) els.hudLives.textContent = game.mode.id === 'quick' ? `세트 ${(game.running ? game.quickSet : 0) + 1}/${game.mode.stages}` : `훈련 ${game.stage + 1}/${game.mode.stages}`;
   // 자유 연습 코스: 사이클 진행(완료/목표)과 평균·가장 빠른 사이클 시간
   const courseOn = game.mode.id === 'free' && game.course.points.length > 0;
   $('.hud-right .hud-label').textContent = courseOn ? 'Cycle' : 'Score';
@@ -1946,15 +2075,16 @@ function updateChips(result) {
     result.floor.mode === 'manual' ? '영역(사다리꼴)' : result.floor.mode === 'full' || result.floor.fallback ? '영역(전체화면)' : vision.floorLocked ? '바닥(고정)' : '바닥(흰색)');
   const stickCtl = settings.controller === 'stick';
   if (app.mouseMode) {
-    setChip(els.chipPuck, mouse.has ? 'ok' : 'warn', '마우스(조작)');
-    setChip(els.chipStick, '', '스틱(마우스 모드)');
-    els.chipFps.textContent = `${app.fps} fps`;
+    setChip(els.chipPuck, mouse.has ? 'ok' : 'warn', '퍽(마우스·터치)');
+    setChip(els.chipStick, '', '스틱(체험 모드)');
+    els.chipFps.textContent = fpsChipText();
     return;
   }
   setChip(els.chipPuck, result.puck ? 'ok' : (!stickCtl && (tracker.state === 'predicted' || stickBridge.active)) ? 'warn' : 'bad', stickCtl ? '퍽' : '퍽(조작)');
   if (settings.stickModel) setChip(els.chipStick, result.stick ? 'ok' : 'bad', stickCtl ? '스틱(조작)' : '스틱');
   else setChip(els.chipStick, '', '스틱(미지정)');
-  els.chipFps.textContent = app.frozenWarned || app.cameraLost ? '영상 없음' : `${app.fps} fps`;
+  els.chipFps.textContent = fpsChipText();
+  els.chipFps.title = fpsChipTitle();
 }
 
 function setChip(el, state, label) {
@@ -2189,7 +2319,7 @@ function syncScoreChallenge() {
 async function renderShare(result) {
   const box = $('#result-share');
   box.classList.add('hidden'); box.innerHTML = '';
-  if (result.versus || (result.reason !== 'time' && result.reason !== 'done')) return;
+  if (result.versus || app.mouseMode || (result.reason !== 'time' && result.reason !== 'done')) return; // 체험 기록은 자랑·도전 기록에도 안 올림
   // 버튼 하나 또는 둘 (둘째: [라벨, 동작])
   const show = (html, btnLabel, onClick, second) => {
     box.innerHTML = `<div class="share-msg">${html}</div><div class="share-btns">${second ? `<button type="button" class="btn btn-ghost" id="btn-share-2">${second[0]}</button>` : ''}${btnLabel ? `<button type="button" class="btn" id="btn-share">${btnLabel}</button>` : ''}</div>`;
@@ -2339,7 +2469,7 @@ function renderModeList() {
       syncScoreChallenge();
       if (app.afterStart) {
         app.afterStart = false;
-        toast(app.mouseMode ? `${m.name} 선택됨 · 커서를 가운데 원에 3초 두거나 시작을 누르세요` : `${m.name} 선택됨 · 퍽을 가운데 원 안에 놓고 3초 기다리세요`, 5000);
+        toast(app.mouseMode ? `${m.name} 선택됨 · 가운데 원에 3초 머무르거나 시작을 누르세요` : `${m.name} 선택됨 · 퍽을 가운데 원 안에 놓고 3초 기다리세요`, 5000);
       } else toast(`${m.name} 선택됨`);
     });
     els.modeList.appendChild(card);
@@ -2552,7 +2682,7 @@ function applySettingsToUI() {
   $('#set-mirror').checked = settings.mirror;
   $('#set-sound').checked = settings.sound;
   $('#set-autoStart').checked = settings.autoStart;
-  $('#set-flipDepth').checked = settings.flipDepth;
+  $('#set-reverseDepth').checked = settings.reverseDepth;
   applyDepthDirection();
   els.invisibleToggle.checked = settings.invisible;
   game.invisible = settings.invisible;
@@ -2563,6 +2693,7 @@ function applySettingsToUI() {
   applyWash();
   game.arcade.floorWidthM = settings.floorWidthM;
   $('#set-procWidth').value = String(settings.procWidth);
+  $('#set-camRate').value = settings.camRate;
   $('#set-controller').value = settings.controller;
   els.p1.value = settings.p1; els.p2.value = settings.p2;
   refreshCalibUI();
@@ -2604,12 +2735,16 @@ function drawTransparencyPreview(result) {
   }
   ctx.fillStyle = rgba(C.paper, renderer.wash); ctx.fillRect(0, 0, w, h); // 평면 판의 종이 배경
   ctx.beginPath(); ctx.arc(w * 0.72, h * 0.4, w * 0.045, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill(); // 목표 하나
-  // 내 퍽: 지금 보이는 자리(평면 판에서와 같은 자리). 못 찾으면 왼쪽 아래
+  // 내 퍽: 지금 보이는 자리 — 평면 판 게임은 판에서와 같은 자리, 바닥 위 게임은 영역 안 자리
+  // (와이드는 영상 속 진짜 퍽 자리, 퀵 핸즈·반응 타겟은 위아래 반대). 못 찾으면 왼쪽 아래
   const obj = settings.controller === 'stick' ? result?.stick : p, m = result?.floor?.mapping;
-  let uv = null;
+  let uv = null, pos = { x: 0.3, y: 0.62 };
   if (obj && m) { const [u, v] = m.toUV(obj.x, obj.y); if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) uv = { x: u, y: v }; }
   else if (tracker.pos && tracker.state !== 'lost') uv = tracker.pos;
-  const pos = uv ? { x: uv.x, y: game.plane.flip ? 1 - uv.y : uv.y } : { x: 0.3, y: 0.62 };
+  if (uv && m && FLOOR_MODES.has(game.mode.id)) {
+    const [px, py] = m.toPx(uv.x, FLOOR_FLIP_MODES.has(game.mode.id) && game.plane.flip ? 1 - uv.y : uv.y);
+    pos = { x: px / vision.PW, y: py / vision.PH };
+  } else if (uv) pos = { x: uv.x, y: game.plane.flip ? 1 - uv.y : uv.y };
   ctx.globalAlpha = pa;
   ctx.beginPath(); ctx.arc(pos.x * w, pos.y * h, Math.max(4 * dpr, PUCK_R * w), 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill();
   ctx.globalAlpha = 1;
@@ -2621,10 +2756,12 @@ function previewWhilePaused(now) {
   const video = els.video;
   if (!app.mouseMode && video.readyState >= 2 && video.currentTime !== app.lastVideoTime) {
     app.lastVideoTime = video.currentTime;
-    app.lastVision = vision.process(video, settings);
+    app.lastVision = processFrame(video);
+    app.fpsFresh = false; // 설정 창 미리보기(더 무거움) 동안의 속도로는 카메라를 바꾸지 않는다
   }
   drawTransparencyPreview(app.lastVision);
   drawMaskPreview(app.lastVision);
+  if ($('.settings-adv')?.open) $('#proc-live').textContent = app.mouseMode ? '' : fpsChipTitle();
   if (app.tpPeek) drawPeek(now);
 }
 
@@ -2637,18 +2774,11 @@ let maskImg = null;
 function drawMaskPreview(result) {
   const cv = $('#mask-preview'), adv = $('.settings-adv');
   if (!cv || !adv?.open || els.panelSettings.classList.contains('hidden')) return;
-  const { PW, PH } = vision, f = vision.frame;
+  const { PW, PH } = vision;
   if (cv.width !== PW || cv.height !== PH) { cv.width = PW; cv.height = PH; }
   const ctx = cv.getContext('2d');
-  if (app.mouseMode || !f || f.width !== PW || f.height !== PH) { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, PW, PH); return; }
   if (!maskImg || maskImg.width !== PW || maskImg.height !== PH) maskImg = new ImageData(PW, PH);
-  const s = f.data, o = maskImg.data, pm = vision.puckMask, sm = settings.stickModel ? vision.stickMask : null;
-  for (let i = 0, p = 0; i < PW * PH; i++, p += 4) {
-    if (pm[i]) { o[p] = 232; o[p + 1] = 38; o[p + 2] = 38; }
-    else if (sm && sm[i]) { o[p] = 24; o[p + 1] = 196; o[p + 2] = 72; }
-    else { o[p] = 140 + s[p] * 0.42; o[p + 1] = 140 + s[p + 1] * 0.42; o[p + 2] = 140 + s[p + 2] * 0.42; } // 바탕은 흐리게
-    o[p + 3] = 255;
-  }
+  if (app.mouseMode || !vision.paintMaskPreview(maskImg, !!settings.stickModel)) { ctx.fillStyle = '#8b9099'; ctx.fillRect(0, 0, PW, PH); return; }
   ctx.putImageData(maskImg, 0, 0);
   const q = result?.floor?.quad;
   if (q) { ctx.beginPath(); q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(22,22,22,0.7)'; ctx.stroke(); }
@@ -2686,18 +2816,19 @@ function drawPeek(now) {
 
 /**
  * 게임마다 배경·퍽 투명도 규칙 (bg·puck: 실제로 쓰는 투명도 %, bgLock·puckLock: 이 게임에서 설정을 못 바꾸는지)
- *  - 아케이드·퍽 피하기·8자 드리블: 배경 0 고정 (흰 화면), 퍽만 조절
- *  - 와이드 드리블: 배경 0 이면 퍽 0~100, 배경을 1 이상 주면 흰 칠 없이 카메라 그대로 + 퍽 투명도 0 고정
+ *  - 아케이드·퍽 피하기·8자 드리블·자유 연습: 배경 0 고정 (흰 화면), 퍽만 조절
+ *  - 와이드 드리블: 배경 0~100 그대로 (슬라이더대로 카메라가 비침 — 끄는 동안 실제 화면에서 바로 보임).
+ *    배경 0 이면 퍽 0~100, 배경을 1 이상 주면 퍽 투명도 0 고정 (영상 속 진짜 퍽이 보이므로)
  *  - 퀵 핸즈: 배경만 조절, 퍽 투명도 0 고정
- *  - 반응 타겟·자유 연습: 둘 다 조절
+ *  - 반응 타겟 (퀵 핸즈처럼 영역 안에서 배경을 보며): 둘 다 조절
  */
 function visualRules(modeId = game.mode.id) {
   const bgSet = settings.bgTransparency, puckSet = settings.puckTransparency;
   switch (modeId) {
-    case 'arcade': case 'obstacle': case 'figure8':
+    case 'arcade': case 'obstacle': case 'figure8': case 'free':
       return { bg: 0, puck: puckSet, bgLock: true, puckLock: false };
     case 'wide':
-      return bgSet > 0 ? { bg: 100, puck: 0, bgLock: false, puckLock: true } : { bg: 0, puck: puckSet, bgLock: false, puckLock: false };
+      return bgSet > 0 ? { bg: bgSet, puck: 0, bgLock: false, puckLock: true } : { bg: 0, puck: puckSet, bgLock: false, puckLock: false };
     case 'quick':
       return { bg: bgSet, puck: 0, bgLock: false, puckLock: true };
     default:
@@ -2727,18 +2858,30 @@ function refreshVisualLocks() {
   const note = $('#visual-note');
   const msg = v.bgLock ? `${name}: 배경 투명도 0 고정 (흰 화면) · 퍽 투명도만 조절`
     : game.mode.id === 'quick' ? `${name}: 배경 투명도만 조절 · 퍽 투명도 0 고정`
-      : game.mode.id === 'wide' ? (v.puckLock ? `${name}: 배경 투명도를 주면 카메라 그대로 · 퍽 투명도 0 고정` : `${name}: 배경 투명도 0 일 때만 퍽 투명도 조절`)
+      : game.mode.id === 'wide' ? (v.puckLock ? `${name}: 배경 투명도를 주면 퍽 투명도 0 고정` : `${name}: 배경 투명도 0 일 때만 퍽 투명도 조절`)
         : '';
   note.textContent = msg; note.classList.toggle('hidden', !msg);
 }
 
 /**
- * 앞뒤 방향 (아케이드·퍽 피하기·자유 연습 공통): true = 퍽을 카메라 쪽으로 밀면 화면 위로, 몸쪽으로 당기면 아래로.
- * 세 모드가 같은 값을 쓰도록 한 곳에서 맞춘다 (설정 초기화 때 평면 모드만 예전 값으로 남던 문제 방지)
+ * 게임마다 앞뒤(위아래) 방향: true = 판정 평면의 위아래를 카메라 영상과 반대로 (퍽을 카메라 쪽으로 밀면 화면 위로).
+ *  - 아케이드 (아래쪽 플레이 존): 카메라 쪽으로 밀면 위로 (퍽들이 내려오는 쪽)
+ *  - 퍽 피하기·8자 드리블 (흰 화면): 카메라 쪽으로 밀면 위로 (판 위쪽 = 카메라쪽, 아래쪽 = 몸쪽)
+ *  - 자유 연습 (흰 화면): 퍽 피하기와 같음 — 카메라 쪽으로 밀면 위로
+ *  - 퀵 핸즈·반응 타겟 (영역 안, 배경이 보임): 화면(영상)은 그대로 두고 내 퍽만 위아래 반대로 — 카메라 쪽으로 밀면 위로
+ *  - 와이드 드리블: 영상 속 진짜 퍽 자리 그대로 (렌더러가 평면의 뒤집기를 되돌려 그리므로 이 값과 상관없음)
+ * 설정 '위아래 반대로'(reverseDepth)를 켜면 와이드 드리블을 뺀 모든 게임이 반대로 바뀐다
  */
+function depthFlip(modeId = game.mode.id) {
+  // init() 중에도 불리므로 모듈 상수(const) 대신 여기서 바로 정한다 (선언 전에 쓰면 앱이 시작하지 않음)
+  const base = modeId !== 'wide'; // 와이드 드리블을 뺀 모든 게임: 카메라 쪽으로 밀면 위로
+  return settings.reverseDepth ? !base : base;
+}
+
+/** 지금 모드의 앞뒤 방향을 게임에 적용 (모드를 바꿀 때·설정을 바꿀 때·화면 크기가 바뀔 때) */
 function applyDepthDirection() {
-  game.arcade.flipY = settings.flipDepth;
-  game.plane.flip = settings.flipDepth;
+  game.arcade.flipY = depthFlip('arcade');
+  game.plane.flip = depthFlip();
 }
 
 function persist() { saveSettings(settings); }

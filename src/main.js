@@ -442,7 +442,7 @@ async function submitResult(result) {
     const parts = [];
     if (all) parts.push(`전체 ${all.rank}위/${all.total}명`);
     if (age) parts.push(`${u.ageGroup} ${age.rank}위/${age.total}명`);
-    els.resultRank.innerHTML = `<span class="script">${improved && Number(result.score) > 0 ? 'New best!' : `best ${best}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
+    els.resultRank.innerHTML = `<span class="script">${improved && Number(result.score) > 0 ? '최고 기록!' : `최고 ${best}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
     els.resultRank.classList.remove('hidden');
     $('#btn-result-rank').addEventListener('click', () => { close(els.panelResult); openRank(result.mode.id); });
   } catch (err) {
@@ -1356,7 +1356,7 @@ function finishSetup() {
 /**
  * 시작 준비가 끝나면: 바로 게임으로 가지 않고 모드 창을 연다 (게임 종류·시간 선택). 고른 뒤 원 안 안내가 이어진다.
  * 이때 퍽은 마지막 표적(바닥 모서리) 자리에 있어 커서가 모서리 카드(아케이드 등) 위에 놓이므로,
- * 퍽으로 고르기는 가운데 칸(puck)에 한 번 둔 뒤에야 켠다 (modeNeedCenter) — 아케이드가 저절로 골라져 시작되지 않게
+ * 퍽으로 고르기는 가운데 칸(퍽 대기)에 한 번 둔 뒤에야 켠다 (modeNeedCenter) — 아케이드가 저절로 골라져 시작되지 않게
  */
 function openModeAfterStart() {
   app.afterStart = true;
@@ -1747,10 +1747,10 @@ function updateResultChoice(dt) {
  * 모드 선택 화면을 퍽으로 고르기: 퍽의 (좌우, 앞뒤) 위치를 카드 목록 위의 빨간 커서로 옮기고,
  * 카드 안쪽에 2초 머물면 그 모드를 선택한다(테두리 근처는 어느 카드도 아님). 창이 열릴 때 커서가 올라가 있던 카드는 한 번 벗어났다가 다시 와야 한다
  * (결과 화면에서 퍽을 오른쪽에 둔 채 넘어왔을 때 엉뚱한 카드가 바로 선택되는 것을 방지).
- * 시작 준비 직후(modeNeedCenter)에는 퍽을 가운데 칸(puck)에 한 번 둔 뒤에야 고른다 (가운데 칸이 빨갛게 표시되고 안내가 바뀜)
+ * 시작 준비 직후(modeNeedCenter)에는 퍽을 가운데 칸(퍽 대기)에 한 번 둔 뒤에야 고른다 (가운데 칸이 빨갛게 표시되고 안내가 바뀜)
  */
 const PICK_HINT = '퍽을 카드 가운데에 2초 두면 선택';
-const PICK_HINT_CENTER = '퍽을 가운데(puck) 칸에 두었다가 카드에 2초';
+const PICK_HINT_CENTER = '퍽을 가운데 ‘퍽 대기’ 칸에 두었다가 카드에 2초';
 function updateModeChoice(dt) {
   const c = app.calib; c.active = false; c.hold = 0; app.idleHold = 0; autoCal.reset();
   $('#btn-replace-puck').classList.add('hidden');
@@ -2042,7 +2042,7 @@ function updateHud(force) {
   if (game.mode.stages) els.hudLives.textContent = game.mode.id === 'quick' ? `세트 ${(game.running ? game.quickSet : 0) + 1}/${game.mode.stages}` : `훈련 ${game.stage + 1}/${game.mode.stages}`;
   // 자유 연습 코스: 사이클 진행(완료/목표)과 평균·가장 빠른 사이클 시간
   const courseOn = game.mode.id === 'free' && game.course.points.length > 0;
-  $('.hud-right .hud-label').textContent = courseOn ? 'Cycle' : 'Score';
+  $('.hud-right .hud-label').textContent = courseOn ? '사이클' : '점수';
   els.hudLives.classList.toggle('info', courseOn || !!game.mode.stages);
   if (courseOn) {
     const lt = (game.running && game.stats.lapTimes) || [];
@@ -2105,7 +2105,7 @@ function startRun(opts = {}) {
 game.onEnd = (result) => {
   result.versus = !!app.versus;
   app.lastResult = result;
-  // 0점은 최고 기록으로 치지 않는다 (처음 한 판을 바로 멈췄을 때 'New best 0' 방지)
+  // 0점은 최고 기록으로 치지 않는다 (처음 한 판을 바로 멈췄을 때 '최고 기록! 0' 방지)
   const isBest = result.mode.id !== 'free' && result.reason !== 'manual' && Number(result.score) > 0 ? saveBest(result.rankKey || result.mode.id, result.score) : false;
   app.idleBlocked = result.reason === 'manual';
   showResult(result, isBest);
@@ -2120,10 +2120,10 @@ function showResult(result, isBest) {
   let title = result.mode.timed ? `${result.mode.name} · ${timeLabel(result.mode, result.seconds || result.limit)}` : result.mode.name;
   if (result.level && result.level !== 'normal') title += ` · ${levelLabel(result.level)}`;
   if (result.invisible) title += ' · 투명';
-  if (result.reason === 'time') title += ' — Time up';
-  if (result.reason === 'done') title += ' — Complete';
+  if (result.reason === 'time') title += ' — 시간 종료';
+  if (result.reason === 'done') title += ' — 완주';
   const body = [];
-  if (isBest) body.push(`<div class="stat full winner"><small>New best</small><b>${result.score}</b></div>`);
+  if (isBest) body.push(`<div class="stat full winner"><small>최고 기록!</small><b>${result.score}</b></div>`);
   for (const [k, v] of result.items) { if (isBest && k === '점수') continue; body.push(`<div class="stat"><small>${k}</small><b>${v}</b></div>`); }
 
   if (app.versus) {
@@ -2349,16 +2349,16 @@ async function renderShare(result) {
     if (r.isHolder && r.improved && ph && ph.uid !== u.id) {
       sfx.target?.();
       const beatTitle = tr(`${tr(ch.title)} 기록 갱신!`);
-      show(`<span class="script">New record!</span> <span>갈아치운 기록</span> <b data-ugc>${esc(ph.nick)}</b> <strong>평균 ${s1(ph.avg)} → ${s1(rec.avg)}</strong>`,
+      show(`<span class="script">신기록!</span> <span>갈아치운 기록</span> <b data-ugc>${esc(ph.nick)}</b> <strong>평균 ${s1(ph.avg)} → ${s1(rec.avg)}</strong>`,
         '기록 갱신 자랑하기', () => community.compose({
           type: 'beat', title: beatTitle.length <= TITLE_MAX ? beatTitle : tr('기록 갱신!'),
           ref: { id: ch.id, title: ch.title, nick: ph.nick, avg: ph.avg },
           course: { points: game.course.points.map((p) => ({ n: p.n, x: p.x, y: p.y })), cycles: c.target, record: rec },
         }));
     } else if (r.isHolder && r.improved && !ph) {
-      show(`<span class="script">First record!</span> <span>이 코스의 첫 기록 보유자가 되었습니다</span> <strong>평균 ${s1(rec.avg)}</strong>`, '기록 게시판 보기', openBoard);
+      show(`<span class="script">첫 기록!</span> <span>이 코스의 첫 기록 보유자가 되었습니다</span> <strong>평균 ${s1(rec.avg)}</strong>`, '기록 게시판 보기', openBoard);
     } else if (r.isHolder && r.improved) {
-      show(`<span class="script">New best!</span> <span>내 기록을 고쳐 썼습니다 — 여전히 1위</span> <strong>평균 ${s1(rec.avg)}</strong>`, '기록 게시판 보기', openBoard);
+      show(`<span class="script">최고 기록!</span> <span>내 기록을 고쳐 썼습니다 — 여전히 1위</span> <strong>평균 ${s1(rec.avg)}</strong>`, '기록 게시판 보기', openBoard);
     } else if (r.isHolder) {
       show(`<span>기록 보유자 유지 — 이번 평균 ${s1(rec.avg)}</span>`, '기록 게시판 보기', openBoard);
     } else {
@@ -2402,7 +2402,7 @@ async function renderScoreChallenge(result, sc, show) {
     let html;
     if (r.isHolder && r.improved && ph && ph.uid !== u.id) {
       sfx.target?.();
-      html = `<span class="script">New record!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${num(ph.score)}점 → ${num(result.score)}점</strong>`;
+      html = `<span class="script">신기록!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${num(ph.score)}점 → ${num(result.score)}점</strong>`;
     } else {
       html = `${target} <span>도전 기록 ${r.rank}위 / ${r.total}명</span>${r.improved ? ' <span>내 최고 기록 갱신</span>' : ''}`;
     }
@@ -2424,27 +2424,27 @@ function renderModeList() {
   $$('#time-seg button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === settings.playMinutes));
   $$('#level-seg button').forEach((b) => b.classList.toggle('active', b.dataset.level === settings.difficulty));
   els.invisibleToggle.checked = settings.invisible;
-  // 3×3 배치: 1 2 3 / 4 (가운데 비움: 퍽 대기) 6 / 7 8 9(커뮤니티)
+  // 3×3 배치: 게임 01 02 03 / 04 (가운데: 퍽 대기) 05 / 06 07 + 커뮤니티
+  // 번호는 게임에만 (게임 순서대로 01–07). 가운데 칸과 커뮤니티는 게임이 아니라 번호를 붙이지 않는다
   const CELLS = [0, 1, 2, 3, 'wait', 4, 5, 6, 'community'];
-  CELLS.forEach((cell, pos) => {
-    const no = String(pos + 1).padStart(2, '0');
-    if (cell === 'wait') { const w = document.createElement('div'); w.className = 'mode-wait'; w.innerHTML = '<i></i><span>puck</span>'; els.modeList.appendChild(w); return; }
+  CELLS.forEach((cell) => {
+    if (cell === 'wait') { const w = document.createElement('div'); w.className = 'mode-wait'; w.innerHTML = '<i></i><span>퍽 대기</span>'; els.modeList.appendChild(w); return; }
     if (cell === 'community') {
-      // 9번: 커뮤니티 (코스·기록 공유). 다른 카드처럼 퍽으로도 고를 수 있다
+      // 커뮤니티 (코스·기록 공유): 게임 카드와 구분되게 번호 없이 점선 테두리. 다른 카드처럼 퍽으로도 고를 수 있다
       const card = document.createElement('button');
       card.className = 'mode-card mode-community';
-      card.innerHTML = `<span class="no">${no}</span><span class="time">Share</span><b>커뮤니티</b><em>Community</em><small>코스와 기록을 공유하고 도전하세요.</small>`;
+      card.innerHTML = `<span class="time">공유</span><b>커뮤니티</b><em>Community</em><small>코스와 기록을 공유하고 도전하세요.</small>`;
       card.addEventListener('click', () => { close(els.panelMode); community.open(); });
       els.modeList.appendChild(card);
       return;
     }
-    const m = MODES[cell], i = pos;
+    const m = MODES[cell];
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
     const key = rankKey(m.id, game.playSeconds, settings.invisible, settings.difficulty);
-    const best = scores[key] !== undefined ? `<span class="best">best ${scores[key]}</span>` : '';
+    const best = scores[key] !== undefined ? `<span class="best">최고 ${scores[key]}</span>` : '';
     const time = m.timed ? timeLabel(m, settings.playMinutes * 60) : m.duration ? `${m.duration}초` : '자유';
-    card.innerHTML = `<span class="no">${String(i + 1).padStart(2, '0')}</span><span class="time">${time}</span><b>${m.name}</b><em>${m.en}</em><small>${m.desc}</small>${best}`;
+    card.innerHTML = `<span class="no">${String(cell + 1).padStart(2, '0')}</span><span class="time">${time}</span><b>${m.name}</b><em>${m.en}</em><small>${m.desc}</small>${best}`;
     card.addEventListener('click', () => {
       if (game.running) game.stop('manual');
       game.setMode(m.id);

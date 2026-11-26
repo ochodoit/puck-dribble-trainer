@@ -5,11 +5,12 @@
 //       제한 시간(Game이 관리) 동안의 점수로 겨룬다. 목숨 없음 — 충돌은 감점.
 import { C, F, rgba, text, sparks, font, alphaLayer } from './theme.js';
 import { clockNow } from './clock.js';
+import { getLang } from './i18n.js';
 
 export const ZONE_RATIO = 0.30;      // 화면 높이 중 플레이 존 비율
 export const FIELD_MARGIN = 0.05;    // 좌우 테두리 위치 (화면 폭 비율)
 export const PUCK_R = 0.01125;       // 내 퍽 반지름 (화면 폭 단위) = 퍽 피하기의 내 퍽 (경기장 폭 0.9 × 0.0125)
-// 점수: 더하기만 한다 (연속 보너스 없음). coin을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
+// 점수: 더하기만 한다 (연속 보너스 없음). 코인을 많이 먹을수록, 좌우로 자주 칠수록(터치) 높아진다.
 //       가만히 있으면 점수가 나지 않는다. 나를 겨냥한 퍽을 피한 것 자체에는 점수가 없다(피한 수는 기록만).
 //       아래 세 값은 쉬움 기준이고, 난이도 배율(SCORE_MULT)을 모두 곱한다.
 export const HIT_PENALTY = 3;        // 충돌 감점 (예전 10: 터치 +1 로 모은 점수가 충돌 몇 번에 다 깎여 점수가 쌓이지 않았다)
@@ -106,8 +107,8 @@ export class Arcade {
     if (skipCountdown) {
       // 핸즈프리 시작: 이미 원 안에 3초 정지했으므로 바로 GO
       this.phase = 'play';
-      this.instruction = 'GO!';
-      this._pop(0.5, this.zoneTop - 0.1, 'Go!', C.red, 900, 'script');
+      this.instruction = '시작!';
+      this._pop(0.5, this.zoneTop - 0.1, '시작!', C.red, 900, 'script');
       this.sfx?.go?.();
     } else {
       this.phase = 'countdown';
@@ -192,7 +193,7 @@ export class Arcade {
     }
     this.pickups = this.pickups.filter((p) => !p.taken && p.y - p.r < this.aspect + 0.05);
 
-    this.instruction = 'coin은 먹고, 빨간 퍽은 좌우로 쳐서 피하기';
+    this.instruction = '코인은 먹고, 빨간 퍽은 좌우로 쳐서 피하기';
   }
 
   _updateCountdown(dt, tracked) {
@@ -204,8 +205,8 @@ export class Arcade {
     this.instruction = inside ? `시선은 화면에! ${remain}` : '퍽을 가운데 원 안에 멈추고 화면을 보세요';
     if (this.hold >= COUNTDOWN_S) {
       this.phase = 'play';
-      this.instruction = 'GO!';
-      this._pop(0.5, this.zoneTop - 0.1, 'Go!', C.red, 900, 'script');
+      this.instruction = '시작!';
+      this._pop(0.5, this.zoneTop - 0.1, '시작!', C.red, 900, 'script');
       this.sfx?.go?.();
     }
   }
@@ -300,7 +301,7 @@ export class Arcade {
       score: this.score, touches: this.touches, maxStreak: this.maxStreak, passed: this.passed, items: this.items, hits: this.hits,
       elapsed: this.elapsed, distanceM: distM, level: this.level,
       items_: [
-        ['점수', this.score], ['Coin', this.items], ['터치', this.touches], ['충돌', this.hits],
+        ['점수', this.score], ['코인', this.items], ['터치', this.touches], ['충돌', this.hits],
         ['최고 연속 터치', this.maxStreak], ['피한 퍽', this.passed],
         ['퍽 이동 거리', `${distM.toFixed(1)} m`], ['레벨', this.level + 1],
       ],
@@ -328,7 +329,7 @@ export class Arcade {
     ctx.lineWidth = hair; ctx.strokeStyle = C.ink;
     ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(L, H); ctx.moveTo(Rr, 0); ctx.lineTo(Rr, H); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(L, zt); ctx.lineTo(Rr, zt); ctx.stroke();
-    text(ctx, 'PLAY ZONE', L + W * 0.012, zt + fs * 0.95, fs * 0.66, { weight: 600, color: C.mute, align: 'left', halo: false });
+    text(ctx, '플레이 영역', L + W * 0.012, zt + fs * 0.95, fs * 0.66, { weight: 600, color: C.mute, align: 'left', halo: false });
     text(ctx, `LV ${this.level + 1}`, Rr - W * 0.012, zt + fs * 0.95, fs * 0.66, { weight: 600, color: C.mute, align: 'right', halo: false });
     // 방향 안내: 위 = 카메라 쪽으로 밀기, 아래 = 몸쪽으로 당기기 (flipY=false면 반대)
     const up = this.flipY ? '↑ 카메라쪽 · 밀기' : '↑ 몸쪽 · 당기기', down = this.flipY ? '↓ 몸쪽 · 당기기' : '↓ 카메라쪽 · 밀기';
@@ -365,7 +366,7 @@ export class Arcade {
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = o.color; ctx.fill();
       ctx.globalAlpha = 1;
     }
-    // coin: 동전 모양 (톱니 테두리 + 안쪽 고리 + 가운데 'coin' 글자)
+    // 코인: 동전 모양 (톱니 테두리 + 안쪽 고리 + 가운데 '코인' 글자, 영어 화면은 'coin')
     for (const p of this.pickups) drawCoin(ctx, p.x * S, p.y * S, p.r * S, hair);
 
     // 내 퍽: 플레이 중에는 설정한 농도로 (카운트다운 동안은 항상 또렷이 — 원 안에 놓아야 하므로)
@@ -378,7 +379,7 @@ export class Arcade {
         ctx.lineWidth = hair * 3; ctx.strokeStyle = rgba(C.red, 1 - e.age);
         ctx.beginPath(); ctx.moveTo(L, 0); ctx.lineTo(L, H); ctx.moveTo(Rr, 0); ctx.lineTo(Rr, H); ctx.stroke();
       } else if (e.type === 'pop') {
-        // 작은 글자가 살짝 떠오르며 사라진다. 'Go!' 만 필기체, 나머지는 본문보다 작은 숫자
+        // 작은 글자가 살짝 떠오르며 사라진다. '시작!' 만 필기체, 나머지는 본문보다 작은 숫자
         ctx.globalAlpha = Math.min(1, (1 - e.age) * 1.8);
         const script = e.style === 'script', big = e.style === 'display';
         const size = script ? fs * 1.5 : big ? fs * 2.2 : fs * 0.82;
@@ -403,7 +404,7 @@ export class Arcade {
     ctx.restore();
   }
 
-  /** 규칙 범례: coin은 먹고, 빨간 퍽은 피한다 */
+  /** 규칙 범례: 코인은 먹고, 빨간 퍽은 피한다 */
   _drawLegend(ctx, S, zt, fs) {
     const W = S, y = zt - W * 0.2, r = fs * 0.55;
     let x = W / 2 - fs * 9.5;
@@ -456,7 +457,7 @@ export class Arcade {
 }
 
 /**
- * 동전: 옐로 원판 + 잉크 외곽선, 테두리의 톱니(짧은 방사선), 안쪽 고리, 가운데 'coin' 글자.
+ * 동전: 옐로 원판 + 잉크 외곽선, 테두리의 톱니(짧은 방사선), 안쪽 고리, 가운데 '코인' 글자 (영어 화면은 'coin').
  * 퍽(색만 다른 민무늬 원)과 한눈에 구분되도록 한다.
  */
 export function drawCoin(ctx, x, y, r, hair) {
@@ -472,8 +473,9 @@ export function drawCoin(ctx, x, y, r, hair) {
   // 안쪽 고리
   ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); ctx.lineWidth = Math.max(0.75, hair * 0.75); ctx.strokeStyle = C.ink; ctx.stroke();
   // 글자: 작아도 원 안에
-  ctx.font = font(F.sans, r * 0.66, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = C.ink;
-  ctx.fillText('coin', x, y + r * 0.03);
+  const en = getLang() === 'en';
+  ctx.font = font(F.sans, r * (en ? 0.66 : 0.58), 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = C.ink;
+  ctx.fillText(en ? 'coin' : '코인', x, y + r * 0.03);
   ctx.restore();
 }
 

@@ -8,6 +8,9 @@ const sec = (v) => `${Number(v).toFixed(1)}s`;
 /** 저장된 숫자 칸을 HTML에 넣을 때: 숫자가 아니면 0 (조작된 글로 HTML이 끼어들지 못하게) */
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 
+/** 글 종류 꼬리표: 보기 버튼(코스 · 기록 자랑)과 같은 말 + 기록 갱신 */
+export const postTag = (p) => (p.type === 'course' ? '코스' : p.type === 'beat' ? '기록 갱신' : '기록 자랑');
+
 export function timeAgo(at, now = Date.now()) {
   const m = Math.floor((now - at) / 60000);
   if (m < 1) return '방금';
@@ -73,7 +76,7 @@ export function initCommunity(host) {
     if (!p) return `<p class="detail-empty">글을 누르면 도전한 사람 수와 상위 ${BOARD_TOP}위 기록이 여기에 보입니다.</p>`;
     const bp = boardPost(p);
     const me = host.getUser();
-    const tag = p.type === 'course' ? 'Course' : p.type === 'beat' ? 'New record' : 'Record';
+    const tag = postTag(p);
     const sub = p.type === 'record' ? modeLabel(p) : bp?.course ? `${num(bp.course.length)} 포인트 · ${num(bp.cycles)} 사이클` : '';
     const head = `<div class="detail-head"><span class="post-tag">${tag}</span><h4${p.official ? '' : ' data-ugc'}>${esc(bp && bp !== p ? bp.title : p.title)}</h4>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
     if (!bp) return `${head}<p class="post-empty">원본 코스 글을 찾을 수 없습니다 (지워졌을 수 있습니다)</p>`;
@@ -99,7 +102,7 @@ export function initCommunity(host) {
     const mine = me && p.uid === me.id && !p.official;
     const ugc = p.official ? '' : ' data-ugc';
     const cheers = (p.cheers || []).length, cheered = me && (p.cheers || []).includes(me.id);
-    const tag = p.type === 'course' ? 'Course' : p.type === 'beat' ? 'New record' : 'Record';
+    const tag = postTag(p);
     let main = '';
     if (p.type === 'record') {
       main = `<div class="post-score"><b>${Number(p.score)}</b><span>${esc(modeLabel(p))}</span></div>`;

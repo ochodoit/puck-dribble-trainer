@@ -10,7 +10,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SITE, UPDATED, VERIFY, SAME_AS, DEF, NAME, HOME, GAMES, PAGES, UI } from './site-content.mjs';
-import { icon, cameraDiagram, heightChart, puckSwatch } from './guide-art.mjs';
+import { icon, cameraDiagram, heightChart, puckSwatch, gameArt } from './guide-art.mjs';
 
 export const ROOT = normalize(join(fileURLToPath(import.meta.url), '..', '..'));
 const LANGS = ['ko', 'en'];
@@ -176,7 +176,8 @@ function block(b) {
   // 표: ['table', { caption, head: [...], rows: [[...], ...] }] — 행의 첫 칸은 행 제목(th)
   if (tag === 'table') {
     const { caption, head, rows } = items;
-    return `<div class="table-wrap"><table>${caption ? `<caption>${md(caption)}</caption>` : ''}<thead><tr>${head.map((x) => `<th scope="col">${md(x)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x, i) => (i === 0 ? `<th scope="row">${md(x)}</th>` : `<td>${md(x)}</td>`)).join('')}</tr>`).join('')}</tbody></table></div>`;
+    // 칸마다 data-label(머리글): 좁은 화면에서는 줄마다 카드로 쌓고 칸 앞에 머리글을 붙여 읽는다 (pages.css)
+    return `<div class="table-wrap"><table>${caption ? `<caption>${md(caption)}</caption>` : ''}<thead><tr>${head.map((x) => `<th scope="col">${md(x)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x, i) => (i === 0 ? `<th scope="row">${md(x)}</th>` : `<td data-label="${esc(plain(head[i]))}">${md(x)}</td>`)).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
   return `<${tag}>${items.map((x) => `<li>${md(x)}</li>`).join('')}</${tag}>`;
 }
@@ -213,6 +214,7 @@ ${body}
   </main>
   <footer class="foot">
     <nav aria-label="${esc(u.navLabel)}"><a href="${pathOf(lang)}">${esc(u.home)}</a>${nav}</nav>
+    <p class="about">${esc(DEF[lang])}</p>
     <p>${esc(u.analytics)}</p>
     <p>${esc(u.copyright)}</p>
   </footer>
@@ -258,7 +260,7 @@ function guidePage(lang, page) {
     '    <div class="guide">',
     `      <div class="g-hero"><nav class="crumb" aria-label="${esc(u.crumbLabel)}"><a href="${pathOf(lang)}">${esc(u.home)}</a> › <span>${esc(p.nav)}</span></nav>`,
     `      <h1>${esc(p.h1)}</h1>`,
-    `      <p class="lead">${esc(DEF[lang])} ${esc(p.lead)}</p></div>`,
+    `      <p class="lead">${md(p.lead)}</p></div>`,
     `      <nav class="toc" aria-label="${esc(g.toc)}"><p class="toc-h">${esc(g.toc)}</p><ol>${secs.map((s, i) => `<li><a href="#${s.id}"><span class="toc-no">${no(i)}</span>${esc(s.toc)}</a></li>`).join('')}</ol></nav>`,
     '      <div class="g-body">',
     ...keys.map((k, i) => `      <section class="g-sec gs-${k}" id="${secs[i].id}">${head(secs[i], i)}${lead(secs[i])}\n      ${html[k](secs[i])}</section>`),
@@ -276,11 +278,15 @@ function contentPage(lang, page) {
   const parts = [
     `    <nav class="crumb" aria-label="${esc(u.crumbLabel)}"><a href="${pathOf(lang)}">${esc(u.home)}</a> › <span>${esc(p.nav)}</span></nav>`,
     `    <h1>${esc(p.h1)}</h1>`,
-    `    <p class="lead">${esc(DEF[lang])} ${esc(p.lead)}</p>`,
+    `    <p class="lead">${md(p.lead)}</p>`,
   ];
   if (page.slug === 'games') {
+    // 목표별로 고르기: 무엇부터 할지 한눈에 (게임 이름은 아래 카드로 가는 링크)
+    const gname = (id) => GAMES.find((g) => g.id === id)[lang].name;
+    parts.push(`    <h2>${esc(p.pickTitle)}</h2>`);
+    parts.push('    <ul class="pick">' + p.pick.map(([goal, ids, note]) => `<li><b>${esc(goal)}</b><span>${ids.map((id) => `<a href="#${id}">${esc(gname(id))}</a>`).join(' · ')}${note ? ` <small>${esc(note)}</small>` : ''}</span></li>`).join('') + '</ul>');
     parts.push(`    <h2>${esc(p.gamesTitle)}</h2>`);
-    parts.push('    <div class="games">' + GAMES.map((g, i) => `<article class="game" id="${g.id}"><span class="no">${String(i + 1).padStart(2, '0')}</span><h3>${esc(g[lang].name)}</h3><p>${md(g[lang].what)}</p><p class="skills"><b>${esc(p.skillsLabel)}</b> ${esc(g[lang].skills)}</p></article>`).join('') + '</div>');
+    parts.push('    <div class="games">' + GAMES.map((g, i) => `<article class="game" id="${g.id}">${gameArt(g.id)}<span class="no">${String(i + 1).padStart(2, '0')}</span><h3>${esc(g[lang].name)}</h3><p>${md(g[lang].what)}</p><p class="skills"><b>${esc(p.skillsLabel)}</b> ${esc(g[lang].skills)}</p></article>`).join('') + '</div>');
   }
   for (const [h, ...blocks] of p.sections || []) parts.push(`    <h2>${esc(h)}</h2>`, ...blocks.map((b) => `    ${block(b)}`));
   if (p.faq) parts.push('    <div class="faq">' + p.faq.map(([q, a]) => `<section class="qa"><h2>${esc(q)}</h2><p>${md(answer(lang, a))}</p></section>`).join('') + '</div>');

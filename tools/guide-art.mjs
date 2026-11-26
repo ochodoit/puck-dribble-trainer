@@ -99,4 +99,66 @@ export function puckSwatch({ floor, puck, ok }) {
   return `<svg class="art art-swatch" viewBox="0 0 120 80" aria-hidden="true"><rect x="2" y="2" width="116" height="76" rx="12" fill="${fl}" stroke="${INK}" stroke-width="1.5"/>${p}${badge}</svg>`;
 }
 
+/**
+ * 게임 소개 카드의 설명 그림 (160×96, 글자 없음 — 번호만. 카드 글이 같은 내용을 말하므로 화면 읽기에서는 숨김). 잉크 원 = 내 퍽, 빨강 = 피할 퍽·목표·구역, 노랑 = 코인.
+ * 게임 화면과 같은 약속이라 그림만 보고도 무엇을 하는지 알 수 있게
+ */
+const YELLOW = '#FFC72C';
+const me = (x, y) => `<circle cx="${x}" cy="${y}" r="6" fill="${INK}"/>`;
+const dot = (x, y, r = 5.5) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${RED}"/>`;
+const thin = `fill="none" stroke="${INK}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"`;
+const dash = (c = RED) => `fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="3 4"`;
+const arrows = (x1, x2, y) => `<path d="M${x1} ${y}h${x2 - x1}M${x1 + 6} ${y - 4}l-6 4 6 4M${x2 - 6} ${y - 4}l6 4-6 4" ${thin}/>`;
+const GAME_ART = {
+  arcade: [
+    dot(40, 20), dot(104, 30, 6.5), dot(134, 14), dot(64, 44, 5),
+    `<path d="M40 6v6M104 14v8M134 2v4M64 32v4" ${dash()}/>`,
+    `<circle cx="118" cy="58" r="5" fill="${YELLOW}" stroke="${INK}" stroke-width="1.2"/>`,
+    `<path d="M10 64h140" stroke="${INK}" stroke-width="1" stroke-opacity="0.35"/>`,
+    me(80, 78), arrows(54, 106, 78),
+  ],
+  // 위·아래·왼쪽·오른쪽에서 가운데(나)로 날아오는 퍽. 점선은 퍽이 지나온 자리(퍽 뒤쪽)
+  obstacle: [
+    me(80, 48),
+    dot(44, 44), `<path d="M6 44h28" ${dash()}/>`,
+    dot(116, 54), `<path d="M154 54h-28" ${dash()}/>`,
+    dot(88, 20), `<path d="M88 2v8" ${dash()}/>`,
+    dot(72, 76), `<path d="M72 94v-8" ${dash()}/>`,
+  ],
+  wide: [
+    `<rect x="6" y="22" width="22" height="52" rx="5" fill="${RED}" fill-opacity="0.14" stroke="${RED}" stroke-width="1.5"/>`,
+    `<rect x="132" y="22" width="22" height="52" rx="5" fill="${RED}" fill-opacity="0.14" stroke="${RED}" stroke-width="1.5"/>`,
+    // 좌우로만 왔다 갔다: 양쪽 빨간 구역 사이 가로 왕복
+    `<path d="M34 48h92" ${dash(INK)}/><path d="M40 43l-6 5 6 5M120 43l6 5-6 5" ${thin}/>`,
+    me(80, 48),
+  ],
+  figure8: [
+    `<path d="M80 48C66 22 30 24 30 48s36 26 50 0 50-26 50 0-36 26-50 0" ${dash()}/>`,
+    `<path d="M52 56l-6 0 6-16 6 16z" fill="${INK}"/><path d="M114 56l-6 0 6-16 6 16z" fill="${INK}"/>`,
+    `<path d="M80 34v-8M80 62v8" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>`,
+    me(31, 50),
+  ],
+  // 그림에서는 박스를 3시 → 12시 → 9시 방향에 둔다
+  quick: [
+    `<circle cx="80" cy="52" r="3" fill="none" stroke="${INK}" stroke-width="1.5"/>`,
+    `<rect x="112" y="40" width="38" height="24" rx="4" fill="${RED}" fill-opacity="0.12" stroke="${RED}" stroke-width="1.6"/>`,
+    `<rect x="61" y="6" width="38" height="24" rx="4" ${thin} stroke-dasharray="3 3"/>`,
+    `<rect x="10" y="40" width="38" height="24" rx="4" ${thin} stroke-dasharray="3 3"/>`,
+    me(131, 52), arrows(117, 145, 52).replace(/stroke-width="1.5"/, 'stroke-width="1.3"'),
+    `<text x="131" y="34" class="t-red" text-anchor="middle">1</text><text x="108" y="23" class="t-num" text-anchor="middle">2</text><text x="29" y="34" class="t-num" text-anchor="middle">3</text>`,
+  ],
+  reaction: [
+    `<circle cx="118" cy="30" r="15" fill="none" stroke="${RED}" stroke-width="1.6"/><circle cx="118" cy="30" r="8" fill="none" stroke="${RED}" stroke-width="1.6"/>`, dot(118, 30, 3),
+    `<path d="M118 8v-5M140 30h5M134 14l4-4M102 14l-4-4" ${thin}/>`,
+    `<path d="M50 70C70 64 92 52 104 40" ${dash(INK)}/><path d="M96 38l9 1-2 9" ${thin}/>`,
+    me(44, 72),
+  ],
+  free: [
+    `<path d="M32 70L62 24L110 30L132 70L32 70" ${dash()}/>`,
+    ...[[32, 70, 1], [62, 24, 2], [110, 30, 3], [132, 70, 4]].map(([x, y, n]) => `<circle cx="${x}" cy="${y}" r="9" fill="${n === 1 ? RED : PAPER}" stroke="${n === 1 ? RED : INK}" stroke-width="1.5"/><text x="${x}" y="${y + 4}" class="t-num${n === 1 ? ' t-inv' : ''}" text-anchor="middle">${n}</text>`),
+    me(80, 70),
+  ],
+};
+export const gameArt = (id) => `<svg class="art art-game" viewBox="0 0 160 96" aria-hidden="true">${(GAME_ART[id] || []).join('')}</svg>`;
+
 export const PALETTE = { INK, RED, PAPER, PAPER2, MUTE };

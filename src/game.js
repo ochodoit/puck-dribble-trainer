@@ -6,18 +6,18 @@ import { C } from './theme.js';
 // timed: 제한 시간(1·3·5분 선택) 동안의 점수로 겨루는 모드. 목숨 없음 — 충돌은 감점.
 export const MODES = [
   { id: 'arcade', name: '아케이드', en: 'Arcade', duration: 0, timed: true, levels: true,
-    desc: '내려오는 퍽을 좌우로 쳐서 피하고 coin을 모으세요.' },
+    desc: '내려오는 퍽을 좌우로 쳐서 피하고 코인을 모으세요.' },
   { id: 'obstacle', name: '퍽 피하기', en: 'Dodge', duration: 0, timed: true, levels: true,
     desc: '네 변에서 날아오는 빨간 퍽을 피하세요.' },
-  { id: 'wide', name: '와이드 드리블', en: 'Wide', duration: 0, timed: true, stages: 3,
+  { id: 'wide', name: '와이드 드리블', en: 'Wide Dribble', duration: 0, timed: true, stages: 3,
     desc: '좌우 끝까지 넓게, 3가지 훈련을 이어서.' },
   { id: 'figure8', name: '8자 드리블', en: 'Figure 8', duration: 45,
     desc: '두 콘 사이를 8자로 돌며 게이트 통과.' },
-  { id: 'quick', name: '퀵 핸즈', en: 'Quick hands', duration: 0, timed: true, stages: 3,
+  { id: 'quick', name: '퀵 핸즈', en: 'Quick Hands', duration: 0, timed: true, stages: 3,
     desc: '3시·6시·9시 방향 박스에서 차례로 빠르게 좌우로.' },
-  { id: 'reaction', name: '반응 타겟', en: 'Reaction', duration: 30,
+  { id: 'reaction', name: '반응 타겟', en: 'Reaction Target', duration: 30,
     desc: '나타나는 타겟으로 최대한 빨리 이동.' },
-  { id: 'free', name: '자유 연습', en: 'Free · course', duration: 0,
+  { id: 'free', name: '자유 연습', en: 'Free Practice', duration: 0,
     desc: '번호를 놓아 나만의 코스로 연습.' },
 ];
 
@@ -599,7 +599,7 @@ export class Game {
               this.courseIdx = 0;
               const lt = this.elapsed - this.lapStart;
               this.stats.laps++; this.stats.lapTimes.push(lt);
-              this._pop(tg.x, tg.y * A - 0.07, `Cycle ${this.stats.laps} · ${lt.toFixed(1)}s`, C.red, 'script');
+              this._pop(tg.x, tg.y * A - 0.07, `사이클 ${this.stats.laps} · ${lt.toFixed(1)}s`, C.red, 'script');
               this.sfx?.target();
               this.lapStart = this.elapsed;
               if (this.stats.laps >= (this.course.cycles || 10)) { this.score = this.stats.laps; this.stop('done'); return; } // 목표 사이클 달성

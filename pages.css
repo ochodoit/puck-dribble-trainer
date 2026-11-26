@@ -38,8 +38,19 @@ ul, ol { padding-left: 1.3em; }
 li { margin: 6px 0; }
 b { font-weight: 700; }
 
+/* 게임 페이지: 목표별로 고르기 (목표 → 게임 링크) */
+.pick { list-style: none; padding: 0; margin: 10px 0 0; border-top: 1.5px solid var(--ink); }
+.pick li { display: grid; grid-template-columns: minmax(150px, 15em) 1fr; gap: 2px 16px; margin: 0; padding: 10px 2px; border-bottom: 1px solid rgba(22, 22, 22, 0.2); }
+.pick b { font-weight: 700; }
+.pick a { font-weight: 600; text-decoration-color: var(--red); }
+.pick small { color: var(--ink-soft); font-size: 13.5px; margin-left: 4px; }
+@media (max-width: 520px) { .pick li { grid-template-columns: 1fr; } }
+
 .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 12px; }
-.game { border: 1.5px solid var(--ink); border-radius: 18px; padding: 16px 18px 12px; background: rgba(255, 255, 255, 0.35); }
+.game { border: 1.5px solid var(--ink); border-radius: 18px; padding: 16px 18px 12px; background: rgba(255, 255, 255, 0.35); scroll-margin-top: 16px; }
+/* 게임별 설명 그림: 카드 위쪽 종이색 바닥 위에 */
+.game .art-game { max-height: 128px; margin: -4px 0 10px; background: var(--paper); border: 1px solid rgba(22, 22, 22, 0.16); border-radius: 12px; }
+.game:target { border-color: var(--red); box-shadow: 0 0 0 2px var(--red); }
 .game .no { font-family: var(--display); font-weight: 900; color: var(--red); font-size: 15px; }
 .game p { margin: 6px 0; font-size: 15.5px; }
 .game .skills { font-size: 14px; color: var(--ink-soft); }
@@ -56,6 +67,18 @@ b { font-weight: 700; }
 .table-wrap th, .table-wrap td { text-align: left; vertical-align: top; padding: 9px 12px; border-top: 1px solid rgba(22, 22, 22, 0.18); word-break: keep-all; }
 .table-wrap thead th { border-top: 0; font-size: 13px; font-weight: 700; background: rgba(22, 22, 22, 0.05); }
 .table-wrap tbody th { font-weight: 700; white-space: nowrap; }
+/* 좁은 화면: 옆으로 밀지 않고 줄마다 카드로 쌓는다. 칸 앞에 머리글(data-label) */
+@media (max-width: 640px) {
+  .table-wrap { overflow: visible; border: 0; background: none; }
+  .table-wrap table { min-width: 0; display: flex; flex-direction: column; }
+  .table-wrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .table-wrap tbody, .table-wrap tr, .table-wrap th, .table-wrap td { display: block; }
+  .table-wrap tr { border: 1.5px solid var(--ink); border-radius: 14px; background: rgba(255, 255, 255, 0.35); margin: 0 0 10px; padding: 4px 0 6px; }
+  .table-wrap tbody th { border-top: 0; font-size: 16px; padding: 10px 14px 4px; white-space: normal; }
+  .table-wrap td { border-top: 0; padding: 3px 14px; display: grid; grid-template-columns: 7.5em 1fr; gap: 10px; }
+  .table-wrap td::before { content: attr(data-label); font-size: 12.5px; font-weight: 700; color: var(--ink-soft); padding-top: 1px; }
+  .table-wrap caption { display: block; order: 2; padding: 0 2px 8px; }
+}
 
 .cta { margin: 34px 0 8px; }
 .btn { display: inline-block; background: var(--red); color: var(--paper); text-decoration: none; font-weight: 600; border-radius: 999px; padding: 12px 26px; border: 1.5px solid var(--red); }
@@ -64,6 +87,7 @@ b { font-weight: 700; }
 .foot { max-width: 980px; margin: 0 auto; padding: 18px 20px 30px; border-top: 1.5px solid var(--ink); font-size: 12.5px; color: var(--ink-soft); }
 .foot nav { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 6px; font-size: 13.5px; }
 .foot p { margin: 4px 0; }
+.foot .about { color: var(--ink); max-width: 62em; }
 
 /* =====================================================================
    사용 가이드 — 디자인된 한 장 안내 (카드·그림 + 따라다니는 목차)
@@ -125,6 +149,7 @@ html { scroll-behavior: smooth; }
 .art .t-small { font-size: 11px; fill: var(--ink-soft); }
 .art .t-red { font-weight: 700; font-size: 12px; fill: var(--red); }
 .art .t-num { font-weight: 600; font-size: 12.5px; }
+.art .t-inv { fill: var(--paper); }
 .ico { width: 40px; height: 40px; flex: none; }
 
 /* 01 한눈에 보기: 4단계 + 꼭 지킬 3가지 */

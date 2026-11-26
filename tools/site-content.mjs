@@ -8,7 +8,7 @@ export const SITE = 'https://puck-trainer.com';
  * 페이지마다 내용을 마지막으로 크게 바꾼 날 (YYYY-MM-DD). sitemap.xml 의 <lastmod>, rss.xml 의 <pubDate> 로 나간다.
  * 네이버·구글·Bing 이 바뀐 페이지를 먼저 다시 가져가게 하는 값이라, 페이지 내용을 바꾸면 이 날짜도 고친다. '' = 첫 화면
  */
-export const UPDATED = { '': '2026-11-26', guide: '2026-11-25', games: '2026-11-26', faq: '2026-11-26', compare: '2026-11-26' };
+export const UPDATED = { '': '2026-11-26', guide: '2026-11-26', games: '2026-11-26', faq: '2026-11-26', compare: '2026-11-26' };
 
 /** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구·Daum 웹마스터도구·네이버 서치어드바이저에서 받은 값 */
 export const VERIFY = {
@@ -25,7 +25,8 @@ export const VERIFY = {
 /** 공식 인스타그램 (운영자 화면의 게스트 안내에 설정된 계정) */
 export const SAME_AS = ['https://www.instagram.com/puck_trainer/'];
 
-/** 한 줄 정의 — 첫 화면·안내 페이지·구조화 데이터·llms.txt 에 똑같이 쓴다 (AI 검색이 인용하기 쉽게) */
+/** 한 줄 정의 — 첫 화면·안내 페이지 아래(바닥글)·구조화 데이터·llms.txt 에 똑같이 쓴다 (AI 검색이 인용하기 쉽게).
+ *  안내 페이지 맨 위에는 쓰지 않는다: 페이지마다 같은 소개로 시작하면 찍어 낸 글처럼 보이므로, 도입(lead)은 그 페이지에 온 이유에 바로 답한다 */
 export const DEF = {
   ko: '퍽 드리블 트레이너는 휴대폰·아이패드·노트북 카메라로 퍽과 스틱을 인식해, 집에서 아이스하키 스틱핸들링을 훈련하는 무료 웹 게임입니다. 앱 설치 없이 브라우저에서 바로 시작합니다.',
   en: 'Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.',
@@ -50,7 +51,7 @@ export const HOME = {
 /** 7가지 게임 (게임 페이지·구조화 데이터·llms.txt) */
 export const GAMES = [
   { id: 'arcade',
-    ko: { name: '아케이드', what: '내려오는 빨간 퍽을 좌우로 피하며 coin을 모읍니다. 방향을 바꿀 때마다(터치) 점수가 올라요. 1·3·5분.', skills: '좌우 스틱핸들링 · 퍽을 다루면서 주변 보기 · 순간 판단' },
+    ko: { name: '아케이드', what: '내려오는 빨간 퍽을 좌우로 피하며 코인을 모읍니다. 방향을 바꿀 때마다(터치) 점수가 올라요. 1·3·5분.', skills: '좌우 스틱핸들링 · 퍽을 다루면서 주변 보기 · 순간 판단' },
     en: { name: 'Arcade', what: 'Dodge the falling red pucks side to side and collect coins. Every change of direction (a touch) scores. 1, 3 or 5 minutes.', skills: 'Side-to-side stickhandling · seeing the play while handling the puck · quick decisions' } },
   { id: 'obstacle',
     ko: { name: '퍽 피하기', what: '네 변에서 날아오는 빨간 퍽을 피합니다. 시간이 갈수록 퍽이 늘어나요.', skills: '360° 퍽 컨트롤 · 급정지와 방향 전환 · 위험 읽기' },
@@ -82,7 +83,7 @@ export const PAGES = [
       title: '집에서 하는 하키 스틱핸들링 훈련 가이드 | 퍽 드리블 트레이너',
       description: '휴대폰 카메라와 퍽 하나로 집에서 아이스하키 스틱핸들링 훈련하기. 카메라 높이, 퍽 색, 큰 화면 연결, 처음 세팅, 15분 루틴까지.',
       h1: '집에서 하는 하키 스틱핸들링 훈련 가이드',
-      lead: '카메라 위치와 퍽 색만 잘 맞추면 대부분 바로 잘 잡힙니다.',
+      lead: '퍽이 잘 안 잡힌다면 거의 언제나 카메라 높이나 퍽 색 문제예요. 이 두 가지를 먼저 맞추고, 5분 세팅과 15분 루틴으로 이어 가세요.',
       howto: { name: '퍽 드리블 트레이너 처음 세팅하기', steps: ['기기 세우기', '카메라 시작', '영역 맞추기', '퍽 등록', '움직여 보기', '게임 시작'] },
       guide: {
         toc: '목차',
@@ -182,7 +183,7 @@ export const PAGES = [
       title: 'How to Train Hockey Stickhandling at Home | Puck Dribble Trainer',
       description: 'Practice hockey stickhandling at home with a phone camera and a puck: camera height, puck color, big screens, first setup and a 15-minute routine.',
       h1: 'How to train hockey stickhandling at home',
-      lead: 'Get the camera position and the puck color right and tracking usually just works.',
+      lead: 'If the puck is not tracked well, it is almost always the camera height or the puck color. Fix those two first, then follow the 5-minute setup and the 15-minute routine.',
       howto: { name: 'Set up Puck Dribble Trainer', steps: ['Stand the device up', 'Start the camera', 'Fit the area', 'Register the puck', 'Test move', 'Start a game'] },
       guide: {
         toc: 'Contents',
@@ -285,7 +286,15 @@ export const PAGES = [
       title: '7가지 하키 스틱핸들링 게임 — 무엇을 훈련하나 | 퍽 드리블 트레이너',
       description: '아케이드·퍽 피하기·와이드 드리블·8자 드리블·퀵 핸즈·반응 타겟·자유 연습. 7가지 게임이 키우는 스틱핸들링 기술을 소개합니다.',
       h1: '7가지 스틱핸들링 게임',
-      lead: '모든 게임은 카메라가 실제 퍽(또는 공)을 따라가며 판정합니다. 게임마다 키우는 스틱핸들링 기술이 다릅니다.',
+      lead: '무엇부터 할지 고민된다면 바로 아래 ‘목표별로 고르기’를 보세요. 모든 게임은 카메라가 진짜 퍽(또는 공)을 따라가며 판정하고, 게임마다 키우는 기술이 다릅니다.',
+      pickTitle: '목표별로 고르기',
+      pick: [
+        ['처음이라면', ['arcade'], '쉬움 · 1분부터'],
+        ['손을 더 빠르게', ['quick', 'wide']],
+        ['방향 전환과 퍽 보호', ['figure8', 'reaction']],
+        ['고개 들고 주변 보기', ['obstacle'], '익숙해지면 투명 모드'],
+        ['코치가 준 드릴 그대로', ['free']],
+      ],
       gamesTitle: '게임별 훈련 효과',
       skillsLabel: '키우는 기술',
       sections: [
@@ -297,7 +306,15 @@ export const PAGES = [
       title: '7 Stickhandling Games and What They Train | Puck Dribble Trainer',
       description: 'Arcade, Dodge, Wide Dribble, Figure 8, Quick Hands, Reaction Target and Free Practice: the stickhandling skill each of the 7 games trains.',
       h1: 'The 7 stickhandling games',
-      lead: 'In every game the camera follows your real puck (or ball). Each game trains a different stickhandling skill.',
+      lead: 'Not sure where to start? See “Pick by goal” just below. In every game the camera follows your real puck (or ball), and each game trains a different skill.',
+      pickTitle: 'Pick by goal',
+      pick: [
+        ['New to it', ['arcade'], 'Easy · start with 1 minute'],
+        ['Faster hands', ['quick', 'wide']],
+        ['Turns and protecting the puck', ['figure8', 'reaction']],
+        ['Head up, seeing the play', ['obstacle'], 'then try Invisible mode'],
+        ['A coach’s drill, exactly', ['free']],
+      ],
       gamesTitle: 'What each game trains',
       skillsLabel: 'Skills',
       sections: [
@@ -312,14 +329,14 @@ export const PAGES = [
       title: '자주 묻는 질문 | 퍽 드리블 트레이너',
       description: '퍽 드리블 트레이너는 무료인가요? 앱 설치가 필요한가요? 카메라 영상은 저장되나요? 기기·바닥·나이·랭킹·가입 코드에 대한 답을 모았습니다.',
       h1: '자주 묻는 질문',
-      lead: '퍽 드리블 트레이너를 처음 쓰는 분들이 많이 묻는 질문입니다.',
+      lead: '시작하기 전에 많이 묻는 질문에 짧게 답했습니다. 무료인지, 설치가 필요한지, 카메라 영상이 저장되는지는 맨 위에 있어요. 세팅 방법은 [사용 가이드](/guide/)에서 그림과 함께 보세요.',
       faq: [
         ['퍽 드리블 트레이너는 무엇인가요?', '@DEF'],
         ['무료인가요?', '네, 누구나 무료로 플레이합니다. 랭킹 등록과 커뮤니티 글쓰기만 정회원(가입 코드로 가입)이 할 수 있어요.'],
         ['앱을 설치해야 하나요?', '아니요. Safari·Chrome에서 puck-trainer.com을 열면 바로 됩니다. 첫 화면의 **바로가기 만들기**를 누르면 바탕화면이나 홈 화면에 아이콘이 생겨 앱처럼 열리고, 한 번 연 뒤에는 인터넷이 끊겨도 게임이 열려요(로그인·랭킹은 인터넷이 필요해요).'],
+        ['카메라 영상이 저장되거나 어딘가로 보내지나요?', '아니요. 영상은 기기 안에서 퍽 위치를 찾는 데만 쓰고, 저장하거나 서버로 보내지 않습니다. 남는 건 점수·기록·설정뿐이에요.'],
         ['어떤 기기에서 할 수 있나요?', '카메라가 있는 휴대폰(아이폰·안드로이드), 아이패드·태블릿, 노트북이면 됩니다. 바닥이 보이게 거치대에 세워 두세요.'],
         ['카메라 없이 해 볼 수 있나요?', '네. 첫 화면의 **카메라 없이 체험하기**를 누르면 마우스나 손가락이 퍽이 됩니다. 체험 기록은 저장되지 않고 랭킹에도 오르지 않아요. 마음에 들면 카메라와 진짜 퍽으로 해 보세요.'],
-        ['카메라 영상이 저장되거나 어딘가로 보내지나요?', '아니요. 영상은 기기 안에서 퍽 위치를 찾는 데만 쓰고, 저장하거나 서버로 보내지 않습니다. 남는 건 점수·기록·설정뿐이에요.'],
         ['퍽이 없어도 되나요?', '네. 공·병뚜껑처럼 바닥과 색이 다른 물건을 가운데 원에 3초 두면 퍽으로 익힙니다.'],
         ['어떤 바닥에서 하면 좋나요?', '흰 연습판이나 밝은 단색 매트가 가장 잘 됩니다. 다른 바닥도 되지만, 퍽 색이 바닥과 확실히 달라야 해요.'],
         ['카메라는 어디에, 얼마나 높이 두나요?', '**1~1.5m 높이**(최소 80cm)에서 바닥을 비스듬히 내려다보게 두세요. 바닥에 내려놓으면 너무 낮아 먼 쪽에서 퍽을 놓칩니다. 카메라를 옮기면 영역을 다시 맞추세요.'],
@@ -344,14 +361,14 @@ export const PAGES = [
       title: 'FAQ | Puck Dribble Trainer',
       description: 'Is Puck Dribble Trainer free? Do I need to install an app? Is the camera video saved? Answers about devices, floors, ages, leaderboards and invite codes.',
       h1: 'Frequently asked questions',
-      lead: 'The questions new players ask most about Puck Dribble Trainer.',
+      lead: 'Short answers to what people ask before they start. Whether it is free, whether you need to install anything and whether the camera video is saved are at the top. For setup, see the [guide](/en/guide/) with pictures.',
       faq: [
         ['What is Puck Dribble Trainer?', '@DEF'],
         ['Is it free?', 'Yes, anyone can play for free. Only leaderboards and community posts are for members (who join with an invite code).'],
         ['Do I need to install an app?', 'No. Open puck-trainer.com in Safari or Chrome and play. Press **Add a shortcut** on the first screen to put an icon on your desktop or home screen: it opens like an app, and once opened it works offline too (logging in and leaderboards need the internet).'],
+        ['Is the camera video saved or sent anywhere?', 'No. The video is only used on your device to find the puck. It is never saved or uploaded; only scores, records and settings are kept.'],
         ['Which devices does it work on?', 'Any phone (iPhone or Android), iPad, tablet or laptop with a camera. Put it on a stand so it can see the floor.'],
         ['Can I try it without a camera?', 'Yes. Press **Try it without a camera** on the first screen and your mouse or finger becomes the puck. Trial scores are not saved or ranked. If you like it, play with your camera and a real puck.'],
-        ['Is the camera video saved or sent anywhere?', 'No. The video is only used on your device to find the puck. It is never saved or uploaded; only scores, records and settings are kept.'],
         ['Do I need a real puck?', 'No. Hold a ball, a bottle cap or anything that stands out from the floor in the center circle for 3 seconds, and it becomes your puck.'],
         ['What floor works best?', 'A white shooting pad or a plain, light mat works best. Other floors work too, as long as the puck color clearly differs from the floor.'],
         ['Where and how high should the camera be?', 'Put it **1–1.5 m high** (at least 80 cm), looking down at the floor at an angle. Lying on the floor it is too low, and the puck gets lost on the far side. If you move the camera, fit the area again.'],
@@ -381,9 +398,18 @@ export const PAGES = [
       title: '카메라 하키 스틱핸들링 앱·게임 비교 (2026) | 퍽 드리블 트레이너',
       description: '카메라로 진짜 퍽을 따라가는 스틱핸들링 앱·게임 9가지를 설치 여부·기기·가격·한국어 지원으로 비교했습니다. Stick Control, Hockey Home, Quick Hands Hockey, Hotdangle 등.',
       h1: '카메라 스틱핸들링 앱·게임 비교',
-      lead: '카메라로 진짜 퍽(또는 공)을 따라가며 집에서 스틱핸들링을 연습하는 앱·게임을 설치 여부, 기기, 가격, 한국어 지원으로 비교했습니다. 2026년 11월 26일, 각 서비스 공식 페이지와 미국 앱스토어·Steam 기준입니다.',
+      lead: '집에서 카메라로 스틱핸들링을 연습할 앱을 고르고 있다면, 가진 기기와 설치할 수 있는지부터 보면 금방 좁혀집니다. 결론을 먼저 적고, 아래에 9가지 앱·게임의 세부 비교를 붙였습니다.',
       sections: [
+        ['결론부터',
+          ['ul', [
+            '**설치 없이 휴대폰·아이패드·노트북 브라우저에서** — 퍽 드리블 트레이너. 브라우저에서 되는 다른 것은 Puckcam Arena(개발 중)와 SuperSticks PRO(컴퓨터 + TV)입니다.',
+            '**한국어 화면이 필요하면** — 한국어를 지원한다고 밝힌 것은 퍽 드리블 트레이너뿐입니다(두 곳은 언어 표기 없음).',
+            '**휴대폰 앱으로 쓰고 싶다면** — Stick Control·Quick Hands Hockey(아이폰·안드로이드), Hockey Home·PuckPro(아이폰). 모두 한국어는 지원하지 않습니다.',
+            '**Windows PC + USB 웹캠으로 Steam 게임처럼** — Hotdangle.',
+            '**애플 기기 2대로 비디오 게임처럼** — Dangleverse.',
+          ]]],
         ['한눈에 비교',
+          '2026년 11월 26일, 각 서비스 공식 페이지와 미국 앱스토어·Steam에서 확인한 내용입니다.',
           ['table', {
             head: ['서비스', '어디서 실행', '카메라·추적', '가격 (무료 범위)', '한국어'],
             rows: [
@@ -408,12 +434,6 @@ export const PAGES = [
             '**영상은 기기 밖으로 나가지 않습니다.** 카메라 영상은 퍽 위치를 찾는 데만 쓰고 저장하거나 보내지 않습니다.',
             '**큰 화면으로 볼 수 있습니다.** 휴대폰을 카메라로 쓰고(QR 연결) 노트북·TV로 보거나, 노트북 + 웹캠을 TV에 연결해 고개를 들고 연습합니다.',
           ]]],
-        ['다른 앱이 더 맞는 경우',
-          ['ul', [
-            '휴대폰 **앱**으로 쓰고 싶고 영어 화면이 괜찮다면 Stick Control·Quick Hands Hockey·PuckPro도 좋은 선택입니다.',
-            '**Windows PC + USB 웹캠**으로 Steam 게임처럼 하고 싶다면 Hotdangle이 맞습니다.',
-            '**애플 기기 2대**로 비디오 게임처럼 즐기고 싶다면 Dangleverse를 보세요.',
-          ]]],
         ['고르는 법',
           ['ol', [
             '**가진 기기** — 휴대폰만 있는지, 노트북·아이패드·Windows PC가 있는지.',
@@ -429,9 +449,18 @@ export const PAGES = [
       title: 'Camera Stickhandling Apps Compared (2026) | Puck Dribble Trainer',
       description: 'Nine apps and games that track a real puck with a camera for hockey stickhandling at home, compared by install, devices, price and languages: Stick Control, Hockey Home, Hotdangle and more.',
       h1: 'Camera stickhandling apps compared',
-      lead: 'Apps and games that follow a real puck (or ball) with a camera so you can practice stickhandling at home, compared by install, devices, price and languages. Checked on 26 November 2026 against each official page and the US App Store and Steam.',
+      lead: 'Choosing an app to practice stickhandling at home with a camera? Start with the devices you have and whether you can install apps: that narrows it down fast. The short answer comes first, then a detailed look at nine apps and games.',
       sections: [
+        ['The short answer',
+          ['ul', [
+            '**Nothing to install, in the browser on a phone, iPad or laptop**: Puck Dribble Trainer. Others that run in a browser are Puckcam Arena (in development) and SuperSticks PRO (computer + TV).',
+            '**Need Korean on screen?** Puck Dribble Trainer is the only one that states Korean support (two do not list languages).',
+            '**Want a phone app?** Stick Control and Quick Hands Hockey (iPhone and Android), Hockey Home and PuckPro (iPhone).',
+            '**Windows PC + USB webcam, like a Steam game**: Hotdangle.',
+            '**A video-game feel with two Apple devices**: Dangleverse.',
+          ]]],
         ['At a glance',
+          'Checked on 26 November 2026 against each official page and the US App Store and Steam.',
           ['table', {
             head: ['Product', 'Runs on', 'Camera and tracking', 'Price (what is free)', 'Korean'],
             rows: [
@@ -455,12 +484,6 @@ export const PAGES = [
             '**No real puck needed.** Hold a ball or bottle cap that stands out from the floor in the center circle for 3 seconds and it becomes your puck. No tape needed.',
             '**The video never leaves your device.** The camera is only used to find the puck; nothing is saved or uploaded.',
             '**Big screens.** Use a phone as the camera (QR connect) and watch on a laptop or TV, or plug a laptop + webcam into a TV and keep your head up.',
-          ]]],
-        ['When another app may suit you better',
-          ['ul', [
-            'If you want a phone **app** and English is fine, Stick Control, Quick Hands Hockey and PuckPro are good choices.',
-            'For a Steam game on a **Windows PC with a USB webcam**, try Hotdangle.',
-            'For a video-game feel with **two Apple devices**, look at Dangleverse.',
           ]]],
         ['How to choose',
           ['ol', [

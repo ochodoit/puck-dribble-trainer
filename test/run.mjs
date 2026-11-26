@@ -278,7 +278,7 @@ const skipSetup = async (page, touch = false) => {
   if (!(nextIs3 === '3' && lap.reached === 2 && lap.laps === 1)) failed = true;
   await page.waitForTimeout(250);
   const hudPlay = { score: (await page.textContent('#hud-score')).trim(), info: (await page.textContent('#hud-lives')).trim(), label: (await page.textContent('.hud-right .hud-label')).trim() };
-  const hudOk = hudPlay.score === '1/10' && /평균 \d+\.\ds · 최고 \d+\.\ds/.test(hudPlay.info) && hudPlay.label === 'Cycle';
+  const hudOk = hudPlay.score === '1/10' && /평균 \d+\.\ds · 최고 \d+\.\ds/.test(hudPlay.info) && hudPlay.label === '사이클';
   console.log(`${hudOk ? 'PASS' : 'FAIL'} course HUD shows cycle progress, average and fastest (${JSON.stringify(hudPlay)})`);
   if (!hudOk) failed = true;
   await page.screenshot({ path: join(ROOT, 'test', 'screenshot-course.png') });
@@ -861,7 +861,7 @@ const skipSetup = async (page, touch = false) => {
   await page.click('#btn-start');
   await page.waitForSelector('#panel-result:not(.hidden)');
   const resultText = await page.textContent('#result-body');
-  const reportOk = resultText.includes('터치') && resultText.includes('Coin') && resultText.includes('충돌') && !resultText.includes('Quick hands');
+  const reportOk = resultText.includes('터치') && resultText.includes('코인') && resultText.includes('충돌') && !resultText.includes('Quick hands');
   console.log(`${reportOk ? 'PASS' : 'FAIL'} arcade result report (touches, coins, hits; no bonus rows)`);
   if (!reportOk) failed = true;
   // 게임 종료 후 선택. 중지 버튼으로 끝낸 결과는 퍽으로 고르지 않는다 (버튼만 — 멈추자마자 다시 시작되는 일 방지)
@@ -1425,7 +1425,7 @@ const skipSetup = async (page, touch = false) => {
   await page.tap('#btn-start'); await tick(300);
   await page.evaluate(() => window.__puckTrainer.game.stop('time'));
   await page.waitForSelector('#panel-result:not(.hidden)');
-  const res = await page.evaluate(() => ({ key: window.__puckTrainer.app.lastResult.rankKey, level: window.__puckTrainer.app.lastResult.level, title: document.querySelector('#result-title').textContent, best: /New best/.test(document.querySelector('#result-body').textContent) }));
+  const res = await page.evaluate(() => ({ key: window.__puckTrainer.app.lastResult.rankKey, level: window.__puckTrainer.app.lastResult.level, title: document.querySelector('#result-title').textContent, best: /최고 기록!/.test(document.querySelector('#result-body').textContent) }));
   ok(lv.set === 'hard' && lv.game === 'hard' && lv.active === 'hard' && lv.saved === 'hard' && /어려움/.test(hudMode) && res.key === 'arcade@60-hard' && res.level === 'hard' && /어려움/.test(res.title) && !res.best,
     'difficulty picked in the mode window: saved, shown in HUD and result, ranked separately (arcade@60-hard); a 0 score is not a new best', JSON.stringify({ lv, hudMode, res }));
   await page.tap('[data-close="panel-result"]');

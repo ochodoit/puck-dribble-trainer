@@ -3,6 +3,7 @@
 import { attendanceSummary, monthGrid, dayKey, keyInfo, sparkPoints, hoursMinutes } from './activity.js';
 import { renderAbility } from './ability-ui.js';
 import { passName } from './account.js';
+import { postTag } from './community-ui.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
@@ -217,7 +218,7 @@ export function initMe(deps) {
     try { const store = await app.communityStore; posts = store ? await store.list('all') : []; } catch { box.innerHTML = '<p class="muted">커뮤니티를 불러오지 못했습니다</p>'; return; }
     const mine = posts.filter((p) => p.uid === u.id);
     const tried = posts.filter((p) => p.course && p.uid !== u.id && (p.records || []).some((r) => r.uid === u.id));
-    const tag = (p) => (p.type === 'course' ? 'Course' : p.type === 'beat' ? 'New record' : 'Record');
+    const tag = postTag;
     const mineRow = (p) => {
       const info = [p.at ? ymd(p.at) : '', `응원 ${(p.cheers || []).length}`].filter(Boolean).join(' · ');
       return `<li><span class="tag">${tag(p)}</span> <b data-ugc>${esc(p.title)}</b> <span class="muted">${info}</span></li>`;

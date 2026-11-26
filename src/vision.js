@@ -12,11 +12,19 @@ const SPLIT_MAX_FRAMES = 45;   // 같은 색 물체에 붙은 퍽을 떼어 내�
 // 이보다 가늘고 긴 조각(짧은 축/긴 축)은 '애매한 조각': 퍽과 같은 색 스틱 샤프트 토막일 수 있다.
 // 퍽은 비스듬히 봐도 옆면(두께)이 보여 0.5 아래로 잘 안 내려가고, 샤프트 토막은 보통 0.4 아래
 const THIN_ELONG = 0.4;
+// 퍽·스틱 색 거리(colorDist)가 이보다 멀면, 두 색에 다 맞는 픽셀은 더 가까운 쪽 하나로만 본다
+// (진한 녹색 퍽과 검정 스틱처럼 어두운 두 색이 허용 오차 안에서 겹쳐, 스틱 전체가 퍽으로도 잡히던 문제).
+// 이보다 가까우면 사실상 같은 색이라 나누지 않는다 (나누면 잡음 때문에 두 물체가 다 조각난다)
+export const SEPARATE_MIN = 15;
+// 등록할 때 '다른 색'으로 볼 색상 차이 (hueOf 거리). 그늘·반사처럼 밝기만 다른 같은 물체는 이보다 가깝다
+const HUE_SPLIT = 18;
 // 영역만 잘라 읽기: 게임 영역(+여유 ROI_MARGIN px)만 카메라 영상에서 잘라, 예전에 화면 전체에 쓰던 픽셀 수(PW×PH)만큼의
 // 해상도로 읽는다. 영역이 화면의 1/4이면 가로·세로 2배로 읽는 셈 (작은 퍽이 더 많은 픽셀로 잡히고 위치가 더 정확해진다).
 // 좌표·면적은 예전처럼 처리 해상도(PW×PH) 단위로 돌려준다 (등록한 퍽 크기·추적 기준을 그대로 쓰게)
 const ROI_MARGIN = 2;          // 영역 둘레 여유 (처리 px)
 const ROI_MAX_SCALE = 3;       // 영역을 읽는 최대 배율 (카메라 원본 해상도보다 더 키우지는 않는다)
+// 원본 픽셀 이만큼 이상을 한 픽셀로 줄여 읽을 때는 잡음을 줄여 읽는다 (Vision._grab)
+const SMOOTH_SHRINK = 3;
 
 export class Vision {
   constructor(procWidth = 240) {
@@ -74,13 +82,44 @@ export class Vision {
       this.fullCanvas = document.createElement('canvas');
       this.fullCtx = this.fullCanvas.getContext('2d', { willReadFrequently: true });
     }
-    const cv = this.fullCanvas, ctx = this.fullCtx;
-    if (cv.width !== PW || cv.height !== PH) { cv.width = PW; cv.height = PH; }
+    const vw = video.videoWidth || video.width || PW, vh = video.videoHeight || video.height || PH;
+    return this._grab(this.fullCanvas, this.fullCtx, video, 0, 0, vw, vh, PW, PH, 'full');
+  }
+
+  /**
+   * 영상의 한 부분(원본 px: sx,sy,sw,sh — 거울 모드면 이미 좌우를 바꾼 자리)을 W×H 로 읽는다 (거울 모드면 좌우 반전).
+   * 많이 줄일 때(원본 SMOOTH_SHRINK 픽셀 이상 -> 1픽셀)는 두 배 크기로 그린 뒤 2×2 칸씩 평균한다: 한 번에 크게 줄이면(1280 -> 240)
+   * 브라우저가 원본 픽셀 몇 개만 집어 와 카메라 잡음이 그대로 남고, 얇은 스틱이 프레임마다 깜박인다. 잡음이 절반으로 줄어 어두운 두 색
+   * (진한 녹색·검정)의 경계가 덜 흔들린다. 조금 줄일 때(640 -> 240, 영역만 크게 읽을 때)는 한 번에 그린다: 평균을 내면 멀리 있는
+   * 작은 퍽·가려지고 남은 얇은 조각의 대비가 흐려진다. key: 결과 버퍼 이름 (화면 전체 'full' / 영역 'roi' 를 따로 둔다)
+   */
+  _grab(cv, ctx, video, sx, sy, sw, sh, W, H, key) {
+    const smooth = sw / W >= SMOOTH_SHRINK && sh / H >= SMOOTH_SHRINK;
+    if (smooth) {
+      if (!this.canvas2) { this.canvas2 = document.createElement('canvas'); this.ctx2 = this.canvas2.getContext('2d', { willReadFrequently: true }); }
+      cv = this.canvas2; ctx = this.ctx2;
+    }
+    const dw = smooth ? W * 2 : W, dh = smooth ? H * 2 : H;
+    if (cv.width < dw || cv.height < dh) { cv.width = Math.max(cv.width, dw); cv.height = Math.max(cv.height, dh); }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (this.mirror) ctx.setTransform(-1, 0, 0, 1, PW, 0);
-    ctx.drawImage(video, 0, 0, PW, PH);
+    if (this.mirror) ctx.setTransform(-1, 0, 0, 1, dw, 0);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    return ctx.getImageData(0, 0, PW, PH);
+    const img = ctx.getImageData(0, 0, dw, dh);
+    if (!smooth) return img;
+    if (!this._smooth) this._smooth = {};
+    let out = this._smooth[key];
+    if (!out || out.width !== W || out.height !== H) out = this._smooth[key] = new ImageData(W, H);
+    const s = img.data, o = out.data, row = dw * 4;
+    for (let y = 0, q = 0; y < H; y++) {
+      for (let x = 0, p = y * 2 * row; x < W; x++, p += 8, q += 4) {
+        o[q] = (s[p] + s[p + 4] + s[p + row] + s[p + row + 4] + 2) >> 2;
+        o[q + 1] = (s[p + 1] + s[p + 5] + s[p + row + 1] + s[p + row + 5] + 2) >> 2;
+        o[q + 2] = (s[p + 2] + s[p + 6] + s[p + row + 2] + s[p + row + 6] + 2) >> 2;
+        o[q + 3] = 255;
+      }
+    }
+    return out;
   }
 
   /**
@@ -98,17 +137,12 @@ export class Vision {
     let s = Math.min(Math.sqrt((PW * PH) / (rw * rh)), ROI_MAX_SCALE, vw / PW, vh / PH);
     s = Math.max(1, Math.floor(s * 4) / 4);
     const W = Math.max(2, Math.round(rw * s)), H = Math.max(2, Math.round(rh * s));
-    const cv = this.canvas, ctx = this.ctx;
-    if (cv.width < W || cv.height < H) { cv.width = Math.max(cv.width, W); cv.height = Math.max(cv.height, H); }
     const kx = vw / PW, ky = vh / PH;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (this.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
-    ctx.drawImage(video, (this.mirror ? PW - x1 : x0) * kx, y0 * ky, rw * kx, rh * ky, 0, 0, W, H);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const img = ctx.getImageData(0, 0, W, H);
+    const img = this._grab(this.canvas, this.ctx, video, (this.mirror ? PW - x1 : x0) * kx, y0 * ky, rw * kx, rh * ky, W, H, 'roi');
     // 영역이 곧 화면 전체(배율 1)면 보정용 화면 전체로도 쓴다 (다시 그리지 않게)
     if (x0 === 0 && y0 === 0 && x1 === PW && y1 === PH && W === PW && H === PH) this._frame = img;
-    return { x0, y0, x1, y1, W, H, sx: W / rw, sy: H / rh, data: img.data };
+    // budget: 픽셀 수만 따진 배율 (해상도·카메라 원본과 무관한 영역 크기 몫) — 인식 해상도를 바꾸면 배율이 어떻게 될지 어림할 때 (autotune)
+    return { x0, y0, x1, y1, W, H, sx: W / rw, sy: H / rh, data: img.data, budget: Math.sqrt((PW * PH) / (rw * rh)) };
   }
 
   /** 처리 좌표 (x,y) 픽셀이 읽은 영역 버퍼에서 몇 번째인지 (영역 밖이면 -1) */
@@ -204,6 +238,7 @@ export class Vision {
     const mapping = quad ? makeFloorMapping(quad) : null;
     this.useArea(mapping, { area: settings.puckModel?.area || 0, widthM: settings.floorWidthM || 0 });
     this.scan = mapping ? quadScanlines(quad, PH) : null; // 게임 영역 행별 x 범위 (가운데 원의 배경색을 영역 안에서만 재는 데도 씀)
+    this._quadN = quad ? quad.map(([x, y]) => [x / PW, y / PH]) : null; // 해상도를 바꾼 직후에도 영역을 알게 (distanceMap)
     const result = {
       floor: { quad, mapping, detected: floorDetected, locked: this.floorLocked, polygon: this.floorPolygon, mode: settings.floorMode, fallback: settings.floorMode === 'auto' && this.floorFallback },
       puck: null,
@@ -237,6 +272,9 @@ export class Vision {
     const puckMask = this.puckMask, stickMask = this.stickMask;
     puckMask.fill(0, 0, W * H);
     if (sm) stickMask.fill(0, 0, W * H);
+    // 두 색에 다 맞는 픽셀은 더 가까운 색 쪽으로만 (퍽·스틱 색이 충분히 다를 때)
+    const pKey = colorKey(pm), sKey = sm ? colorKey(sm) : null;
+    const exclusive = !!sKey && Math.sqrt(colorDist2(sm.r, sm.g, sm.b, pKey)) >= SEPARATE_MIN;
     const y0 = Math.max(0, Math.floor(bH.y0)), y1 = Math.min(H - 1, Math.ceil(bH.y1));
     for (let y = y0; y <= y1; y++) {
       const xa = scan[y * 2], xb = scan[y * 2 + 1];
@@ -244,8 +282,10 @@ export class Vision {
       const xEnd = Math.min(W - 1, xb);
       for (let x = xa, i = y * W + xa, p = i * 4; x <= xEnd; x++, i++, p += 4) {
         const r = d[p], g = d[p + 1], b = d[p + 2];
-        if (matchPixel(pMatch, r, g, b)) puckMask[i] = 1;
-        if (sMatch && matchPixel(sMatch, r, g, b)) stickMask[i] = 1;
+        let mp = matchPixel(pMatch, r, g, b), ms = !!sMatch && matchPixel(sMatch, r, g, b);
+        if (mp && ms && exclusive) { if (colorDist2(r, g, b, pKey) <= colorDist2(r, g, b, sKey)) ms = false; else mp = false; }
+        if (mp) puckMask[i] = 1;
+        if (ms) stickMask[i] = 1;
       }
     }
     // 덩어리 찾기는 읽은 해상도로, 결과(중심·면적·테두리·모양)는 처리 좌표로 바꿔 아래 고르기는 예전 기준 그대로
@@ -597,6 +637,9 @@ export class Vision {
     }
     if (!best || best.px.length < 2) return null;
     const toP = (j) => { const lx = j % w, ly = (j - lx) / w; return ((ly + y0) * PW + lx + x0) * 4; };
+    // 누른 물체에 다른 색 물체가 닿아 있으면(퍽에 붙은 스틱 날) 떼어 내고 누른 쪽만 잰다
+    const sep = separateTouching(d, best.px, w, h, toP, cx - x0, cy - y0, bg);
+    if (sep) best = sep.blob;
     const col = coreColor(d, best.px, toP, bg);
     const dist = Math.hypot(col.r - bg.r, col.g - bg.g, col.b - bg.b);
     const tolS = Math.round(Math.min(120, Math.max(45, dist * 0.5)));
@@ -605,13 +648,15 @@ export class Vision {
     const seeds = best.px.map((j) => toP(j) / 4).filter((i) => matchPixel(m, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]));
     const blobArea = best.px.length;
     const clipped = best.minx === 0 || best.miny === 0 || best.maxx === w - 1 || best.maxy === h - 1; // 창보다 큰 물체 (스틱 블레이드)
-    let area = seeds.length ? this._floodArea(seeds, m, 4000) : 0;
+    const guard = sep ? { self: colorKey(col), other: colorKey(sep.other) } : null; // 떼어 낸 물체 쪽으로는 흘러가지 않게
+    let area = seeds.length ? this._floodArea(seeds, m, 4000, guard) : 0;
     if (!(area > 0) || (!clipped && area > blobArea * 4)) area = blobArea;
-    return { r: col.r, g: col.g, b: col.b, area, cx: best.sx / blobArea + x0, cy: best.sy / blobArea + y0, snapped: true, tol: tolS, dist, bg };
+    const need = innerNeed(d, best.px, toP, col, bg); // 자동 맞춤(autotune)의 아래쪽 기준
+    return { r: col.r, g: col.g, b: col.b, area, cx: best.sx / blobArea + x0, cy: best.sy / blobArea + y0, snapped: true, tol: tolS, dist, bg, separated: !!sep, need };
   }
 
-  /** seeds(픽셀 번호)에서 시작해 색 판정 m 에 맞는 이웃으로 흘려 채운 면적 (cap 까지) */
-  _floodArea(seeds, m, cap) {
+  /** seeds(픽셀 번호)에서 시작해 색 판정 m 에 맞는 이웃으로 흘려 채운 면적 (cap 까지). guard: {self, other} 이면 other 색에 더 가까운 픽셀은 건너뜀 */
+  _floodArea(seeds, m, cap, guard = null) {
     const { PW, PH } = this; const d = this.frame.data;
     const visited = new Uint8Array(PW * PH), stack = this.stack;
     let sp = 0, area = 0;
@@ -619,6 +664,7 @@ export class Vision {
     while (sp > 0 && area < cap) {
       const i = stack[--sp], p = i * 4;
       if (!matchPixel(m, d[p], d[p + 1], d[p + 2])) continue;
+      if (guard && colorDist2(d[p], d[p + 1], d[p + 2], guard.other) < colorDist2(d[p], d[p + 1], d[p + 2], guard.self)) continue;
       area++;
       const x = i % PW, y = (i - x) / PW;
       if (x > 0 && !visited[i - 1]) { visited[i - 1] = 1; stack[sp++] = i - 1; }
@@ -790,8 +836,16 @@ export class Vision {
     // 가장 큰 덩어리를 물체로 본다
     const blobs = mergeBlobs(labelBlobs(mask, w, h), 2);
     blobs.sort((a, b) => b.px.length - a.px.length);
-    const best = blobs[0];
+    let best = blobs[0];
     if (!best || best.px.length < minObj) return { status: 'none', bg: bgOut, th, scattered: true };
+    const toP = (j) => { const lx = j % w, ly = (j - lx) / w; return ((ly + y0) * PW + lx + x0) * 4; };
+    // 원 한가운데 물체에 다른 색 물체가 닿아 있으면(퍽에 붙은 스틱 날) 떼어 내고 가운데 쪽만 잰다.
+    // 기준 자리: 원 한가운데가 물체 위면 거기, 아니면(퍽을 원 가장자리에 둠) 덩어리 중심
+    const lcx = c.x - x0, lcy = c.y - y0;
+    const onCenter = best.px.some((j) => { const lx = j % w; return Math.hypot(lx - lcx, (j - lx) / w - lcy) <= 1.5; });
+    const sep = separateTouching(d, best.px, w, h, toP, onCenter ? lcx : best.sx / best.px.length, onCenter ? lcy : best.sy / best.px.length, bgc);
+    if (sep) best = sep.blob;
+    if (best.px.length < minObj) return { status: 'none', bg: bgOut, th };
     const n = best.px.length;
     // 밀집도: 균일한 원판이면 위치 표준편차 ≈ 0.5*sqrt(area/π)·√2 (2차원)
     const mx = best.sx / n, my = best.sy / n;
@@ -799,10 +853,87 @@ export class Vision {
     const expected = Math.SQRT2 * 0.5 * Math.sqrt(n / Math.PI);
     if (spread > expected * 2.2) return { status: 'none', bg: bgOut, th, scattered: true };
     // 물체 색: 바닥과 섞인 가장자리를 빼고 한가운데(배경과 가장 다른 쪽) 픽셀의 평균 — 작은 퍽일수록 가장자리 비중이 커서 색이 바닥 쪽으로 틀어진다
-    const toP = (j) => { const lx = j % w, ly = (j - lx) / w; return ((ly + y0) * PW + lx + x0) * 4; };
     const model = coreColor(d, best.px, toP, bgc);
     const dist = Math.hypot(model.r - bgc.r, model.g - bgc.g, model.b - bgc.b);
-    return { status: 'ok', r: model.r, g: model.g, b: model.b, area: n, cx: mx + x0, cy: my + y0, bg: bgOut, dist, th, pieces: blobs.length };
+    const need = innerNeed(d, best.px, toP, model, bgc); // 자동 맞춤(autotune)의 아래쪽 기준
+    return { status: 'ok', r: model.r, g: model.g, b: model.b, area: n, cx: mx + x0, cy: my + y0, bg: bgOut, dist, th, pieces: blobs.length, separated: !!sep, need };
+  }
+
+  // ---------------- 자동 맞춤(autotune)이 쓰는 측정 ----------------
+
+  /**
+   * 게임 영역 안 모든 픽셀이 model 색에서 얼마나 먼지 (matchDistance, 처리 해상도 화면 전체 기준).
+   * exclude: [{x,y,r}] 빼고 볼 자리 (등록한 물체와 그 그림자). other: {model, tol} 다른 물체(퍽↔스틱) — 두 색이 충분히 다르면
+   * 추적할 때처럼 다른 쪽 허용 오차 안이면서 다른 쪽 색에 더 가까운 픽셀은 이 색으로 잡히지 않으므로 뺀다.
+   * 반환: { D (영역 밖·뺀 자리 = Infinity), w, h, n (영역 픽셀 수), luma (영역 평균 밝기 0~255) } — 화면·영역이 없으면 null
+   */
+  distanceMap(model, { exclude = [], other = null } = {}) {
+    const { PW, PH } = this, f = this.frame;
+    // 인식 해상도를 막 바꿨으면 영역 행 범위가 비어 있다 -> 마지막 영역을 새 해상도로
+    const s = this.scan || (this._quadN ? quadScanlines(this._quadN.map(([u, v]) => [u * PW, v * PH]), PH) : null);
+    if (!f || !s || f.width !== PW || f.height !== PH) return null;
+    const d = f.data;
+    const m = makeMatcher(model, 100), key = colorKey(model);
+    const om = other?.model ? makeMatcher(other.model, other.tol) : null;
+    const oKey = om ? colorKey(other.model) : null;
+    const exclusive = !!oKey && Math.sqrt(colorDist2(other.model.r, other.model.g, other.model.b, key)) >= SEPARATE_MIN;
+    const D = new Float32Array(PW * PH).fill(Infinity);
+    let n = 0, lum = 0;
+    for (let y = 0; y < PH; y++) {
+      const xa = s[y * 2], xb = s[y * 2 + 1];
+      if (xa < 0) continue;
+      for (let x = Math.max(0, xa); x <= Math.min(PW - 1, xb); x++) {
+        const i = y * PW + x, p = i * 4, r = d[p], g = d[p + 1], b = d[p + 2];
+        n++; lum += 0.299 * r + 0.587 * g + 0.114 * b;
+        if (exclude.some((e) => (x - e.x) ** 2 + (y - e.y) ** 2 <= e.r * e.r)) continue;
+        if (exclusive && matchPixel(om, r, g, b) && colorDist2(r, g, b, oKey) < colorDist2(r, g, b, key)) continue;
+        D[i] = matchDistance(m, r, g, b);
+      }
+    }
+    return { D, w: PW, h: PH, n, luma: n ? lum / n : 0 };
+  }
+
+  /**
+   * 추적 중인 퍽 한가운데(처리 좌표 x,y, 반지름 r) 픽셀들의 색 거리를 hist(Uint32Array(257): 0~255, 256 = 허용 오차로 못 잡는 색)에 더한다.
+   * 이번 프레임에 읽은 영역(ROI)에서 읽는다 (화면 전체를 새로 그리지 않게). 반환: 더한 픽셀 수
+   */
+  sampleCore(model, x, y, r, hist) {
+    const ro = this.roi;
+    if (!ro || !(r > 0)) return 0;
+    const m = makeMatcher(model, 100), d = ro.data;
+    const cx = (x + 0.5 - ro.x0) * ro.sx, cy = (y + 0.5 - ro.y0) * ro.sy, rx = r * ro.sx, ry = r * ro.sy;
+    const hx0 = Math.max(0, Math.floor(cx - rx)), hx1 = Math.min(ro.W - 1, Math.ceil(cx + rx));
+    const hy0 = Math.max(0, Math.floor(cy - ry)), hy1 = Math.min(ro.H - 1, Math.ceil(cy + ry));
+    let k = 0;
+    for (let hy = hy0; hy <= hy1; hy++) for (let hx = hx0; hx <= hx1; hx++) {
+      if (((hx + 0.5 - cx) / rx) ** 2 + ((hy + 0.5 - cy) / ry) ** 2 > 1) continue;
+      const p = (hy * ro.W + hx) * 4, v = matchDistance(m, d[p], d[p + 1], d[p + 2]);
+      hist[Number.isFinite(v) ? Math.min(255, Math.round(v)) : 256]++; k++;
+    }
+    return k;
+  }
+
+  /**
+   * 영상 자글거림(카메라 잡음): 영역 안 24×24 격자 점의 밝기가 앞 영상과 얼마나 다른지의 평균 (움직인 자리 = 25 이상 차이는 뺀다).
+   * 어두운 곳에서 60fps 로 찍으면 노출이 짧아 이 값이 커진다. state: 부르는 쪽이 들고 있는 {} (앞 영상 값을 담아 둠).
+   * 처음이거나 영역 크기가 바뀌었거나 화면 절반 넘게 움직였으면 null. 앞 영상과 똑같으면(카메라가 같은 영상을 다시 보냄 —
+   * 진짜 카메라 잡음은 0 이 될 수 없다) 세지 않고 null
+   */
+  noiseProbe(state) {
+    const ro = this.roi;
+    if (!ro) return null;
+    const N = 24, d = ro.data, vals = new Uint8Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const hx = Math.floor(((i + 0.5) / N) * ro.W), hy = Math.floor(((j + 0.5) / N) * ro.H), p = (hy * ro.W + hx) * 4;
+      vals[j * N + i] = (77 * d[p] + 150 * d[p + 1] + 29 * d[p + 2]) >> 8;
+    }
+    const prev = state.prev, same = !!prev && state.W === ro.W && state.H === ro.H;
+    state.prev = vals; state.W = ro.W; state.H = ro.H;
+    if (!same) return null;
+    let sum = 0, n = 0;
+    for (let k = 0; k < vals.length; k++) { const dd = Math.abs(vals[k] - prev[k]); if (dd < 25) { sum += dd; n++; } }
+    if (!sum) return null;
+    return n >= vals.length * 0.5 ? sum / n : null;
   }
 
   /** 처리 좌표 (x,y) 가 게임 영역(바닥 사다리꼴) 안인지. 영역을 아직 모르면 true */
@@ -910,6 +1041,148 @@ export function matchPixel(m, r, g, b) {
   const sum = r + g + b;
   const dr = (r / sum) * 255 - m.nr, dg = (g / sum) * 255 - m.ng;
   return dr * dr + dg * dg <= m.tol2;
+}
+
+/**
+ * matchPixel 과 같은 판정의 '거리' (허용 오차 단위): 허용 오차가 이 값 이상이면 이 픽셀이 그 색으로 잡힌다.
+ * 채도 높은 색(색도 비교)은 색도 거리 / 0.6 (makeMatcher 의 tolC = tol × 0.6), 밝기·채도 문턱에 걸리면 Infinity (허용 오차로는 못 잡음)
+ */
+export function matchDistance(m, r, g, b) {
+  if (!m.chroma) return Math.sqrt((r - m.r) ** 2 + (g - m.g) ** 2 + (b - m.b) ** 2);
+  const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  if (mx < m.minV || (mx - mn) < m.minChroma) return Infinity;
+  const sum = r + g + b;
+  return Math.hypot((r / sum) * 255 - m.nr, (g / sum) * 255 - m.ng) / 0.6;
+}
+
+/**
+ * 등록한 물체가 '다 잡히려면' 필요한 허용 오차 (자동 맞춤의 아래쪽 기준).
+ * 몸통(물체 픽셀의 75%)과 한가운데(배경에서 가장 먼 쪽, coreColor 와 같은 기준)의 95% 가 잡히는 값 중 큰 쪽.
+ * 바닥과 섞인 가장자리 끝까지 맞추려 하면 허용 오차가 바닥 쪽으로 너무 넓어지므로 몸통은 75% 까지만
+ */
+export function innerNeed(d, px, toP, model, bg) {
+  const m = makeMatcher(model, 100);
+  const n = px.length;
+  if (!n) return 0;
+  const all = new Float32Array(n), toBg = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const p = toP(px[k]);
+    all[k] = matchDistance(m, d[p], d[p + 1], d[p + 2]);
+    toBg[k] = bg ? Math.hypot(d[p] - bg.r, d[p + 1] - bg.g, d[p + 2] - bg.b) : 0;
+  }
+  const body = quantileOf(all, 0.75);
+  let core = body;
+  if (bg && n >= 4) {
+    const cut = Float32Array.from(toBg).sort()[Math.min(n - 1, Math.floor(n * 0.9))] * 0.7;
+    const sel = [];
+    for (let k = 0; k < n; k++) if (toBg[k] >= cut) sel.push(all[k]);
+    if (sel.length) core = quantileOf(Float32Array.from(sel), 0.95);
+  }
+  const v = Math.max(body, core);
+  return Number.isFinite(v) ? Math.round(v) : 200;
+}
+
+/** 값 배열의 분위수 (q: 0~1). Infinity 도 크기 순서대로 센다 */
+export function quantileOf(values, q) {
+  if (!values.length) return 0;
+  const s = Float32Array.from(values).sort();
+  return s[Math.min(s.length - 1, Math.max(0, Math.floor((s.length - 1) * q)))];
+}
+
+/**
+ * 색 거리용 특징: 밝기 Y 와 각 채널의 '밝기를 뺀 색' (r-Y, g-Y, b-Y).
+ * colorDist2 는 밝기 차이는 1/4 만 세고 색 차이는 그대로 센다: 그늘·조명으로 밝기만 바뀐 같은 물체는 가깝고,
+ * 진한 녹색과 검정처럼 둘 다 어두워도 색이 다른 것은 멀다 (RGB 거리로는 둘이 30 정도밖에 안 떨어져 허용 오차 안에서 겹친다)
+ */
+export function colorKey(c) {
+  const Y = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+  return { Y, r: c.r - Y, g: c.g - Y, b: c.b - Y };
+}
+export function colorDist2(r, g, b, k) {
+  const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+  const dY = Y - k.Y, dr = r - Y - k.r, dg = g - Y - k.g, db = b - Y - k.b;
+  return 0.25 * dY * dY + dr * dr + dg * dg + db * db;
+}
+/** 두 색 사이 거리 (colorDist2 의 제곱근) */
+export function colorDist(a, b) { return Math.sqrt(colorDist2(a.r, a.g, a.b, colorKey(b))); }
+/** 퍽·스틱으로 등록한 두 색이 너무 비슷해 서로 구분할 수 없는지 */
+export function colorsTooClose(a, b) { return !!(a && b) && colorDist(a, b) < SEPARATE_MIN; }
+
+/** 밝기에 덜 흔들리는 색상: (각 채널 - 밝기) 를 밝기로 나눈 값 (아주 어두운 픽셀이 튀지 않게 +20) */
+function hueOf(r, g, b) {
+  const Y = 0.299 * r + 0.587 * g + 0.114 * b, s = 100 / (Y + 20);
+  return [(r - Y) * s, (g - Y) * s, (b - Y) * s];
+}
+
+/** 색상 h 에서 선분 a~b (색상 공간) 까지의 거리 */
+function hueSegDist(h, a, b) {
+  const vx = b[0] - a[0], vy = b[1] - a[1], vz = b[2] - a[2], vl = vx * vx + vy * vy + vz * vz;
+  const t = vl ? Math.max(0, Math.min(1, ((h[0] - a[0]) * vx + (h[1] - a[1]) * vy + (h[2] - a[2]) * vz) / vl)) : 0;
+  return Math.hypot(h[0] - a[0] - t * vx, h[1] - a[1] - t * vy, h[2] - a[2] - t * vz);
+}
+
+/**
+ * 등록할 때 붙어 있는 다른 색 물체 떼어 내기. 퍽에 스틱 날이 닿은 채로 등록하면 둘이 한 덩어리로 잡혀 두 색이 섞이고,
+ * 퍽과 스틱이 '둘 다 비슷한 색'으로 등록되던 문제.
+ *  - 기준: (sx, sy) 에 가장 가까운 픽셀 몇 개(누른 자리·원 한가운데)의 중앙값 색
+ *  - 같은 물체로 보는 것: 기준과 색상이 같은 픽셀(밝기만 다른 그늘·반사), 바닥색과 기준색을 잇는 직선 위의 픽셀
+ *    (바닥과 섞인 가장자리, 또는 기준이 가장자리에 걸렸을 때의 더 진한 한가운데)
+ *  - 바닥 그림자·반사광(바닥과 같은 색상에 밝기만 조금 다름)은 어느 쪽도 아님
+ *  - 나머지(다른 물체)가 덩어리의 8% 넘으면 붙은 물체가 있는 것. 그러면 같은 물체 쪽 색에 더 가까우면서 기준 픽셀과 이어진 부분만 남긴다
+ * px: 덩어리 픽셀(창 w×h 안의 번호), toP: 창 번호 -> 영상 RGBA 위치, bg: 바닥색.
+ * 반환: { blob (labelBlobs 와 같은 꼴), other: 떼어 낸 물체 색 } | null (떼어 낼 것이 없음)
+ */
+export function separateTouching(d, px, w, h, toP, sx, sy, bg) {
+  const n = px.length;
+  if (n < 8 || !bg) return null;
+  const near = new Float32Array(n);
+  for (let k = 0; k < n; k++) { const x = px[k] % w, y = (px[k] - x) / w; near[k] = (x - sx) ** 2 + (y - sy) ** 2; }
+  const order = Array.from({ length: n }, (_, k) => k).sort((a, b) => near[a] - near[b]);
+  // 기준: 가까운 픽셀 몇 개 중 바닥과 가장 다른(진한) 쪽. 기준 자리가 물체 가장자리에 걸려도 바닥과 섞인 색이 기준이 되지 않게.
+  // 너무 많이 잡으면 붙은 물체까지 들어가므로 30개까지
+  const seedK = order.slice(0, Math.min(30, Math.max(6, Math.round(n * 0.25))));
+  const seed = coreColor(d, seedK.map((k) => px[k]), toP, bg);
+  const sh = hueOf(seed.r, seed.g, seed.b), bh = hueOf(bg.r, bg.g, bg.b);
+  const bgY = 0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b, seedY = 0.299 * seed.r + 0.587 * seed.g + 0.114 * seed.b;
+  const bx = bg.r - seed.r, by = bg.g - seed.g, bz = bg.b - seed.b, bl = bx * bx + by * by + bz * bz || 1;
+  const same = [], other = [];
+  for (let k = 0; k < n; k++) {
+    const p = toP(px[k]), r = d[p], g = d[p + 1], b = d[p + 2];
+    const hh = hueOf(r, g, b);
+    if (Math.hypot(hh[0] - sh[0], hh[1] - sh[1], hh[2] - sh[2]) <= HUE_SPLIT) { same.push(px[k]); continue; }
+    const t = ((r - seed.r) * bx + (g - seed.g) * by + (b - seed.b) * bz) / bl;
+    if (t >= -3 && t <= 1 && Math.hypot(r - seed.r - t * bx, g - seed.g - t * by, b - seed.b - t * bz) <= 18) { same.push(px[k]); continue; }
+    const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (Y >= bgY * 0.45 && Math.hypot(hh[0] - bh[0], hh[1] - bh[1], hh[2] - bh[2]) <= HUE_SPLIT) continue;
+    // 퍽 그림자(어두워진 바닥)와 섞인 가장자리: 색상이 바닥~기준 사이이고, 밝기가 기준보다 어둡지 않음.
+    // 검정 스틱은 색상이 바닥 쪽이어도 기준과 그림자보다 훨씬 어두워 여기에 들지 않는다
+    if (Y >= Math.min(seedY, bgY * 0.45) && hueSegDist(hh, bh, sh) <= HUE_SPLIT) { same.push(px[k]); continue; }
+    other.push(p);
+  }
+  if (other.length < Math.max(4, n * 0.08) || same.length < 2) return null;
+  const oc = medianColor(d, other);
+  const sc = coreColor(d, same, toP, bg); // 같은 물체 쪽의 한가운데 색 (기준이 가장자리였어도)
+  const sk = colorKey(sc), ok = colorKey(oc);
+  if (Math.sqrt(colorDist2(oc.r, oc.g, oc.b, sk)) < SEPARATE_MIN) return null;
+  // 기준 색에 더 가까운 픽셀만 남기고, 기준 픽셀에서 4-연결로 이어진 부분
+  const allow = new Uint8Array(w * h);
+  for (let k = 0; k < n; k++) {
+    const p = toP(px[k]);
+    if (colorDist2(d[p], d[p + 1], d[p + 2], sk) <= colorDist2(d[p], d[p + 1], d[p + 2], ok)) allow[px[k]] = 1;
+  }
+  const stack = [], keep = [];
+  for (const k of seedK) if (allow[px[k]] === 1) { allow[px[k]] = 2; stack.push(px[k]); }
+  while (stack.length) {
+    const j = stack.pop(); keep.push(j);
+    const x = j % w, y = (j - x) / w;
+    if (x > 0 && allow[j - 1] === 1) { allow[j - 1] = 2; stack.push(j - 1); }
+    if (x < w - 1 && allow[j + 1] === 1) { allow[j + 1] = 2; stack.push(j + 1); }
+    if (y > 0 && allow[j - w] === 1) { allow[j - w] = 2; stack.push(j - w); }
+    if (y < h - 1 && allow[j + w] === 1) { allow[j + w] = 2; stack.push(j + w); }
+  }
+  if (keep.length < 2) return null;
+  return { blob: blobStats(keep, w), other: oc };
 }
 
 /**
@@ -1064,17 +1337,19 @@ export class AutoCalibrator {
     this.status = sample.status;
     this.sample = sample;
     if (sample.status !== 'ok') { this.hold = Math.max(0, this.hold - dt * 2); if (this.hold === 0) this.avg = null; return null; }
-    if (!this.avg) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area }; this.hold = 0; return null; }
+    if (!this.avg) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area, need: sample.need || 0 }; this.hold = 0; return null; }
     const a = this.avg;
     const colorDiff = Math.hypot(sample.r - a.r, sample.g - a.g, sample.b - a.b);
     const areaRatio = sample.area / a.area;
     // 작은 물체는 한두 픽셀만 달라져도 크기 비율이 크게 흔들리므로 허용 폭을 넓힌다 (가만히 있는데 셈이 자꾸 처음부터 되는 것 방지)
     const small = a.area < 30;
-    if (colorDiff > (small ? 50 : 35) || areaRatio < (small ? 0.45 : 0.6) || areaRatio > (small ? 2.2 : 1.6)) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area }; this.hold = 0; return null; }
+    if (colorDiff > (small ? 50 : 35) || areaRatio < (small ? 0.45 : 0.6) || areaRatio > (small ? 2.2 : 1.6)) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area, need: sample.need || 0 }; this.hold = 0; return null; }
     a.r += (sample.r - a.r) * 0.2; a.g += (sample.g - a.g) * 0.2; a.b += (sample.b - a.b) * 0.2; a.area += (sample.area - a.area) * 0.2;
+    // 3초 동안 잰 '필요한 허용 오차'는 가장 큰 값 쪽으로 (조명이 깜박이거나 그늘이 지나가도 다 잡히게)
+    a.need = Math.max(a.need * 0.95, sample.need || 0);
     this.hold += dt;
     if (this.hold < this.holdSec) return null;
     const tol = Math.round(Math.min(120, Math.max(45, sample.dist * 0.5)));
-    return { r: Math.round(a.r), g: Math.round(a.g), b: Math.round(a.b), area: Math.round(a.area), tol, cx: sample.cx, cy: sample.cy, bg: sample.bg };
+    return { r: Math.round(a.r), g: Math.round(a.g), b: Math.round(a.b), area: Math.round(a.area), tol, cx: sample.cx, cy: sample.cy, bg: sample.bg, need: Math.round(a.need), dist: sample.dist };
   }
 }

@@ -11,7 +11,8 @@ export const cameraConstraints = (fps = 60) => ({ width: { ideal: 1280 }, height
  */
 export class CameraRateAuto {
   constructor() { this.reset(); }
-  reset() { this.target = 60; this.badSince = null; this.lowered = false; }
+  // dark: 어둡고 자글거려 30 으로 시작함 (인식 자동 맞춤 — main.js autoTuneAfterTest). 기기가 못 따라가 낮춘 것과 구분해 안내
+  reset() { this.target = 60; this.badSince = null; this.lowered = false; this.dark = false; }
   /** 1초마다: cam = 카메라가 보내는 fps (모르면 0), done = 그 1초에 인식한 프레임 수. 카메라를 바꿀 fps 를 돌려준다 (그대로면 null) */
   update(now, cam, done) {
     if (this.target !== 60 || !(cam >= 45)) { this.badSince = null; return null; }

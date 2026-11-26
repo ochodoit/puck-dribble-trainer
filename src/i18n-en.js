@@ -318,6 +318,26 @@ export const EN = {
   '게임 시간': 'Game time',
   '{0#}분': '{0} min',
   '분': 'M', // 게임 선택 창의 시간 버튼 단위만 (1<span>분</span> → 1M)
+  // ---------- 인식 자동 맞춤 (src/autotune.js) ----------
+  '퍽·스틱을 등록하고 3/3 움직여 보기를 마치면 이 집의 바닥·조명·카메라에 맞춰 아래 값이 자동으로 정해져요. 미리보기의 빨강은 퍽, 초록은 스틱이에요. 퍽만 빨가면 그대로 두세요.': 'Once you register the puck (and stick) and finish the 3/3 test move, the values below are set automatically for your floor, lighting and camera. In the preview, red is the puck and green the stick. If only the puck is red, leave it.',
+  '지금 영상으로 자동 맞추기': 'Auto-tune from the current view',
+  '3/3 움직여 보기를 마치면 먼 쪽 퍽이 보이는 크기와 기기 속도에 맞춰 자동으로 정해져요. 높을수록 작은 퍽도 잡지만 처리가 무거워져요': 'Set automatically after the 3/3 test move, from how big the puck looks on the far side and how fast this device is. Higher catches smaller pucks but takes more processing',
+  '자동: 기기·Wi-Fi 상태에 맞추고, 3/3 움직여 보기 때 화면이 어둡고 자글거리면 30fps로 찍어요 (노출이 길어져 잡음이 줄어요)': 'Auto: follows the device and Wi-Fi, and films at 30 fps if the picture was dark and grainy during the 3/3 test move (longer exposure, less noise)',
+  '영역 안에 퍽과 거의 같은 색·크기 물체가 보여요 (다른 퍽·병뚜껑·얼룩) · 치우면 더 정확해요': 'Something in the area looks like the puck (another puck, a cap, a stain) · Remove it for better tracking',
+  '영역 안에 스틱 테이프와 같은 색이 보여요 · 치우거나 퍽·바닥과 다른 색 테이프를 감아 보세요': 'The stick tape color shows up elsewhere in the area · Remove it, or use tape that differs from the puck and the floor',
+  '인식 해상도 {0#}': 'detection resolution {0}',
+  '어두워서 카메라 30fps': 'dark room: camera at 30 fps',
+  '영역 안에 퍽과 비슷한 물체가 보여요': 'something in the area looks like the puck',
+  '퍽을 먼저 등록하세요 (보정 > 원 안에 3초)': 'Register the puck first (Calibrate > 3 s in circle)',
+  '퍽이 보이게 영역 안에 두고 다시 누르세요': 'Put the puck in the area where the camera sees it, then press again',
+  '자동으로 맞췄어요': 'Auto-tuned',
+  '퍽 {0#}': 'puck {0}',
+  '스틱 {0#}': 'stick {0}',
+  '자동 맞춤: 퍽 {0#}': 'Auto-tuned: puck {0}',
+  '해상도 {0#}': 'resolution {0}',
+  '영역 안에 퍽과 비슷한 물체가 있어요': 'something in the area looks like the puck',
+  '바닥과 겹쳐 조금 좁게': 'a little narrower: close to the floor color',
+  '카메라 {0#} fps (어둡고 자글거려 자동으로 낮춤)': 'Camera {0} fps (lowered automatically: dark and grainy)',
   '{0#}초': '{0} s',
   '자유': 'Free',
   '게임 시간 · 랭킹은 시간별로 따로': 'Game time · ranked separately per time',
@@ -1169,6 +1189,9 @@ export const EN = {
   // ---------- 카메라 화면 방향이 바뀜 (휴대폰·아이패드 회전) ----------
   '화면 방향이 바뀌었어요': 'The camera view turned',
   '게임 영역을 다시 맞춰 주세요': 'Please set the game area again',
+  // ---------- 등록한 퍽·스틱 색이 거의 같음 ----------
+  '퍽과 스틱 색이 거의 같아 서로 헷갈릴 수 있어요': 'The puck and stick colors are almost the same, so they can get mixed up',
+  '스틱 날에 주황·노랑처럼 퍽·바닥과 다른 색 테이프를 감아 보세요': 'Try taping the blade in a color unlike the puck and floor, such as orange or yellow',
   // ---------- 휴대폰 카메라 연결 (로그인한 회원, 같은 Wi-Fi) ----------
   '휴대폰 카메라로 시작 (QR 연결)': 'Start with phone camera (QR link)',
   '휴대폰과 이 기기가 같은 Wi-Fi에 연결되어 있어야 합니다': 'Your phone and this device must be on the same Wi-Fi',

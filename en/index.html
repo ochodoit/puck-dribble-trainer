@@ -364,7 +364,9 @@
         <details class="settings-adv">
           <summary>Detection fine-tuning (only if the puck is not tracked well)</summary>
           <div class="settings-grid">
-            <p class="adv-intro">Registering the puck and stick in Calibrate sets these automatically. In the preview, red is the puck and green the stick. If only the puck is red, leave them.</p>
+            <p class="adv-intro">Once you register the puck (and stick) and finish the 3/3 test move, the values below are set automatically for your floor, lighting and camera. In the preview, red is the puck and green the stick. If only the puck is red, leave it.</p>
+            <!-- 인식 자동 맞춤 (src/autotune.js): 지금 영상으로 허용 오차를 다시 맞춘다. 조명을 바꿨을 때 등 -->
+            <div class="tune-row"><button type="button" id="btn-tune-now" class="btn">Auto-tune from the current view</button><small class="hint" id="tune-status"></small></div>
             <!-- 인식 미리보기: 인식에 쓰는 영상 위에 퍽·스틱으로 잡힌 픽셀을 칠한다 (설정 창 안에서만 — 게임 화면은 가리지 않음) -->
             <figure class="mask-preview"><canvas id="mask-preview" aria-hidden="true"></canvas><figcaption>Detection preview · red puck · green stick · circle = where the puck was found</figcaption></figure>
             <label>Puck color tolerance <output id="out-puckTol"></output>
@@ -381,7 +383,7 @@
                 <option value="320">High (320px)</option>
                 <option value="400">Highest (400px, when the puck looks small)</option>
               </select>
-              <small class="hint">Raise it if the puck looks small or far away (slightly heavier processing). A very small puck switches to 400 automatically when registered</small>
+              <small class="hint">Set automatically after the 3/3 test move, from how big the puck looks on the far side and how fast this device is. Higher catches smaller pucks but takes more processing</small>
               <small class="hint">If the play area is smaller than the camera view, only the area is read, at up to 3× the detail</small>
               <small class="hint" id="proc-live"></small>
             </label>
@@ -391,7 +393,7 @@
                 <option value="60">Always 60fps</option>
                 <option value="30">Always 30fps (dim rooms)</option>
               </select>
-              <small class="hint">Auto: switches between 60 and 30fps to suit the device and the Wi-Fi. If the picture looks dark or grainy, fix it at 30</small>
+              <small class="hint">Auto: follows the device and Wi-Fi, and films at 30 fps if the picture was dark and grainy during the 3/3 test move (longer exposure, less noise)</small>
             </label>
           </div>
         </details>

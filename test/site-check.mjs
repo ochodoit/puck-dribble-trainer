@@ -71,7 +71,7 @@ export async function checkSite() {
     && noRssLink.length === 0, { lastmods: lastmods.length, items: items.length, noRssLink });
 
   const yml = await readFile(join(ROOT, '.github/workflows/pages.yml'), 'utf8');
-  const need = ['en', 'guide', 'games', 'faq', 'pages.css', 'robots.txt', 'sitemap.xml', 'rss.xml', 'llms.txt', '404.html', VERIFY.googleFile, `${VERIFY.indexnow}.txt`];
+  const need = ['en', 'guide', 'games', 'faq', 'compare', 'pages.css', 'robots.txt', 'sitemap.xml', 'rss.xml', 'llms.txt', '404.html', VERIFY.googleFile, `${VERIFY.indexnow}.txt`];
   check('SEO7 deploy copies the generated files', need.every((f) => new RegExp(`cp -r [^\\n]*\\b${f.replace('.', '\\.')}\\b`).test(yml)), need.filter((f) => !yml.includes(f)));
 
   // IndexNow: 키 파일 = 키, 바뀐 파일 → 알릴 주소 고르기, 배포 뒤 알림 작업

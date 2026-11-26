@@ -156,6 +156,8 @@ async function englishHome(koHtml) {
   h = h.replace('<html lang="ko">', '<html lang="en">');
   // 영어판은 /en/ 아래에 있으므로 상대 주소(style.css, src/…, icons/…)가 첫 화면과 같은 곳을 가리키게
   h = h.replace('<meta charset="UTF-8" />', '<meta charset="UTF-8" />\n  <base href="/" />');
+  // 제목(h1) 안의 한국어 이름은 영어판에 넣지 않는다 (영어판 제목은 로고의 Puck Dribble Trainer)
+  h = h.replace(/<span class="lockup-ko" data-ugc>[^<]*<\/span>/, '');
   h = translateHtml(h, tr);
   // 안내 페이지 링크는 영어판으로, 언어 안내는 한국어 쪽으로
   for (const p of PAGES) h = h.split(`href="${pathOf('ko', p.slug)}"`).join(`href="${pathOf('en', p.slug)}"`);
@@ -171,6 +173,11 @@ const FONTS = 'https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=F
 function block(b) {
   if (typeof b === 'string') return `<p>${md(b)}</p>`;
   const [tag, items] = b;
+  // 표: ['table', { caption, head: [...], rows: [[...], ...] }] — 행의 첫 칸은 행 제목(th)
+  if (tag === 'table') {
+    const { caption, head, rows } = items;
+    return `<div class="table-wrap"><table>${caption ? `<caption>${md(caption)}</caption>` : ''}<thead><tr>${head.map((x) => `<th scope="col">${md(x)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x, i) => (i === 0 ? `<th scope="row">${md(x)}</th>` : `<td>${md(x)}</td>`)).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
   return `<${tag}>${items.map((x) => `<li>${md(x)}</li>`).join('')}</${tag}>`;
 }
 

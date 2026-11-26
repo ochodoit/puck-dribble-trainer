@@ -8,7 +8,7 @@ export const SITE = 'https://puck-trainer.com';
  * 페이지마다 내용을 마지막으로 크게 바꾼 날 (YYYY-MM-DD). sitemap.xml 의 <lastmod>, rss.xml 의 <pubDate> 로 나간다.
  * 네이버·구글·Bing 이 바뀐 페이지를 먼저 다시 가져가게 하는 값이라, 페이지 내용을 바꾸면 이 날짜도 고친다. '' = 첫 화면
  */
-export const UPDATED = { '': '2026-11-25', guide: '2026-11-25', games: '2026-11-25', faq: '2026-11-25' };
+export const UPDATED = { '': '2026-11-26', guide: '2026-11-25', games: '2026-11-25', faq: '2026-11-26', compare: '2026-11-26' };
 
 /** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구·Daum 웹마스터도구·네이버 서치어드바이저에서 받은 값 */
 export const VERIFY = {
@@ -334,6 +334,7 @@ export const PAGES = [
         ['인라인하키·롤러하키 연습에도 쓸 수 있나요?', '네. 퍽이나 공을 스틱으로 다루는 연습이라 인라인하키·롤러하키에도 좋습니다.'],
         ['랭킹에는 어떻게 오르나요?', '정회원으로 로그인하고 게임을 끝까지 하면(자유 연습 제외) 최고 기록이 전체·국가·팀·연령대 랭킹에 오릅니다. 게스트 기록은 오르지 않아요.'],
         ['가입 코드는 어떻게 받나요?', '정회원 친구의 초대 링크로 바로 가입할 수 있어요(한 사람이 3명까지). 링크가 없으면 게스트로 한 판을 끝내 보세요. 결과 화면에 가입 방법이 나오고, SNS에 영상을 올릴 필요는 없습니다.'],
+        ['다른 카메라 스틱핸들링 앱과 무엇이 다른가요?', '앱 설치 없이 브라우저에서 바로 하고, 한국어를 지원하며, 7가지 게임을 모두 무료로 합니다. Stick Control·Hockey Home·Hotdangle 등과의 비교는 [다른 앱과 비교](/compare/)에 정리했어요.'],
         ['영어로도 되나요?', '네. 첫 화면의 English 버튼을 누르거나 puck-trainer.com/en/ 으로 들어오세요.'],
         ['개인정보는 어떻게 다루나요?', '가입할 때 별명·국가·팀·나이·스틱 방향만 받고, 메일 주소는 받지 않습니다. 방문 통계(Google 애널리틱스)에도 별명·나이 같은 개인정보는 보내지 않아요.'],
       ],
@@ -365,8 +366,110 @@ export const PAGES = [
         ['Can I use it for inline or roller hockey?', 'Yes. It trains stickhandling with a puck or a ball, so it works for inline and roller hockey too.'],
         ['How do I get on the leaderboard?', 'Finish a game (except Free Practice) while logged in as a member, and your best score goes on the world, country, team and age-group leaderboards. Guest scores are not ranked.'],
         ['How do I get an invite code?', 'Get an invite link from a member friend (each member can invite 3 people). No link? Finish one game as a guest: the result screen shows how to join. You never need to post a video on social media.'],
+        ['How is it different from other camera stickhandling apps?', 'It runs in the browser with nothing to install, it is available in Korean and English, and all 7 games are free. See [Compare apps](/en/compare/) for how it stacks up against Stick Control, Hockey Home, Hotdangle and others.'],
         ['Is it available in English?', 'Yes. Press English on the first screen, or open puck-trainer.com/en/.'],
         ['How is my personal data handled?', 'We only ask for a nickname, country, team, age and stick side, and never an email address. Visit counts (Google Analytics) never include personal details such as nicknames or ages.'],
+      ],
+    },
+  },
+  {
+    // 비교 페이지: AI 검색이 '추천해줘' 질문에 답할 때 인용하기 좋게, 사실만 날짜와 함께. 값은 각 공식 페이지·미국 앱스토어·Steam (2026-11-26 확인).
+    // 가격·기능이 바뀌면 고치고 UPDATED.compare 날짜도 바꾼다
+    slug: 'compare',
+    ko: {
+      nav: '다른 앱과 비교',
+      title: '카메라 하키 스틱핸들링 앱·게임 비교 (2026) | 퍽 드리블 트레이너',
+      description: '카메라로 진짜 퍽을 따라가는 스틱핸들링 앱·게임 9가지를 설치 여부·기기·가격·한국어 지원으로 비교했습니다. Stick Control, Hockey Home, Quick Hands Hockey, Hotdangle 등.',
+      h1: '카메라 스틱핸들링 앱·게임 비교',
+      lead: '카메라로 진짜 퍽(또는 공)을 따라가며 집에서 스틱핸들링을 연습하는 앱·게임을 설치 여부, 기기, 가격, 한국어 지원으로 비교했습니다. 2026년 11월 26일, 각 서비스 공식 페이지와 미국 앱스토어·Steam 기준입니다.',
+      sections: [
+        ['한눈에 비교',
+          ['table', {
+            head: ['서비스', '어디서 실행', '카메라·추적', '가격 (무료 범위)', '한국어'],
+            rows: [
+              ['**퍽 드리블 트레이너**', '웹 브라우저 (휴대폰·아이패드·노트북), 설치 없음', '기기 카메라. 바닥과 색이 다른 퍽·공·병뚜껑', '무료 (7가지 게임 모두). 랭킹·커뮤니티는 정회원', '예 (한국어·영어)'],
+              ['[Stick Control](https://stickcontrol.app)', 'iPhone·Android 앱 설치', '휴대폰 카메라. 퍽·공에 단색 테이프·칠 필요', 'Zone Game 하루 5회 무료, 전체 잠금 해제 $19.99 (1회)', '아니요'],
+              ['[Hockey Home](https://apps.apple.com/us/app/hockey-home/id6754666482)', 'iPhone·iPad 앱 설치', 'iPhone 카메라 + AI 추적, 퍽 또는 공', '무료 다운로드, 앱스토어에 구독 표시 (월 $8.99부터)', '아니요'],
+              ['[Quick Hands Hockey](https://athnexa.com/quickhandshockey)', 'iPhone·iPad·Android 앱 설치', '휴대폰 카메라 색 추적, 거치대 필요', '무료 (터치 플레이·카메라 체험), Pro $9.99~$99.99', '아니요 (영어)'],
+              ['[Hotdangle](https://hotdangle.com)', 'Windows PC (Steam) 설치', 'USB 웹캠 필수, 바닥과 색이 다른 퍽·공', '$17.99 (한국 Steam ₩19,500), 무료 데모', '아니요'],
+              ['[Puckcam Arena](https://alberta-interactive-games.itch.io/puckcam-arena)', '웹 브라우저 (itch.io)', '휴대폰·태블릿 카메라로 퍽 추적', '기본판 무료 (광고 없음), 개발 중', '표기 없음'],
+              ['[Dangleverse](https://apps.apple.com/us/app/dangleverse/id6744417537)', '애플 기기 앱 설치, 기기 2대 필요', '두 번째 기기의 후면 카메라 (90~120cm 높이)', '무료 다운로드, 게임은 구매 ($19.99~$49.99), 30분 체험', '아니요 (영어)'],
+              ['[PuckPro](https://apps.apple.com/us/app/puckpro/id6776488581)', 'iPhone 앱 설치', 'iPhone 카메라, 퍽 색 지정', '무료, Pro 구독 있음 (가격 표기 없음)', '아니요 (영어)'],
+              ['[SuperSticks PRO](https://supersticks.pro)', '컴퓨터 웹 브라우저 + TV', '노트북·외장 카메라, 단색 공', '무료 (1명·드릴 2개), 월 $9.99·연 $99.99', '표기 없음'],
+            ],
+            caption: '가격은 미국 앱스토어·Steam 기준(달러)이며 나라와 시기에 따라 다릅니다. 정확한 내용은 각 공식 페이지에서 확인하세요.',
+          }]],
+        ['퍽 드리블 트레이너가 다른 점',
+          ['ul', [
+            '**설치가 없습니다.** Safari·Chrome에서 puck-trainer.com을 열면 휴대폰·아이패드·노트북 어디서나 바로 시작합니다.',
+            '**한국어로 쓸 수 있습니다.** 화면·안내·도움말이 모두 한국어와 영어로 되어 있어요.',
+            '**7가지 게임이 모두 무료입니다.** 아케이드·퍽 피하기·와이드 드리블·8자 드리블·퀵 핸즈·반응 타겟·자유 연습. 랭킹 등록과 커뮤니티 글쓰기만 정회원이 합니다.',
+            '**진짜 퍽이 아니어도 됩니다.** 바닥과 색이 다른 공·병뚜껑을 가운데 원에 3초 두면 퍽으로 익힙니다. 테이프를 붙일 필요도 없어요.',
+            '**영상은 기기 밖으로 나가지 않습니다.** 카메라 영상은 퍽 위치를 찾는 데만 쓰고 저장하거나 보내지 않습니다.',
+            '**큰 화면으로 볼 수 있습니다.** 휴대폰을 카메라로 쓰고(QR 연결) 노트북·TV로 보거나, 노트북 + 웹캠을 TV에 연결해 고개를 들고 연습합니다.',
+          ]]],
+        ['다른 앱이 더 맞는 경우',
+          ['ul', [
+            '휴대폰 **앱**으로 쓰고 싶고 영어 화면이 괜찮다면 Stick Control·Quick Hands Hockey·PuckPro도 좋은 선택입니다.',
+            '**Windows PC + USB 웹캠**으로 Steam 게임처럼 하고 싶다면 Hotdangle이 맞습니다.',
+            '**애플 기기 2대**로 비디오 게임처럼 즐기고 싶다면 Dangleverse를 보세요.',
+          ]]],
+        ['고르는 법',
+          ['ol', [
+            '**가진 기기** — 휴대폰만 있는지, 노트북·아이패드·Windows PC가 있는지.',
+            '**설치 여부** — 앱스토어 설치가 어려운 기기(학교·공용 노트북 등)라면 브라우저에서 되는 것으로.',
+            '**무료 범위** — 무료로 매일 계속 쓸 수 있는지, 체험판만 무료인지.',
+            '**언어** — 아이가 혼자 쓴다면 한국어 화면이 편합니다.',
+            '**바닥과 퍽 색** — 모든 카메라 추적은 퍽이 바닥과 확실히 달라야 잘 됩니다. 흰 바닥엔 검정·주황, 어두운 바닥엔 흰색·형광.',
+          ]]],
+      ],
+    },
+    en: {
+      nav: 'Compare apps',
+      title: 'Camera Stickhandling Apps Compared (2026) | Puck Dribble Trainer',
+      description: 'Nine apps and games that track a real puck with a camera for hockey stickhandling at home, compared by install, devices, price and languages: Stick Control, Hockey Home, Hotdangle and more.',
+      h1: 'Camera stickhandling apps compared',
+      lead: 'Apps and games that follow a real puck (or ball) with a camera so you can practice stickhandling at home, compared by install, devices, price and languages. Checked on 26 November 2026 against each official page and the US App Store and Steam.',
+      sections: [
+        ['At a glance',
+          ['table', {
+            head: ['Product', 'Runs on', 'Camera and tracking', 'Price (what is free)', 'Korean'],
+            rows: [
+              ['**Puck Dribble Trainer**', 'Web browser (phone, iPad, laptop), nothing to install', 'Device camera; any puck, ball or bottle cap that stands out from the floor', 'Free (all 7 games). Leaderboards and community for members', 'Yes (Korean and English)'],
+              ['[Stick Control](https://stickcontrol.app)', 'iPhone and Android app', 'Phone camera; puck or ball needs a solid color dot or paint', 'Zone Game free 5 times a day; Full Unlock $19.99 one-time', 'No'],
+              ['[Hockey Home](https://apps.apple.com/us/app/hockey-home/id6754666482)', 'iPhone and iPad app', 'iPhone camera with AI tracking; puck or ball', 'Free download; App Store lists subscriptions from $8.99 a month', 'No'],
+              ['[Quick Hands Hockey](https://athnexa.com/quickhandshockey)', 'iPhone, iPad and Android app', 'Phone camera color tracking; needs a phone stand', 'Free (touch play and camera demo); Pro $9.99 to $99.99', 'No (English)'],
+              ['[Hotdangle](https://hotdangle.com)', 'Windows PC (Steam)', 'USB webcam required; puck or ball that contrasts with the floor', '$17.99 (₩19,500 on Korean Steam); free demo', 'No'],
+              ['[Puckcam Arena](https://alberta-interactive-games.itch.io/puckcam-arena)', 'Web browser (itch.io)', 'Phone or tablet camera tracks a real puck', 'Standard edition free, no ads; in development', 'Not stated'],
+              ['[Dangleverse](https://apps.apple.com/us/app/dangleverse/id6744417537)', 'Apple devices app; needs two devices', 'Rear camera on a second device, 36–48 in. high', 'Free download; games are paid ($19.99 to $49.99); 30-minute demo', 'No (English)'],
+              ['[PuckPro](https://apps.apple.com/us/app/puckpro/id6776488581)', 'iPhone app', 'iPhone camera; puck color picker', 'Free; optional Pro subscription (price not stated)', 'No (English)'],
+              ['[SuperSticks PRO](https://supersticks.pro)', 'Computer web browser + TV', 'Laptop or external camera; solid-colored ball', 'Free (1 player, 2 drills); $9.99 a month or $99.99 a year', 'Not stated'],
+            ],
+            caption: 'Prices are from the US App Store and Steam in US dollars and vary by country and over time. Check each official page for current details.',
+          }]],
+        ['What makes Puck Dribble Trainer different',
+          ['ul', [
+            '**Nothing to install.** Open puck-trainer.com in Safari or Chrome and start on a phone, iPad or laptop.',
+            '**Korean and English.** Screens, guides and help are in both languages.',
+            '**All 7 games are free.** Arcade, Dodge, Wide Dribble, Figure 8, Quick Hands, Reaction Target and Free Practice. Only leaderboards and community posts are for members.',
+            '**No real puck needed.** Hold a ball or bottle cap that stands out from the floor in the center circle for 3 seconds and it becomes your puck. No tape needed.',
+            '**The video never leaves your device.** The camera is only used to find the puck; nothing is saved or uploaded.',
+            '**Big screens.** Use a phone as the camera (QR connect) and watch on a laptop or TV, or plug a laptop + webcam into a TV and keep your head up.',
+          ]]],
+        ['When another app may suit you better',
+          ['ul', [
+            'If you want a phone **app** and English is fine, Stick Control, Quick Hands Hockey and PuckPro are good choices.',
+            'For a Steam game on a **Windows PC with a USB webcam**, try Hotdangle.',
+            'For a video-game feel with **two Apple devices**, look at Dangleverse.',
+          ]]],
+        ['How to choose',
+          ['ol', [
+            '**Your devices**: just a phone, or a laptop, iPad or Windows PC too.',
+            '**Install or not**: on devices where you cannot install apps (school or shared laptops), pick one that runs in the browser.',
+            '**What is free**: free to use every day, or only a trial.',
+            '**Language**: if a child plays alone, a screen in their language helps.',
+            '**Floor and puck color**: all camera tracking needs a puck that clearly differs from the floor. Black or orange on a white floor, white or neon on a dark one.',
+          ]]],
       ],
     },
   },

@@ -50,6 +50,119 @@
 </head>
 <body>
   <main id="app">
+    <!-- 시작 화면을 게임 화면보다 먼저 둔다: 검색엔진·AI 크롤러가 소개(제목·한 줄 설명)를 버튼 글자보다 먼저 읽게. 겹침 순서는 .panel 의 z-index 로 정해져 화면은 같다 -->
+    <!-- 시작 화면 -->
+    <div id="splash" class="panel splash">
+      <div class="splash-inner">
+        <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
+        <p id="lang-hint" class="lang-hint hidden" data-ugc><a href="/" data-lang="ko" lang="ko">한국어로 보기 →</a></p>
+        <div class="masthead"><span>iPad · Phone · Laptop</span></div>
+        <h1 class="lockup">Puck Dribble<span class="lockup-script"> Trainer</span></h1>
+        <picture>
+          <source srcset="icons/hero-art.webp" type="image/webp" />
+          <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="Stick and puck illustration" decoding="async" />
+        </picture>
+        <p class="lead">Turn your hockey stick into a game controller. Free stickhandling practice at home, with your camera</p>
+        <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
+        <!-- 카메라 없이 체험 (누구나): 마우스 포인터나 손가락이 곧 퍽. 기록·랭킹·출석에는 안 들어감 -->
+        <div id="trial-start" class="trial-start">
+          <button id="btn-mouse" class="btn btn-trial">Try it without a camera</button>
+          <p class="trial-start-note">Move the puck with your mouse or finger · scores are not saved</p>
+        </div>
+        <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
+        <div id="remote-start" class="remote-start">
+          <button id="btn-remote" class="btn btn-remote">Start with phone camera (QR link)</button>
+          <p class="remote-start-note">Your phone and this device must be on the same Wi-Fi</p>
+        </div>
+        <p id="splash-error" class="error hidden"></p>
+        <div id="splash-diag" class="diag hidden">
+          <label>Choose camera <select id="diag-camera"></select></label>
+          <div class="row" style="justify-content:center">
+            <button type="button" id="btn-retry-camera" class="btn btn-primary">Try again</button>
+            <button type="button" id="btn-copy-diag" class="btn btn-ghost">Copy diagnostics</button>
+          </div>
+          <pre id="diag-info" class="diag-info hidden"></pre>
+        </div>
+        <p class="start-note">Without logging in you start as a guest (not ranked)</p>
+        <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
+        <div id="invite-card" class="invite-card hidden" role="status">
+          <b id="invite-title"></b>
+          <span id="invite-sub"></span>
+        </div>
+        <!-- 로그인 / 회원가입 -->
+        <div id="auth-card" class="auth-card hidden">
+          <div id="auth-logged" class="auth-logged hidden">
+            <span id="auth-who"></span>
+            <button type="button" id="btn-admin" class="btn btn-ghost hidden">Operator</button>
+            <button type="button" id="btn-me-splash" class="btn btn-ghost">My info</button>
+            <button type="button" id="btn-logout" class="btn btn-ghost">Log out</button>
+          </div>
+          <form id="auth-form" autocomplete="off">
+            <div class="auth-tabs" id="auth-tabs">
+              <button type="button" class="tab active" data-tab="login">Log in</button>
+              <button type="button" class="tab" data-tab="register">Sign up</button>
+            </div>
+            <div class="auth-grid">
+              <p class="upgrade-id-only hidden auth-hint">You now log in with an ID. Create an ID and a new password. Your nickname and records stay the same. <span class="muted">Old account:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
+              <p class="upgrade-pw-only hidden auth-hint">You logged in with a temporary password. Set a new password only you know to continue. <span class="muted">ID:</span> <b id="auth-temp-id" data-ugc></b></p>
+              <label id="auth-id-label">ID<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="e.g. puckking07" required /></label>
+              <label>Password<input id="auth-pin" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" autocomplete="current-password" placeholder="8+ characters, letters + numbers" required /></label>
+              <label class="new-pw hidden">Confirm password<input id="auth-pin2" type="password" maxlength="64" autocomplete="new-password" placeholder="Password again" /></label>
+              <label class="reg-only hidden">Player nickname<input id="auth-nick" type="text" maxlength="12" placeholder="e.g. Lightning" /></label>
+              <label class="reg-only hidden">Sign-up code<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. K7MP-Q2XD" /></label>
+              <label class="reg-only hidden">Country<select id="auth-country"></select></label>
+              <label class="reg-only hidden">Team name<input id="auth-team" type="text" maxlength="20" placeholder="e.g. Seoul Youth" /></label>
+              <label class="reg-only hidden">Age<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="e.g. 11" /></label>
+              <label class="reg-only hidden">Jersey number (optional)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="e.g. 87" /></label>
+              <div class="field reg-only hidden"><span id="auth-stick-label">Stick</span>
+                <div id="auth-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="auth-stick-label">
+                  <button type="button" role="radio" aria-checked="false" data-stick="L">Left (L)</button>
+                  <button type="button" role="radio" aria-checked="false" data-stick="R">Right (R)</button>
+                </div>
+              </div>
+            </div>
+            <p class="reg-only hidden auth-hint">ID: 4–20 characters, starts with a lowercase letter, never shown · Nickname: shown on leaderboards, so not your real name · Password: 8+ characters, letters and numbers</p>
+            <p class="reg-only hidden auth-hint">Members join with a sign-up code. No code? Finish one game as a guest. The result screen shows how to join.</p>
+            <p class="login-only auth-hint muted">Joined earlier with a nickname and a 6-digit password? Log in with those once and you will create an ID.</p>
+            <div class="login-only auth-forgot">
+              <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">Forgot your password?</button>
+              <div id="auth-forgot-box" class="forgot-box hidden">
+                <p>We never collect email addresses, so we cannot send a reset email. Send a DM to our official Instagram instead.</p>
+                <ol class="forgot-steps">
+                  <li>In the DM, include your ID (or nickname if you forgot it), team name, age, stick (L/R) and roughly when you joined.</li>
+                  <li>After checking, the operator sends you a temporary password by DM.</li>
+                  <li>Log in with the temporary password and you will set a new one right away.</li>
+                </ol>
+                <div id="auth-forgot-dm" class="guest-dm"></div>
+                <p class="muted">For young players, a parent or guardian should send it. The operator will never ask for your password first.</p>
+              </div>
+            </div>
+            <p id="auth-error" class="error hidden"></p>
+            <div class="row" style="justify-content:center">
+              <button type="submit" id="auth-submit" class="btn btn-primary">Log in</button>
+              <button type="button" id="auth-guest" class="btn btn-ghost">Start as guest (not ranked)</button>
+              <button type="button" id="auth-cancel" class="btn btn-ghost upgrade-only hidden">Log out</button>
+            </div>
+          </form>
+          <p id="auth-store-note" class="muted"></p>
+        </div>
+        <details class="howto">
+          <summary>First time? — How to play</summary>
+          <ol class="tips">
+            <li><span><b>Set up</b> — Stand the device 1–1.5 m high, looking down at the floor at an angle.</span></li>
+            <li><span><b>Area</b> — Drag the four corners onto the floor.</span></li>
+            <li><span><b>Register puck</b> — Hold the puck (a ball or lid works too) in the center circle for 3 s.</span></li>
+            <li><span><b>Test move</b> — Take the puck to the four corner targets.</span></li>
+            <li><span><b>Start</b> — Pick a game and hold the puck in the circle for 3 s to start.</span></li>
+          </ol>
+        </details>
+        <p class="about">Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.</p>
+        <nav class="site-links" aria-label="Guide pages"><a href="/en/guide/">Guide</a><a href="/en/games/">The 7 games</a><a href="/en/faq/">FAQ</a><a href="/en/compare/">Compare apps</a></nav>
+        <p class="analytics-note">We use Google Analytics to count visits and plays. No personal details such as nicknames or ages are sent.</p>
+        <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>All rights reserved · no copying or redistribution</span></p>
+      </div>
+    </div>
+
     <!-- 카메라 영상 + 오버레이 -->
     <section id="stage">
       <div id="view" class="view">
@@ -164,118 +277,6 @@
         <button id="btn-start" class="btn btn-primary">Start</button>
       </nav>
     </section>
-
-    <!-- 시작 화면 -->
-    <div id="splash" class="panel splash">
-      <div class="splash-inner">
-        <div class="lang-row"><div class="seg lang-seg" role="group" aria-label="Language" data-ugc><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div></div>
-        <p id="lang-hint" class="lang-hint hidden" data-ugc><a href="/" data-lang="ko" lang="ko">한국어로 보기 →</a></p>
-        <div class="masthead"><span>iPad · Phone · Laptop</span></div>
-        <h1 class="lockup">Puck Dribble<span class="lockup-script"> Trainer</span></h1>
-        <picture>
-          <source srcset="icons/hero-art.webp" type="image/webp" />
-          <img class="hero-art" src="icons/hero-art.png" width="1200" height="618" alt="Stick and puck illustration" decoding="async" />
-        </picture>
-        <p class="lead">Turn your hockey stick into a game controller. Free stickhandling practice at home, with your camera</p>
-        <button id="btn-camera" class="btn btn-primary btn-big">Start camera</button>
-        <!-- 카메라 없이 체험 (누구나): 마우스 포인터나 손가락이 곧 퍽. 기록·랭킹·출석에는 안 들어감 -->
-        <div id="trial-start" class="trial-start">
-          <button id="btn-mouse" class="btn btn-trial">Try it without a camera</button>
-          <p class="trial-start-note">Move the puck with your mouse or finger · scores are not saved</p>
-        </div>
-        <!-- 휴대폰 카메라 (QR 연결): 로그인한 회원. 휴대폰은 촬영만, 이 기기 화면을 보며 플레이 -->
-        <div id="remote-start" class="remote-start">
-          <button id="btn-remote" class="btn btn-remote">Start with phone camera (QR link)</button>
-          <p class="remote-start-note">Your phone and this device must be on the same Wi-Fi</p>
-        </div>
-        <p id="splash-error" class="error hidden"></p>
-        <div id="splash-diag" class="diag hidden">
-          <label>Choose camera <select id="diag-camera"></select></label>
-          <div class="row" style="justify-content:center">
-            <button type="button" id="btn-retry-camera" class="btn btn-primary">Try again</button>
-            <button type="button" id="btn-copy-diag" class="btn btn-ghost">Copy diagnostics</button>
-          </div>
-          <pre id="diag-info" class="diag-info hidden"></pre>
-        </div>
-        <p class="start-note">Without logging in you start as a guest (not ranked)</p>
-        <!-- 초대 링크(?c=코드)로 들어왔을 때 -->
-        <div id="invite-card" class="invite-card hidden" role="status">
-          <b id="invite-title"></b>
-          <span id="invite-sub"></span>
-        </div>
-        <!-- 로그인 / 회원가입 -->
-        <div id="auth-card" class="auth-card hidden">
-          <div id="auth-logged" class="auth-logged hidden">
-            <span id="auth-who"></span>
-            <button type="button" id="btn-admin" class="btn btn-ghost hidden">Operator</button>
-            <button type="button" id="btn-me-splash" class="btn btn-ghost">My info</button>
-            <button type="button" id="btn-logout" class="btn btn-ghost">Log out</button>
-          </div>
-          <form id="auth-form" autocomplete="off">
-            <div class="auth-tabs" id="auth-tabs">
-              <button type="button" class="tab active" data-tab="login">Log in</button>
-              <button type="button" class="tab" data-tab="register">Sign up</button>
-            </div>
-            <div class="auth-grid">
-              <p class="upgrade-id-only hidden auth-hint">You now log in with an ID. Create an ID and a new password. Your nickname and records stay the same. <span class="muted">Old account:</span> <b id="auth-upgrade-nick" data-ugc></b></p>
-              <p class="upgrade-pw-only hidden auth-hint">You logged in with a temporary password. Set a new password only you know to continue. <span class="muted">ID:</span> <b id="auth-temp-id" data-ugc></b></p>
-              <label id="auth-id-label">ID<input id="auth-id" type="text" maxlength="20" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="e.g. puckking07" required /></label>
-              <label>Password<input id="auth-pin" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="64" autocomplete="current-password" placeholder="8+ characters, letters + numbers" required /></label>
-              <label class="new-pw hidden">Confirm password<input id="auth-pin2" type="password" maxlength="64" autocomplete="new-password" placeholder="Password again" /></label>
-              <label class="reg-only hidden">Player nickname<input id="auth-nick" type="text" maxlength="12" placeholder="e.g. Lightning" /></label>
-              <label class="reg-only hidden">Sign-up code<input id="auth-code" type="text" maxlength="24" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. K7MP-Q2XD" /></label>
-              <label class="reg-only hidden">Country<select id="auth-country"></select></label>
-              <label class="reg-only hidden">Team name<input id="auth-team" type="text" maxlength="20" placeholder="e.g. Seoul Youth" /></label>
-              <label class="reg-only hidden">Age<input id="auth-age" type="number" inputmode="numeric" min="3" max="99" placeholder="e.g. 11" /></label>
-              <label class="reg-only hidden">Jersey number (optional)<input id="auth-number" type="number" inputmode="numeric" min="0" max="99" placeholder="e.g. 87" /></label>
-              <div class="field reg-only hidden"><span id="auth-stick-label">Stick</span>
-                <div id="auth-stick" class="seg stick-seg" role="radiogroup" aria-labelledby="auth-stick-label">
-                  <button type="button" role="radio" aria-checked="false" data-stick="L">Left (L)</button>
-                  <button type="button" role="radio" aria-checked="false" data-stick="R">Right (R)</button>
-                </div>
-              </div>
-            </div>
-            <p class="reg-only hidden auth-hint">ID: 4–20 characters, starts with a lowercase letter, never shown · Nickname: shown on leaderboards, so not your real name · Password: 8+ characters, letters and numbers</p>
-            <p class="reg-only hidden auth-hint">Members join with a sign-up code. No code? Finish one game as a guest. The result screen shows how to join.</p>
-            <p class="login-only auth-hint muted">Joined earlier with a nickname and a 6-digit password? Log in with those once and you will create an ID.</p>
-            <div class="login-only auth-forgot">
-              <button type="button" id="auth-forgot" class="link-btn" aria-expanded="false" aria-controls="auth-forgot-box">Forgot your password?</button>
-              <div id="auth-forgot-box" class="forgot-box hidden">
-                <p>We never collect email addresses, so we cannot send a reset email. Send a DM to our official Instagram instead.</p>
-                <ol class="forgot-steps">
-                  <li>In the DM, include your ID (or nickname if you forgot it), team name, age, stick (L/R) and roughly when you joined.</li>
-                  <li>After checking, the operator sends you a temporary password by DM.</li>
-                  <li>Log in with the temporary password and you will set a new one right away.</li>
-                </ol>
-                <div id="auth-forgot-dm" class="guest-dm"></div>
-                <p class="muted">For young players, a parent or guardian should send it. The operator will never ask for your password first.</p>
-              </div>
-            </div>
-            <p id="auth-error" class="error hidden"></p>
-            <div class="row" style="justify-content:center">
-              <button type="submit" id="auth-submit" class="btn btn-primary">Log in</button>
-              <button type="button" id="auth-guest" class="btn btn-ghost">Start as guest (not ranked)</button>
-              <button type="button" id="auth-cancel" class="btn btn-ghost upgrade-only hidden">Log out</button>
-            </div>
-          </form>
-          <p id="auth-store-note" class="muted"></p>
-        </div>
-        <details class="howto">
-          <summary>First time? — How to play</summary>
-          <ol class="tips">
-            <li><span><b>Set up</b> — Stand the device 1–1.5 m high, looking down at the floor at an angle.</span></li>
-            <li><span><b>Area</b> — Drag the four corners onto the floor.</span></li>
-            <li><span><b>Register puck</b> — Hold the puck (a ball or lid works too) in the center circle for 3 s.</span></li>
-            <li><span><b>Test move</b> — Take the puck to the four corner targets.</span></li>
-            <li><span><b>Start</b> — Pick a game and hold the puck in the circle for 3 s to start.</span></li>
-          </ol>
-        </details>
-        <p class="about">Puck Dribble Trainer is a free web game that uses the camera on your phone, iPad or laptop to track your puck and stick, so you can train ice hockey stickhandling at home. There is no app to install: it runs in the browser.</p>
-        <nav class="site-links" aria-label="Guide pages"><a href="/en/guide/">Guide</a><a href="/en/games/">The 7 games</a><a href="/en/faq/">FAQ</a></nav>
-        <p class="analytics-note">We use Google Analytics to count visits and plays. No personal details such as nicknames or ages are sent.</p>
-        <p class="copyright">© 2026 ochodoit · Puck Dribble Trainer · <span>All rights reserved · no copying or redistribution</span></p>
-      </div>
-    </div>
 
     <!-- 모드 선택 -->
     <div id="panel-mode" class="panel modal hidden">

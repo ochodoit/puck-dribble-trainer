@@ -201,6 +201,9 @@ h1, h2, h3 { font-family: var(--display); font-weight: 900; font-variation-setti
 .lockup { position: relative; display: inline-block; font-size: clamp(50px, min(13vw, 13vh), 112px); line-height: 0.92; letter-spacing: -0.03em; margin: 0 0 0.3em; }
 .lockup-script { position: absolute; right: -0.06em; bottom: -0.52em; font-family: var(--script); font-weight: 700; font-variation-settings: normal; color: var(--red);
   font-size: 0.62em; letter-spacing: 0; transform: rotate(-7deg); white-space: nowrap; }
+/* 제목(h1) 안의 한국어 이름: 로고 위 작은 글자. 검색엔진이 '퍽 드리블 트레이너'를 제목으로 읽게. 영어 화면에서는 숨김 (영어판 HTML 에서는 build-site 가 지움) */
+.lockup-ko { display: block; font-family: var(--sans); font-size: clamp(14px, 2.4vw, 17px); font-weight: 700; line-height: 1.2; letter-spacing: 0.08em; color: var(--ink-soft); margin: 0 0 0.5em; }
+html[lang="en"] .lockup-ko { display: none; }
 .hero-art { display: block; width: min(360px, 74%); height: auto; max-height: 26vh; object-fit: contain; margin: clamp(10px, 2.4vh, 28px) auto clamp(6px, 1.6vh, 14px); }
 .lead { display: inline-block; border: var(--line) solid var(--ink); border-radius: 28px; padding: 9px 24px; font-size: clamp(13px, 2.2vw, 15.5px); margin: 0 0 18px; max-width: 100%; text-wrap: balance; }
 /* 카메라 시작: 문구(알약) 바로 옆이 아니라 그 아래 가운데에 한 줄로 (넓은 화면에서 알약 옆에 붙어 보이지 않게) */

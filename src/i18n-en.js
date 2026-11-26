@@ -875,6 +875,7 @@ export const EN = {
   '사용 가이드': 'Guide',
   '7가지 게임': 'The 7 games',
   '자주 묻는 질문': 'FAQ',
+  '다른 앱과 비교': 'Compare apps',
   // 운영자 통계 · 방문 통계 안내
   '통계': 'Stats',
   '회원 기준(가입·출석·플레이)입니다. 방문자 수와 게스트 플레이는 Google 애널리틱스에서 봅니다.': 'Counted from member accounts (sign-ups, attendance, plays). Visitors and guest plays are in Google Analytics.',

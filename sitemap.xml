@@ -2,14 +2,14 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://puck-trainer.com/</loc>
-    <lastmod>2026-11-25</lastmod>
+    <lastmod>2026-11-26</lastmod>
     <xhtml:link rel="alternate" hreflang="ko" href="https://puck-trainer.com/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/" />
   </url>
   <url>
     <loc>https://puck-trainer.com/en/</loc>
-    <lastmod>2026-11-25</lastmod>
+    <lastmod>2026-11-26</lastmod>
     <xhtml:link rel="alternate" hreflang="ko" href="https://puck-trainer.com/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/" />
@@ -44,16 +44,30 @@
   </url>
   <url>
     <loc>https://puck-trainer.com/faq/</loc>
-    <lastmod>2026-11-25</lastmod>
+    <lastmod>2026-11-26</lastmod>
     <xhtml:link rel="alternate" hreflang="ko" href="https://puck-trainer.com/faq/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/faq/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/faq/" />
   </url>
   <url>
     <loc>https://puck-trainer.com/en/faq/</loc>
-    <lastmod>2026-11-25</lastmod>
+    <lastmod>2026-11-26</lastmod>
     <xhtml:link rel="alternate" hreflang="ko" href="https://puck-trainer.com/faq/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/faq/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/faq/" />
+  </url>
+  <url>
+    <loc>https://puck-trainer.com/compare/</loc>
+    <lastmod>2026-11-26</lastmod>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://puck-trainer.com/compare/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/compare/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/compare/" />
+  </url>
+  <url>
+    <loc>https://puck-trainer.com/en/compare/</loc>
+    <lastmod>2026-11-26</lastmod>
+    <xhtml:link rel="alternate" hreflang="ko" href="https://puck-trainer.com/compare/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://puck-trainer.com/en/compare/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://puck-trainer.com/compare/" />
   </url>
 </urlset>

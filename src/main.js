@@ -5,6 +5,7 @@ import { Vision, AutoCalibrator, colorsTooClose } from './vision.js';
 import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
 import { placementCheck } from './placement.js';
+import { chooseTolerance, needFromTest, chooseProcWidth, preferLowRate } from './autotune.js';
 import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
 import { C, rgba } from './theme.js';
 import { Renderer, dodgeField, FLOOR_MODES, FLOOR_FLIP_MODES } from './render.js';
@@ -938,6 +939,7 @@ function bindUI() {
   }
   $('#set-procWidth').addEventListener('change', (e) => { settings.procWidth = Number(e.target.value); vision.setProcWidth(settings.procWidth); layout(); persist(); });
   $('#set-camRate').addEventListener('change', (e) => { settings.camRate = e.target.value; applyCamRate(); persist(); });
+  $('#btn-tune-now').addEventListener('click', tuneNow);
   $('#set-controller').addEventListener('change', (e) => {
     settings.controller = e.target.value; persist(); tracker.reset();
     if (settings.controller === 'stick' && !settings.stickModel) toast('보정에서 스틱 색을 먼저 지정하세요', 4000);
@@ -1281,8 +1283,9 @@ function beginTestSetup() {
   quietCalibReset();
   setSetup('test');
   // meas: 카메라 위치 점검용 — 표적에 닿았을 때 퍽 크기(먼 쪽·가까운 쪽), 먼 쪽 절반에 있는 동안 놓친 영상 수
-  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, lastV: null, frameAt: -1,
-    meas: { far: [], near: [], farFrames: 0, farMissed: 0 } };
+  // hist·noise: 자동 맞춤 재료 — 네 모서리를 도는 동안 퍽 한가운데 색 거리, 영상 잡음 (autoTuneAfterTest)
+  app.test = { targets: TEST_TARGETS.map(([x, y]) => ({ x, y, hit: false })), r: TEST_R, lostFor: 0, lastV: null, frameAt: -1, noiseState: {},
+    meas: { far: [], near: [], farFrames: 0, farMissed: 0, hist: new Uint32Array(257), noise: [] } };
   $('#test-hint').textContent = '퍽을 네 모서리 표적에';
   paintTest();
 }
@@ -1324,6 +1327,10 @@ function updateSetupTest(dt, now) {
     t.frameAt = app.lastFrameAt;
     const v = seen ? tracker.pos.y : t.lastV;
     if (v != null && v < 0.35) { t.meas.farFrames++; if (!res.puck) t.meas.farMissed++; }
+    // 자동 맞춤 재료: 온전히 보이는 퍽의 한가운데 색(가려진 조각·떼어 낸 조각은 빼고), 영상 잡음
+    if (seen && res.puck && !res.puck.doubtful) vision.sampleCore(settings.puckModel, res.puck.x, res.puck.y, 0.6 * Math.sqrt(res.puck.area / Math.PI), t.meas.hist);
+    const nz = vision.noiseProbe(t.noiseState);
+    if (nz != null) t.meas.noise.push(nz);
   }
   if (seen) {
     for (const g of t.targets) {
@@ -1337,9 +1344,12 @@ function updateSetupTest(dt, now) {
     // 네 모서리 모두 잡힘 -> 바로 모드 창 (카메라 높이 점검 결과는 모드 창 위 안내로)
     const pc = checkPlacement(t.meas);
     const advice = pc ? PLACEMENT_ADVICE[pc.verdict] : null;
+    // 이 집에 맞춰 인식 자동 맞춤 (허용 오차·해상도·카메라 프레임). 바꾼 것이 있으면 안내 끝에 붙인다
+    const tuneNote = autoTuneAfterTest(t.meas);
     sfx.target();
     finishSetup();
-    toast(advice || '준비 완료 · 게임을 고르세요', advice ? 6000 : 2500);
+    const msg = advice || '준비 완료 · 게임을 고르세요';
+    toast(tuneNote ? `${msg} · ${tuneNote}` : msg, advice || tuneNote ? 6000 : 2500);
     return;
   }
   const farLost = t.meas.farFrames > 40 && t.meas.farMissed / t.meas.farFrames > 0.35 && t.lastV != null && t.lastV < 0.35;
@@ -1450,8 +1460,8 @@ async function requestWakeLock() {
 }
 
 async function startStream() {
-  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing, settings.camRate === '30' ? 30 : 60);
-  camRateAuto.reset();
+  const { width, height, facing } = await camera.start(settings.cameraId, settings.facing, startRate());
+  camRateAuto.reset(); markDarkRate();
   if (facing === 'user' || facing === 'environment') settings.facing = facing;
   const track = camera.stream.getVideoTracks()[0];
   track.addEventListener('ended', () => { app.cameraLost = true; toast('카메라 연결이 끊겼습니다. 설정에서 카메라를 다시 선택하세요.', 6000); if (game.running) game.stop('manual'); });
@@ -1527,10 +1537,17 @@ function countFrame() {
 
 /** '카메라 프레임' 설정 적용: 직접 연결 카메라는 바로 바꾸고, 휴대폰 카메라 연결이면 휴대폰에 알린다 (휴대폰이 Wi-Fi 상태를 보고 정함) */
 function applyCamRate() {
-  camRateAuto.reset();
+  camRateAuto.reset(); markDarkRate();
   app.fpsFresh = false;
   if (app.remoteMode) remote?.host.send({ t: 'rate', mode: settings.camRate });
-  else if (!app.mouseMode) camera.setFrameRate(settings.camRate === '30' ? 30 : 60);
+  else if (!app.mouseMode) camera.setFrameRate(startRate());
+}
+
+/** 카메라를 켤 때 fps: '30' 고정이거나, 자동인데 지난 3/3 에서 어둡고 자글거렸으면(camDark) 30, 아니면 60 */
+const startRate = () => (settings.camRate === '30' || (settings.camRate === 'auto' && settings.camDark) ? 30 : 60);
+/** 자동인데 어두워서 30 으로 시작했으면 자동 낮춤 상태로 (60 으로 다시 올리지 않고, 안내도 '어두워서') */
+function markDarkRate() {
+  if (settings.camRate === 'auto' && settings.camDark) { camRateAuto.target = 30; camRateAuto.lowered = true; camRateAuto.dark = true; }
 }
 
 /** 자동: 1초마다 이 기기가 카메라 프레임을 따라가는지 보고, 60을 다 인식하지 못하면 카메라를 30으로 (게임 중 화면만 볼 때 — 설정 창 미리보기는 빼고) */
@@ -1553,7 +1570,7 @@ function fpsChipTitle() {
   const r = vision.roi, cam = camera.frameRate();
   const parts = [`인식 ${app.fps} fps, 프레임당 ${app.procMs ? app.procMs.toFixed(1) : '-'}ms`];
   if (app.remoteMode && app.remoteLink?.fps) parts.push(app.remoteLink.mode === 'auto' ? `휴대폰 연결 ${app.remoteLink.fps}fps (Wi-Fi 상태에 맞춰 자동)` : `휴대폰 연결 ${app.remoteLink.fps}fps (고정)`);
-  else if (cam) parts.push(camRateAuto.lowered && settings.camRate === 'auto' ? `카메라 ${Math.round(cam)} fps (이 기기에 맞춰 자동으로 낮춤)` : `카메라 ${Math.round(cam)} fps`);
+  else if (cam) parts.push(camRateAuto.lowered && settings.camRate === 'auto' ? (camRateAuto.dark ? `카메라 ${Math.round(cam)} fps (어둡고 자글거려 자동으로 낮춤)` : `카메라 ${Math.round(cam)} fps (이 기기에 맞춰 자동으로 낮춤)`) : `카메라 ${Math.round(cam)} fps`);
   if (r) parts.push(`영역 ${r.W}×${r.H}px로 읽음 (×${r.sx.toFixed(2)})`);
   return parts.join(' · ');
 }
@@ -1987,6 +2004,129 @@ function updateIdleCircle(dt) {
  * 등록한 퍽·스틱 색이 거의 같으면(검정 퍽 + 검정 테이프, 아주 진한 녹색 + 검정 등) 인식이 둘을 나눌 수 없다.
  * 등록을 마칠 때 알려 준다. 반환: 알렸는지
  */
+// =============== 인식 자동 맞춤 (src/autotune.js) ===============
+// 집마다 카메라·각도·조명·퍽·바닥 색이 달라, 등록한 뒤 '인식 세부 조정'을 손으로 다시 만지지 않아도 되게
+//  - 퍽·스틱 등록 때: 물체 자신의 색 퍼짐(need)과 지금 영상의 바닥·그림자·얼룩을 보고 색 허용 오차
+//  - 3/3 움직여 보기 끝: 네 모서리에서 잰 퍽 색으로 허용 오차를 다시, 먼 쪽 퍽 크기·기기 속도로 인식 해상도, 영상 잡음으로 카메라 프레임
+
+/** 등록한 물체 자리와 그 둘레(그림자·바닥과 섞인 테두리): 영역 확인에서 뺀다 (처리 px) */
+const objectZone = (x, y, area) => ({ x, y, r: Math.max(6, 2.6 * Math.sqrt(Math.max(1, area) / Math.PI)) });
+
+function syncTolUI() {
+  for (const key of ['puckTol', 'stickTol']) { $(`#set-${key}`).value = settings[key]; $(`#out-${key}`).value = settings[key]; }
+}
+
+/**
+ * 색 허용 오차 자동 맞춤. zones: 지금 영상에서 빼고 볼 자리 (등록한 물체·지금 퍽이 있는 자리), which: 맞출 대상 (먼저 쓴 것부터).
+ * 대상 물체가 영상에 없는 상태(자리를 모름)로 맞추면 그 물체 자신이 '같은 색 물체'로 잡히므로, 부르는 쪽이 자리를 아는 것만 넣는다.
+ * 반환: { puck?: {tol, need, status}, stick?: {...}, luma } (status: 'ok' | 'narrow' 바닥과 겹쳐 조금 좁힘 | 'same' 같은 색 물체가 보임)
+ */
+function tuneTolerances({ zones = [], which = ['puck'] } = {}) {
+  const out = {};
+  if (app.mouseMode) return out;
+  for (const target of which) {
+    const self = target === 'puck' ? settings.puckModel : settings.stickModel;
+    if (!(self?.area > 0)) continue;
+    const otherModel = target === 'puck' ? settings.stickModel : settings.puckModel;
+    const other = otherModel?.area > 0 ? { model: otherModel, tol: target === 'puck' ? settings.stickTol : settings.puckTol } : null;
+    const map = vision.distanceMap(self, { exclude: zones, other });
+    const key = target === 'puck' ? 'puckTol' : 'stickTol';
+    const r = chooseTolerance({ need: self.need || settings[key] / 1.2, map, area: self.area, bgDist: self.bgDist || 0, kind: target });
+    settings[key] = r.tol;
+    out[target] = r;
+    if (map) out.luma = map.luma;
+  }
+  syncTolUI();
+  app.autoTune = { ...(app.autoTune || {}), ...out, at: Date.now() };
+  paintTuneStatus();
+  return out;
+}
+
+/** 자동 맞춤이 '같은 색 물체가 영역에 보인다'고 하면 알린다 (허용 오차로는 못 고치는 경우). 알렸으면 true */
+function warnTune(r, target) {
+  if (r?.status !== 'same') return false;
+  toast(target === 'puck'
+    ? '영역 안에 퍽과 거의 같은 색·크기 물체가 보여요 (다른 퍽·병뚜껑·얼룩) · 치우면 더 정확해요'
+    : '영역 안에 스틱 테이프와 같은 색이 보여요 · 치우거나 퍽·바닥과 다른 색 테이프를 감아 보세요', 6000);
+  return true;
+}
+
+/** 인식 해상도 바꾸기: 등록한 퍽·스틱 크기(처리 px)도 새 해상도로 환산 */
+function applyProcWidth(pw) {
+  const before = vision.PW;
+  if (pw === before) return false;
+  settings.procWidth = pw; vision.setProcWidth(pw); layout();
+  $('#set-procWidth').value = String(pw);
+  const k = vision.PW / before;
+  for (const m of [settings.puckModel, settings.stickModel]) if (m?.area > 0) m.area = Math.max(3, Math.round(m.area * k * k));
+  stickBridge.reset();
+  return true;
+}
+
+/**
+ * 3/3 움직여 보기를 마치면: 네 모서리에서 잰 퍽 색으로 허용 오차를 다시, 먼 쪽 퍽 크기로 인식 해상도, 영상 잡음으로 카메라 프레임.
+ * meas: app.test.meas. 반환: 안내 글 조각 (바꾼 것이 없으면 '')
+ */
+function autoTuneAfterTest(meas) {
+  if (app.mouseMode || !(settings.puckModel.area > 0)) return '';
+  const res = app.lastVision;
+  const notes = [];
+  // 1) 허용 오차: 네 모서리의 퍽 색까지 다 잡히게 (지금 퍽·스틱이 있는 자리는 빼고 영역 확인)
+  settings.puckModel.need = needFromTest(meas.hist, settings.puckModel.need);
+  // 퍽 자리: 이번 영상에서 보인 자리, 아니면 추적기가 짐작한 자리. 둘 다 모르면 퍽 자신이 '같은 색 물체'로 잡히므로 허용 오차는 그대로
+  const map0 = res?.floor?.mapping;
+  const ppos = res?.puck ? [res.puck.x, res.puck.y] : tracker.pos && map0 ? map0.toPx(tracker.pos.x, tracker.pos.y) : null;
+  const zones = [];
+  if (ppos) zones.push(objectZone(ppos[0], ppos[1], settings.puckModel.area));
+  const stickSeen = !!(res?.stick && settings.stickModel);
+  if (stickSeen) { const [x0, y0, x1, y1] = res.stick.bbox; zones.push({ x: (x0 + x1) / 2, y: (y0 + y1) / 2, r: Math.hypot(x1 - x0, y1 - y0) / 2 + 3 }); }
+  const tuned = ppos ? tuneTolerances({ zones, which: stickSeen ? ['puck', 'stick'] : ['puck'] }) : { luma: vision.distanceMap(settings.puckModel)?.luma || 0 };
+  // 2) 인식 해상도: 먼 쪽 퍽이 충분한 픽셀로 읽히는 가장 가벼운 값 (기기가 버거우면 올리지 않음)
+  if (meas.far.length && settings.procWidth === vision.PW) {
+    const pw = chooseProcWidth({ far: Math.min(...meas.far), pw: vision.PW, budget: vision.roi?.budget || 1, srcW: vision.srcW || 0, fps: app.fps || 0 });
+    if (applyProcWidth(pw)) notes.push(`인식 해상도 ${pw}`);
+  }
+  // 3) 카메라 프레임(자동일 때만): 어둡고 자글거리면 30fps (노출이 길어져 영상 잡음이 준다)
+  meas.noise.sort((a, b) => a - b);
+  const noise = meas.noise.length >= 10 ? meas.noise[meas.noise.length >> 1] : 0;
+  const luma = tuned.luma || 0;
+  if (settings.camRate === 'auto' && !app.remoteMode && meas.noise.length >= 10) {
+    const dark = preferLowRate({ noise, luma });
+    if (dark && !settings.camDark) {
+      settings.camDark = true; markDarkRate();
+      if (camera.frameRate() >= 45) { camera.setFrameRate(30); notes.push('어두워서 카메라 30fps'); }
+    } else if (!dark && settings.camDark) {
+      // 지난번엔 어두웠는데 이제 밝다 -> 다시 60 부터 (기기가 못 따라가면 자동이 다시 낮춘다)
+      settings.camDark = false; camRateAuto.reset(); camera.setFrameRate(60);
+    }
+  }
+  app.autoTune = { ...(app.autoTune || {}), noise: +noise.toFixed(2), luma: Math.round(luma), procWidth: vision.PW, at: Date.now() };
+  persist(); paintTuneStatus();
+  if (tuned.puck?.status === 'same') notes.push('영역 안에 퍽과 비슷한 물체가 보여요');
+  return notes.join(' · ');
+}
+
+/** 설정 창 '지금 영상으로 자동 맞추기': 지금 보이는 퍽·스틱 자리를 빼고 허용 오차만 다시 맞춘다 (해상도·프레임은 3/3 에서) */
+function tuneNow() {
+  if (app.mouseMode || !app.lastVision || !(settings.puckModel.area > 0)) { toast('퍽을 먼저 등록하세요 (보정 > 원 안에 3초)'); return; }
+  const res = app.lastVision, zones = [], which = ['puck'];
+  if (!res.puck) { toast('퍽이 보이게 영역 안에 두고 다시 누르세요'); return; }
+  zones.push(objectZone(res.puck.x, res.puck.y, settings.puckModel.area));
+  if (res.stick && settings.stickModel) { const [x0, y0, x1, y1] = res.stick.bbox; zones.push({ x: (x0 + x1) / 2, y: (y0 + y1) / 2, r: Math.hypot(x1 - x0, y1 - y0) / 2 + 3 }); which.push('stick'); }
+  const t = tuneTolerances({ zones, which });
+  persist();
+  if (!warnTune(t.puck, 'puck') && !warnTune(t.stick, 'stick')) toast(`자동으로 맞췄어요 · 퍽 ${settings.puckTol}${t.stick ? ` · 스틱 ${settings.stickTol}` : ''}`, 3000);
+}
+
+/** 설정 창 인식 세부 조정의 '자동 맞춤' 한 줄 */
+function paintTuneStatus() {
+  const el = $('#tune-status'), a = app.autoTune;
+  if (!el) return;
+  if (!a?.puck) { el.textContent = ''; return; }
+  const status = a.puck.status === 'same' ? ' · 영역 안에 퍽과 비슷한 물체가 있어요' : a.puck.status === 'narrow' ? ' · 바닥과 겹쳐 조금 좁게' : '';
+  el.textContent = `자동 맞춤: 퍽 ${settings.puckTol}${settings.stickModel ? ` · 스틱 ${settings.stickTol}` : ''} · 해상도 ${settings.procWidth}${status}`;
+}
+
 function warnColorClash() {
   const pm = settings.puckModel;
   if (!(pm?.area > 0) || !colorsTooClose(pm, settings.stickModel)) return false;
@@ -1995,9 +2135,10 @@ function warnColorClash() {
 }
 
 function commitLearnedModel(target, done, refresh = false) {
-  const model = { r: done.r, g: done.g, b: done.b, area: done.area };
+  // need·bgDist: 자동 맞춤(autotune)의 기준 — 물체가 다 잡히는 허용 오차, 바닥과의 색 차이
+  const model = { r: done.r, g: done.g, b: done.b, area: done.area, need: done.need || 0, bgDist: Math.round(done.dist || 0) };
   $('#btn-replace-puck').classList.add('hidden');
-  let boosted = false;
+  let boosted = false, zone;
   if (target === 'puck') {
     if (!app.mouseMode) track('puck_registered');
     // 아주 작게 보이는 퍽은 인식 해상도를 올려 따라간다 (면적·자리는 새 해상도로 환산)
@@ -2005,17 +2146,19 @@ function commitLearnedModel(target, done, refresh = false) {
     if (k !== 1) { boosted = true; model.area = Math.round(model.area * k * k); }
     settings.puckModel = model; settings.puckTol = done.tol;
     vision.seedPuck(done.cx * k, done.cy * k, model.area); tracker.reset(); stickBridge.reset();
-    $('#set-puckTol').value = done.tol; $('#out-puckTol').value = done.tol;
+    zone = objectZone(done.cx * k, done.cy * k, model.area);
   } else {
     settings.stickModel = model; settings.stickTol = done.tol;
-    $('#set-stickTol').value = done.tol; $('#out-stickTol').value = done.tol;
+    zone = objectZone(done.cx, done.cy, model.area);
   }
+  // 이 집 영상(바닥·그림자·얼룩·신발)에 맞춰 허용 오차를 정한다 (등록한 물체 자리는 빼고 본다)
+  const tuned = tuneTolerances({ zones: [zone], which: [target] })[target];
   autoCal.reset();
   persist(); refreshCalibUI();
   sfx.target();
-  if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); warnColorClash(); return; }
-  if (app.calibFromMode) { backToModeAfterCalib(); if (!warnColorClash()) toast(target === 'puck' ? '퍽 등록 완료' : '스틱 등록 완료', 3000); return; }
-  if (warnColorClash()) return;
+  if (app.setup === 'puck' && target === 'puck') { beginTestSetup(); warnColorClash() || warnTune(tuned, target); return; }
+  if (app.calibFromMode) { backToModeAfterCalib(); if (!warnColorClash() && !warnTune(tuned, target)) toast(target === 'puck' ? '퍽 등록 완료' : '스틱 등록 완료', 3000); return; }
+  if (warnColorClash() || warnTune(tuned, target)) return;
   if (refresh) toast('등록된 퍽을 다시 인식했어요 · 원에 3초 더 두면 시작', 3500);
   else if (boosted) toast('퍽 등록 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요', 4000);
   else toast(target === 'puck' ? '퍽 등록 완료 · 원에 3초 더 두면 시작' : '스틱 등록 완료', 3500);
@@ -2643,20 +2786,19 @@ function onViewTap(e) {
     toast('바닥(흰색)과 구분되지 않는 색입니다. 다른 색의 물체/테이프를 사용하세요.');
     return;
   }
-  const model = { r: sample.r, g: sample.g, b: sample.b, area: Math.max(4, Math.min(3000, sample.area)) };
+  const model = { r: sample.r, g: sample.g, b: sample.b, area: Math.max(4, Math.min(3000, sample.area)), need: sample.need || 0, bgDist: Math.round(sample.dist || 0) };
   let sx = sample.snapped ? sample.cx : px, sy = sample.snapped ? sample.cy : py, boosted = false;
   if (target === 'puck') {
     const k = boostForSmallPuck(model.area);
     if (k !== 1) { boosted = true; model.area = Math.round(model.area * k * k); sx *= k; sy *= k; }
     settings.puckModel = model; vision.seedPuck(sx, sy, model.area); tracker.reset(); stickBridge.reset();
   } else settings.stickModel = model;
-  // 주변 바닥과의 색 차이에 맞춘 허용 오차 (원 안에 3초 자동 지정과 같은 기준)
-  if (sample.snapped && sample.tol) {
-    const key = target === 'puck' ? 'puckTol' : 'stickTol';
-    settings[key] = sample.tol; $(`#set-${key}`).value = sample.tol; $(`#out-${key}`).value = sample.tol;
-  }
+  // 허용 오차: 물체 자신의 색 퍼짐(need)과 이 집 영상의 바닥·그림자·얼룩을 보고 자동으로 (원 안에 3초 자동 지정과 같은 기준).
+  // 물체에 붙지 못하고 누른 자리 색만 잰 경우(snapped 아님)는 need 를 모르므로 지금 값을 기준으로
+  if (!sample.snapped) model.need = Math.round((target === 'puck' ? settings.puckTol : settings.stickTol) / 1.2);
+  const tuned = tuneTolerances({ zones: [objectZone(sx, sy, model.area)], which: [target] })[target];
   persist(); refreshCalibUI();
-  if (warnColorClash()) return;
+  if (warnColorClash() || warnTune(tuned, target)) return;
   toast(boosted ? '퍽 색 지정 완료 · 퍽이 작게 보여 인식 해상도를 400으로 올렸어요' : `${target === 'puck' ? '퍽' : '스틱'} 색 지정 완료`, boosted ? 3500 : undefined);
 }
 

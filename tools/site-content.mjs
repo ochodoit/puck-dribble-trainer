@@ -8,7 +8,7 @@ export const SITE = 'https://puck-trainer.com';
  * 페이지마다 내용을 마지막으로 크게 바꾼 날 (YYYY-MM-DD). sitemap.xml 의 <lastmod>, rss.xml 의 <pubDate> 로 나간다.
  * 네이버·구글·Bing 이 바뀐 페이지를 먼저 다시 가져가게 하는 값이라, 페이지 내용을 바꾸면 이 날짜도 고친다. '' = 첫 화면
  */
-export const UPDATED = { '': '2026-11-26', guide: '2026-11-25', games: '2026-11-26', faq: '2026-11-26', compare: '2026-11-26' };
+export const UPDATED = { '': '2026-11-26', guide: '2026-11-27', games: '2026-11-26', faq: '2026-11-26', compare: '2026-11-26' };
 
 /** 검색엔진 소유 확인 (공개되는 값). 구글 서치 콘솔·Bing 웹마스터 도구·Daum 웹마스터도구·네이버 서치어드바이저에서 받은 값 */
 export const VERIFY = {
@@ -170,7 +170,7 @@ export const PAGES = [
             ['퍽 다시 등록', '퍽을 바꿨거나 조명이 크게 바뀌었으면 보정에서 ‘원 안에 3초’로 다시 등록하세요. 허용 오차도 자동으로 다시 맞춰집니다.'],
             ['터치로 지정', '보정의 ‘터치로 지정’을 누르면 어느 게임에서든 카메라 영상이 보이고 게임은 멈춥니다. 퍽 근처를 눌러도 가장 가까운 물체에 붙습니다. 취소는 Esc.'],
             ['작은 퍽', '퍽이 화면에서 아주 작게 보이면 등록할 때 인식 해상도가 자동으로 ‘최고(400)’가 됩니다.'],
-            ['인식 세부 조정', '설정에서 펼치면 실시간 미리보기가 나옵니다. 빨강이 퍽, 초록이 스틱입니다. 퍽만 빨가면 그대로 두세요. 퍽이 덜 칠해지면 허용 오차를 올리고, 신발·그림자까지 빨개지면 내립니다. 미리보기는 설정 창 안에만 보입니다.'],
+            ['인식 세부 조정', '퍽을 등록하고 3/3 움직여 보기를 마치면 이 집의 바닥·조명·카메라에 맞춰 자동으로 정해져 보통은 손댈 필요가 없어요. 조명을 바꿨으면 설정의 ‘지금 영상으로 자동 맞추기’를 누르세요. 설정에서 펼치면 실시간 미리보기가 나옵니다. 빨강이 퍽, 초록이 스틱입니다. 퍽만 빨가면 그대로 두세요. 퍽이 덜 칠해지면 허용 오차를 올리고, 신발·그림자까지 빨개지면 내립니다. 미리보기는 설정 창 안에만 보입니다.'],
             ['모드 창에서 설정', '모드 창 오른쪽 위 ‘설정’으로 바로 열고, 닫으면 모드 창으로 돌아옵니다.'],
             ['카메라가 막혀 있으면', '주소창 왼쪽의 자물쇠(카메라) 아이콘에서 ‘허용’으로 바꾼 뒤 새로 고침합니다.'],
             ['흰 바닥·선이 없다면', '장판·콘크리트도 됩니다(퍽 고르기의 바닥별 추천 참고). 선이 없으면 모서리 네 곳에 테이프·동전을 놓고 영역을 맞추세요 — 한 번 맞추면 선 없이도 플레이됩니다. 노트북 웹캠 앞이라면 네 모서리를 화면 끝까지 끌어 두어도 됩니다.'],
@@ -270,7 +270,7 @@ export const PAGES = [
             ['Register the puck again', 'If you changed pucks or the light changed a lot, register it again with “3 s in circle” in Calibrate. The tolerance is set again automatically.'],
             ['Set by tap', '“Set by tap” in Calibrate shows the camera view in every game and pauses the game. Tapping near the puck snaps to the nearest object. Esc cancels.'],
             ['Small puck', 'If the puck looks very small, the detection resolution switches to “Highest (400)” automatically when you register it.'],
-            ['Detection fine-tuning', 'Open it in Settings for a live preview: red is the puck, green the stick. If only the puck is red, leave it. Raise the tolerance if the puck is only partly red; lower it if shoes or shadows turn red. The preview stays inside Settings.'],
+            ['Detection fine-tuning', 'After you register the puck and finish the 3/3 test move, it is set automatically for your floor, lighting and camera, so you usually never touch it. If the lighting changes, press “Auto-tune from the current view” in Settings. Open it in Settings for a live preview: red is the puck, green the stick. If only the puck is red, leave it. Raise the tolerance if the puck is only partly red; lower it if shoes or shadows turn red. The preview stays inside Settings.'],
             ['Settings from the mode window', 'The Settings button at the top right of the mode window opens Settings; closing it brings you back.'],
             ['Camera blocked', 'Allow it from the lock (camera) icon left of the address bar, then reload.'],
             ['No white floor or no lines', 'Vinyl and concrete work too (see “By floor type” under Picking a puck). With no lines, put tape or coins on the four corners and fit the area to them; once fitted, you can play without any lines. In front of a laptop webcam you can also drag the corners to the screen edges.'],

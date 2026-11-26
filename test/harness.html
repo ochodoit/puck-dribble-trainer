@@ -6,7 +6,8 @@
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
 <script type="module">
-  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp } from '../src/vision.js';
+  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp, matchDistance, makeMatcher, matchPixel } from '../src/vision.js';
+  import { chooseTolerance, falseBlobs, chooseProcWidth, needFromTest, preferLowRate } from '../src/autotune.js';
   import { Tracker } from '../src/tracker.js';
   import { StickBridge } from '../src/occlusion.js';
   import { placementCheck } from '../src/placement.js';
@@ -1746,6 +1747,102 @@
       for (let y = 10; y < 40; y++) for (let x = 150; x < 230; x++) { const q = fd[(y * vn.PW + x) * 4 + 1]; n++; m1 += q; m2 += q * q; }
       const sd = Math.sqrt(m2 / n - (m1 / n) ** 2);
       check('B6 frame is averaged when shrinking (camera noise halved)', sd < 2.8, { floorNoiseSd: +sd.toFixed(2) });
+    }
+    // AT) 인식 자동 맞춤: 등록한 물체의 색 퍼짐(need)과 이 집 영상의 바닥·그림자·얼룩을 보고 허용 오차, 먼 쪽 퍽 크기로 해상도, 잡음으로 카메라 프레임
+    {
+      const mkT = (o = {}) => {
+        const W = 1280, H = 720, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+        const c = cv.getContext('2d');
+        c.fillStyle = o.floor || 'rgb(232,230,224)'; c.fillRect(0, 0, W, H);
+        let s = o.seed || 7; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+        for (let i = 0; i < (o.texture || 0); i++) { const g = (o.texBase ?? 100) + ((rnd() * 50) | 0); c.fillStyle = `rgb(${g},${g},${g - 4})`; c.fillRect((rnd() * W) | 0, (rnd() * H) | 0, 4, 4); }
+        // 퍽: 한가운데는 진하고 가장자리는 밝게 (그늘·반사로 물체 안에서도 색이 퍼진다)
+        const disc = (x, y, r, inner, outer) => { const gr = c.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, inner); gr.addColorStop(0.6, inner); gr.addColorStop(1, outer); c.fillStyle = gr; c.beginPath(); c.ellipse(x, y, r, r * 0.75, 0, 0, Math.PI * 2); c.fill(); };
+        const P = { x: 640, y: 360, r: 30 };
+        disc(P.x, P.y, P.r, o.puckIn || 'rgb(18,18,20)', o.puckOut || 'rgb(64,64,66)');
+        for (const sp of o.spots || []) { c.fillStyle = sp.color; c.beginPath(); c.ellipse(sp.x, sp.y, sp.rx, sp.ry, 0, 0, Math.PI * 2); c.fill(); }
+        if (o.noise) { const img = c.getImageData(0, 0, W, H), d = img.data; for (let i = 0; i < d.length; i += 4) { const n = (rnd() - 0.5) * 2 * o.noise; d[i] += n; d[i + 1] += n; d[i + 2] += n; } c.putImageData(img, 0, 0); }
+        return { cv, P };
+      };
+      const baseT = { ...settings, floorMode: 'full', manualQuad: null, puckModel: { r: 0, g: 0, b: 0, area: 0 }, stickModel: null, puckTol: 95, stickTol: 70 };
+      const openT = (sc) => { const v = new Vision(240); v.mirror = false; v.setSourceSize(1280, 720); v.process(sc.cv, baseT); return v; };
+      const zoneOf = (s) => ({ x: s.cx, y: s.cy, r: Math.max(6, 2.6 * Math.sqrt(s.area / Math.PI)) });
+      const tuneT = (v, s) => chooseTolerance({ need: s.need, map: v.distanceMap(s, { exclude: [zoneOf(s)] }), area: s.area, bgDist: s.dist });
+      const k = 240 / 1280;
+
+      // AT1 색 판정 거리 = 색 판정과 같은 기준 (회색 퍽은 RGB 거리, 주황 퍽은 색도 거리)
+      let agree = 0, tot = 0;
+      for (const model of [{ r: 20, g: 20, b: 22 }, { r: 240, g: 120, b: 30 }, { r: 34, g: 85, b: 51 }]) for (let i = 0; i < 400; i++) {
+        const r = (i * 37) % 256, g = (i * 91) % 256, b = (i * 53) % 256, tol = 30 + (i % 7) * 20;
+        tot++; if (matchPixel(makeMatcher(model, tol), r, g, b) === (matchDistance(makeMatcher(model, tol), r, g, b) <= tol + 1e-6)) agree++;
+      }
+      check('AT1 match distance agrees with the color matcher (gray and saturated models)', agree === tot, { agree, tot });
+
+      // AT2 그림자·얼룩: 퍽만 한 회색 점(퍽 색에서 약 115 떨어짐)이 영역에 있으면 예전 기준(바닥과 차이의 절반, 최대 120)은 그 점까지 퍽으로 칠한다.
+      // 자동 맞춤은 퍽 안의 색 퍼짐(need)은 다 잡고 그 점은 빼는 값을 고른다
+      const sh = mkT({ spots: [{ color: 'rgb(96,96,98)', x: 300, y: 200, rx: 30, ry: 22 }] });
+      const v2 = openT(sh), s2 = v2.autoCalibSample('puck');
+      const map2 = v2.distanceMap(s2, { exclude: [zoneOf(s2)] });
+      const old2 = Math.round(Math.min(120, Math.max(45, s2.dist * 0.5)));
+      const t2 = tuneT(v2, s2);
+      const r2 = v2.process(sh.cv, { ...baseT, puckModel: { r: s2.r, g: s2.g, b: s2.b, area: s2.area }, puckTol: t2.tol });
+      const nearSpot = r2.puckCandidates.some((c) => Math.hypot(c.cx - 300 * k, c.cy - 200 * k) < 8);
+      check('AT2 a puck-sized shadow/stain: the old rule paints it as a puck, auto-tune keeps it out and still covers the whole puck',
+        s2.status === 'ok' && falseBlobs(map2, old2, s2.area).bad && t2.status === 'ok' && t2.tol >= s2.need && !nearSpot && !!r2.puck && Math.hypot(r2.puck.x - 120, r2.puck.y - 67.5) < 2,
+        { need: s2.need, old: old2, tuned: t2.tol, status: t2.status, nearSpot, puck: r2.puck && [+r2.puck.x.toFixed(1), +r2.puck.y.toFixed(1)] });
+
+      // AT2b 얼룩이 퍽 자신의 색 퍼짐 안(퍽 가장자리 색과 비슷)이면 조금 좁혀(narrow) 얼룩은 빼고 퍽은 그대로 잡는다
+      const sb = mkT({ spots: [{ color: 'rgb(80,80,82)', x: 300, y: 200, rx: 30, ry: 22 }] });
+      const vb = openT(sb), sbs = vb.autoCalibSample('puck'), tb = tuneT(vb, sbs);
+      const rb = vb.process(sb.cv, { ...baseT, puckModel: { r: sbs.r, g: sbs.g, b: sbs.b, area: sbs.area }, puckTol: tb.tol });
+      check('AT2b a stain inside the puck color spread: narrowed a little, stain out, puck still found',
+        tb.status === 'narrow' && !rb.puckCandidates.some((c) => Math.hypot(c.cx - 300 * k, c.cy - 200 * k) < 8) && !!rb.puck && Math.hypot(rb.puck.x - 120, rb.puck.y - 67.5) < 2,
+        { need: sbs.need, tol: tb.tol, status: tb.status });
+
+      // AT3 깨끗한 바닥: 넓게 (need × 1.35) — 조명이 바뀌어도 잡히게
+      const cl = mkT(), v3 = openT(cl), s3 = v3.autoCalibSample('puck'), t3 = tuneT(v3, s3);
+      check('AT3 clean floor: tolerance is widened above what the puck needs', t3.status === 'ok' && t3.tol >= Math.round(s3.need * 1.3), { need: s3.need, tol: t3.tol });
+
+      // AT4 퍽과 같은 색·크기 물체(다른 퍽·병뚜껑)가 영역에 있으면 허용 오차로는 못 가른다 -> 알림 (need 근처 유지)
+      const tw = mkT({ spots: [{ color: 'rgb(18,18,20)', x: 300, y: 200, rx: 30, ry: 22 }] });
+      const v4 = openT(tw), s4 = v4.autoCalibSample('puck'), t4 = tuneT(v4, s4);
+      check('AT4 a second puck-like object in the area is reported (cannot be tuned away)', t4.status === 'same' && t4.tol >= s4.need, { status: t4.status, tol: t4.tol, need: s4.need });
+
+      // AT5 어두운 콘크리트 + 결: 진한 녹색 퍽. 바닥이 퍽 색으로 칠해지지 않는 값 (영역의 5% 이하), 퍽은 그대로 잡힘
+      const cc = mkT({ floor: 'rgb(118,116,110)', texture: 6000, texBase: 70, puckIn: 'rgb(30,72,46)', puckOut: 'rgb(52,96,66)', seed: 11 });
+      const v5 = openT(cc), s5 = v5.autoCalibSample('puck'), map5 = v5.distanceMap(s5, { exclude: [zoneOf(s5)] }), t5 = tuneT(v5, s5);
+      const r5 = v5.process(cc.cv, { ...baseT, puckModel: { r: s5.r, g: s5.g, b: s5.b, area: s5.area }, puckTol: t5.tol });
+      const f5 = falseBlobs(map5, t5.tol, s5.area);
+      check('AT5 textured concrete + dark green puck: the floor stays unpainted and the puck is still found',
+        s5.status === 'ok' && t5.status !== 'same' && !f5.bad && !!r5.puck && Math.hypot(r5.puck.x - 120, r5.puck.y - 67.5) < 2,
+        { need: s5.need, tol: t5.tol, status: t5.status, ratio: +f5.ratio.toFixed(4) });
+
+      // AT6 3/3 움직여 보기에서 잰 퍽 한가운데 색: 95% × 1.1, 등록 값보다 작아지지는 않음. 표본이 적으면 등록 값
+      const h6 = new Uint32Array(257); for (let v = 0; v < 100; v++) h6[20 + (v % 40)]++; // 20~59
+      check('AT6 need from the test move: 95th percentile × 1.1, never below the registered need', needFromTest(h6, 30) === Math.round(57 * 1.1) && needFromTest(h6, 90) === 90 && needFromTest(new Uint32Array(257), 44) === 44,
+        { got: needFromTest(h6, 30) });
+
+      // AT7 인식 해상도: 먼 쪽 퍽이 30픽셀 이상 읽히는 가장 가벼운 값. 영역이 작으면(배율 2) 240 으로 충분, 퍽이 크면 400 -> 240 으로 내림, 기기가 느리면 올리지 않음
+      const pw = (o) => chooseProcWidth({ srcW: 1280, fps: 60, budget: 1, ...o });
+      check('AT7 detection resolution follows the far-side puck size, the area zoom and device speed',
+        pw({ far: 8, pw: 240 }) === 400 && pw({ far: 8, pw: 240, budget: 2 }) === 240 && pw({ far: 100, pw: 400 }) === 240 && pw({ far: 40, pw: 400 }) === 400 && pw({ far: 18, pw: 240 }) === 320
+        && pw({ far: 8, pw: 240, fps: 15 }) === 240,
+        { a: pw({ far: 8, pw: 240 }), b: pw({ far: 8, pw: 240, budget: 2 }), c: pw({ far: 100, pw: 400 }), d: pw({ far: 18, pw: 240 }), slow: pw({ far: 8, pw: 240, fps: 15 }) });
+
+      // AT8 카메라 프레임: 어둡고 자글거리면 30fps. 밝은데 자글거리거나(바닥 무늬) 어두워도 깨끗하면 그대로
+      const n0 = new Vision(240); n0.mirror = false; n0.setSourceSize(1280, 720);
+      const quiet = mkT({ floor: 'rgb(70,70,66)' }), grainy = mkT({ floor: 'rgb(70,70,66)', noise: 22, seed: 5 }), grainy2 = mkT({ floor: 'rgb(70,70,66)', noise: 22, seed: 9 });
+      const st = {}; n0.process(quiet.cv, baseT); n0.noiseProbe(st); n0.process(quiet.cv, baseT); const still = n0.noiseProbe(st);
+      const st2 = {}; n0.process(grainy.cv, baseT); n0.noiseProbe(st2); n0.process(grainy2.cv, baseT); const grain = n0.noiseProbe(st2);
+      check('AT8 grain probe: a repeated frame is not counted, high when the camera is noisy; dark + grainy -> 30 fps only',
+        still === null && grain > 3.5 && preferLowRate({ noise: grain, luma: 70 }) && !preferLowRate({ noise: grain, luma: 180 }) && !preferLowRate({ noise: 1, luma: 60 }),
+        { still, grain: grain && +grain.toFixed(2) });
+
+      // AT9 저장: 자동 맞춤 기준(need·bgDist)과 '어두워서 30fps' 는 다시 열어도 남는다 (예전 저장값은 0·false)
+      const sv = sanitizeSettings({ ...DEFAULT_SETTINGS, puckModel: { r: 1, g: 2, b: 3, area: 50, need: 61, bgDist: 300 }, stickModel: { r: 200, g: 90, b: 20, area: 120, need: 40 }, camDark: true });
+      const old = sanitizeSettings({ ...DEFAULT_SETTINGS, puckModel: { r: 1, g: 2, b: 3, area: 50 } });
+      check('AT9 settings keep the auto-tune basis and the dark-room camera choice', sv.puckModel.need === 61 && sv.puckModel.bgDist === 300 && sv.stickModel.need === 40 && sv.camDark === true && old.puckModel.need === 0 && old.camDark === false,
+        { puck: sv.puckModel, camDark: sv.camDark });
     }
     // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
     {

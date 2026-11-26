@@ -141,7 +141,8 @@ export class Vision {
     const img = this._grab(this.canvas, this.ctx, video, (this.mirror ? PW - x1 : x0) * kx, y0 * ky, rw * kx, rh * ky, W, H, 'roi');
     // 영역이 곧 화면 전체(배율 1)면 보정용 화면 전체로도 쓴다 (다시 그리지 않게)
     if (x0 === 0 && y0 === 0 && x1 === PW && y1 === PH && W === PW && H === PH) this._frame = img;
-    return { x0, y0, x1, y1, W, H, sx: W / rw, sy: H / rh, data: img.data };
+    // budget: 픽셀 수만 따진 배율 (해상도·카메라 원본과 무관한 영역 크기 몫) — 인식 해상도를 바꾸면 배율이 어떻게 될지 어림할 때 (autotune)
+    return { x0, y0, x1, y1, W, H, sx: W / rw, sy: H / rh, data: img.data, budget: Math.sqrt((PW * PH) / (rw * rh)) };
   }
 
   /** 처리 좌표 (x,y) 픽셀이 읽은 영역 버퍼에서 몇 번째인지 (영역 밖이면 -1) */
@@ -237,6 +238,7 @@ export class Vision {
     const mapping = quad ? makeFloorMapping(quad) : null;
     this.useArea(mapping, { area: settings.puckModel?.area || 0, widthM: settings.floorWidthM || 0 });
     this.scan = mapping ? quadScanlines(quad, PH) : null; // 게임 영역 행별 x 범위 (가운데 원의 배경색을 영역 안에서만 재는 데도 씀)
+    this._quadN = quad ? quad.map(([x, y]) => [x / PW, y / PH]) : null; // 해상도를 바꾼 직후에도 영역을 알게 (distanceMap)
     const result = {
       floor: { quad, mapping, detected: floorDetected, locked: this.floorLocked, polygon: this.floorPolygon, mode: settings.floorMode, fallback: settings.floorMode === 'auto' && this.floorFallback },
       puck: null,
@@ -649,7 +651,8 @@ export class Vision {
     const guard = sep ? { self: colorKey(col), other: colorKey(sep.other) } : null; // 떼어 낸 물체 쪽으로는 흘러가지 않게
     let area = seeds.length ? this._floodArea(seeds, m, 4000, guard) : 0;
     if (!(area > 0) || (!clipped && area > blobArea * 4)) area = blobArea;
-    return { r: col.r, g: col.g, b: col.b, area, cx: best.sx / blobArea + x0, cy: best.sy / blobArea + y0, snapped: true, tol: tolS, dist, bg, separated: !!sep };
+    const need = innerNeed(d, best.px, toP, col, bg); // 자동 맞춤(autotune)의 아래쪽 기준
+    return { r: col.r, g: col.g, b: col.b, area, cx: best.sx / blobArea + x0, cy: best.sy / blobArea + y0, snapped: true, tol: tolS, dist, bg, separated: !!sep, need };
   }
 
   /** seeds(픽셀 번호)에서 시작해 색 판정 m 에 맞는 이웃으로 흘려 채운 면적 (cap 까지). guard: {self, other} 이면 other 색에 더 가까운 픽셀은 건너뜀 */
@@ -852,7 +855,85 @@ export class Vision {
     // 물체 색: 바닥과 섞인 가장자리를 빼고 한가운데(배경과 가장 다른 쪽) 픽셀의 평균 — 작은 퍽일수록 가장자리 비중이 커서 색이 바닥 쪽으로 틀어진다
     const model = coreColor(d, best.px, toP, bgc);
     const dist = Math.hypot(model.r - bgc.r, model.g - bgc.g, model.b - bgc.b);
-    return { status: 'ok', r: model.r, g: model.g, b: model.b, area: n, cx: mx + x0, cy: my + y0, bg: bgOut, dist, th, pieces: blobs.length, separated: !!sep };
+    const need = innerNeed(d, best.px, toP, model, bgc); // 자동 맞춤(autotune)의 아래쪽 기준
+    return { status: 'ok', r: model.r, g: model.g, b: model.b, area: n, cx: mx + x0, cy: my + y0, bg: bgOut, dist, th, pieces: blobs.length, separated: !!sep, need };
+  }
+
+  // ---------------- 자동 맞춤(autotune)이 쓰는 측정 ----------------
+
+  /**
+   * 게임 영역 안 모든 픽셀이 model 색에서 얼마나 먼지 (matchDistance, 처리 해상도 화면 전체 기준).
+   * exclude: [{x,y,r}] 빼고 볼 자리 (등록한 물체와 그 그림자). other: {model, tol} 다른 물체(퍽↔스틱) — 두 색이 충분히 다르면
+   * 추적할 때처럼 다른 쪽 허용 오차 안이면서 다른 쪽 색에 더 가까운 픽셀은 이 색으로 잡히지 않으므로 뺀다.
+   * 반환: { D (영역 밖·뺀 자리 = Infinity), w, h, n (영역 픽셀 수), luma (영역 평균 밝기 0~255) } — 화면·영역이 없으면 null
+   */
+  distanceMap(model, { exclude = [], other = null } = {}) {
+    const { PW, PH } = this, f = this.frame;
+    // 인식 해상도를 막 바꿨으면 영역 행 범위가 비어 있다 -> 마지막 영역을 새 해상도로
+    const s = this.scan || (this._quadN ? quadScanlines(this._quadN.map(([u, v]) => [u * PW, v * PH]), PH) : null);
+    if (!f || !s || f.width !== PW || f.height !== PH) return null;
+    const d = f.data;
+    const m = makeMatcher(model, 100), key = colorKey(model);
+    const om = other?.model ? makeMatcher(other.model, other.tol) : null;
+    const oKey = om ? colorKey(other.model) : null;
+    const exclusive = !!oKey && Math.sqrt(colorDist2(other.model.r, other.model.g, other.model.b, key)) >= SEPARATE_MIN;
+    const D = new Float32Array(PW * PH).fill(Infinity);
+    let n = 0, lum = 0;
+    for (let y = 0; y < PH; y++) {
+      const xa = s[y * 2], xb = s[y * 2 + 1];
+      if (xa < 0) continue;
+      for (let x = Math.max(0, xa); x <= Math.min(PW - 1, xb); x++) {
+        const i = y * PW + x, p = i * 4, r = d[p], g = d[p + 1], b = d[p + 2];
+        n++; lum += 0.299 * r + 0.587 * g + 0.114 * b;
+        if (exclude.some((e) => (x - e.x) ** 2 + (y - e.y) ** 2 <= e.r * e.r)) continue;
+        if (exclusive && matchPixel(om, r, g, b) && colorDist2(r, g, b, oKey) < colorDist2(r, g, b, key)) continue;
+        D[i] = matchDistance(m, r, g, b);
+      }
+    }
+    return { D, w: PW, h: PH, n, luma: n ? lum / n : 0 };
+  }
+
+  /**
+   * 추적 중인 퍽 한가운데(처리 좌표 x,y, 반지름 r) 픽셀들의 색 거리를 hist(Uint32Array(257): 0~255, 256 = 허용 오차로 못 잡는 색)에 더한다.
+   * 이번 프레임에 읽은 영역(ROI)에서 읽는다 (화면 전체를 새로 그리지 않게). 반환: 더한 픽셀 수
+   */
+  sampleCore(model, x, y, r, hist) {
+    const ro = this.roi;
+    if (!ro || !(r > 0)) return 0;
+    const m = makeMatcher(model, 100), d = ro.data;
+    const cx = (x + 0.5 - ro.x0) * ro.sx, cy = (y + 0.5 - ro.y0) * ro.sy, rx = r * ro.sx, ry = r * ro.sy;
+    const hx0 = Math.max(0, Math.floor(cx - rx)), hx1 = Math.min(ro.W - 1, Math.ceil(cx + rx));
+    const hy0 = Math.max(0, Math.floor(cy - ry)), hy1 = Math.min(ro.H - 1, Math.ceil(cy + ry));
+    let k = 0;
+    for (let hy = hy0; hy <= hy1; hy++) for (let hx = hx0; hx <= hx1; hx++) {
+      if (((hx + 0.5 - cx) / rx) ** 2 + ((hy + 0.5 - cy) / ry) ** 2 > 1) continue;
+      const p = (hy * ro.W + hx) * 4, v = matchDistance(m, d[p], d[p + 1], d[p + 2]);
+      hist[Number.isFinite(v) ? Math.min(255, Math.round(v)) : 256]++; k++;
+    }
+    return k;
+  }
+
+  /**
+   * 영상 자글거림(카메라 잡음): 영역 안 24×24 격자 점의 밝기가 앞 영상과 얼마나 다른지의 평균 (움직인 자리 = 25 이상 차이는 뺀다).
+   * 어두운 곳에서 60fps 로 찍으면 노출이 짧아 이 값이 커진다. state: 부르는 쪽이 들고 있는 {} (앞 영상 값을 담아 둠).
+   * 처음이거나 영역 크기가 바뀌었거나 화면 절반 넘게 움직였으면 null. 앞 영상과 똑같으면(카메라가 같은 영상을 다시 보냄 —
+   * 진짜 카메라 잡음은 0 이 될 수 없다) 세지 않고 null
+   */
+  noiseProbe(state) {
+    const ro = this.roi;
+    if (!ro) return null;
+    const N = 24, d = ro.data, vals = new Uint8Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const hx = Math.floor(((i + 0.5) / N) * ro.W), hy = Math.floor(((j + 0.5) / N) * ro.H), p = (hy * ro.W + hx) * 4;
+      vals[j * N + i] = (77 * d[p] + 150 * d[p + 1] + 29 * d[p + 2]) >> 8;
+    }
+    const prev = state.prev, same = !!prev && state.W === ro.W && state.H === ro.H;
+    state.prev = vals; state.W = ro.W; state.H = ro.H;
+    if (!same) return null;
+    let sum = 0, n = 0;
+    for (let k = 0; k < vals.length; k++) { const dd = Math.abs(vals[k] - prev[k]); if (dd < 25) { sum += dd; n++; } }
+    if (!sum) return null;
+    return n >= vals.length * 0.5 ? sum / n : null;
   }
 
   /** 처리 좌표 (x,y) 가 게임 영역(바닥 사다리꼴) 안인지. 영역을 아직 모르면 true */
@@ -960,6 +1041,53 @@ export function matchPixel(m, r, g, b) {
   const sum = r + g + b;
   const dr = (r / sum) * 255 - m.nr, dg = (g / sum) * 255 - m.ng;
   return dr * dr + dg * dg <= m.tol2;
+}
+
+/**
+ * matchPixel 과 같은 판정의 '거리' (허용 오차 단위): 허용 오차가 이 값 이상이면 이 픽셀이 그 색으로 잡힌다.
+ * 채도 높은 색(색도 비교)은 색도 거리 / 0.6 (makeMatcher 의 tolC = tol × 0.6), 밝기·채도 문턱에 걸리면 Infinity (허용 오차로는 못 잡음)
+ */
+export function matchDistance(m, r, g, b) {
+  if (!m.chroma) return Math.sqrt((r - m.r) ** 2 + (g - m.g) ** 2 + (b - m.b) ** 2);
+  const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  if (mx < m.minV || (mx - mn) < m.minChroma) return Infinity;
+  const sum = r + g + b;
+  return Math.hypot((r / sum) * 255 - m.nr, (g / sum) * 255 - m.ng) / 0.6;
+}
+
+/**
+ * 등록한 물체가 '다 잡히려면' 필요한 허용 오차 (자동 맞춤의 아래쪽 기준).
+ * 몸통(물체 픽셀의 75%)과 한가운데(배경에서 가장 먼 쪽, coreColor 와 같은 기준)의 95% 가 잡히는 값 중 큰 쪽.
+ * 바닥과 섞인 가장자리 끝까지 맞추려 하면 허용 오차가 바닥 쪽으로 너무 넓어지므로 몸통은 75% 까지만
+ */
+export function innerNeed(d, px, toP, model, bg) {
+  const m = makeMatcher(model, 100);
+  const n = px.length;
+  if (!n) return 0;
+  const all = new Float32Array(n), toBg = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const p = toP(px[k]);
+    all[k] = matchDistance(m, d[p], d[p + 1], d[p + 2]);
+    toBg[k] = bg ? Math.hypot(d[p] - bg.r, d[p + 1] - bg.g, d[p + 2] - bg.b) : 0;
+  }
+  const body = quantileOf(all, 0.75);
+  let core = body;
+  if (bg && n >= 4) {
+    const cut = Float32Array.from(toBg).sort()[Math.min(n - 1, Math.floor(n * 0.9))] * 0.7;
+    const sel = [];
+    for (let k = 0; k < n; k++) if (toBg[k] >= cut) sel.push(all[k]);
+    if (sel.length) core = quantileOf(Float32Array.from(sel), 0.95);
+  }
+  const v = Math.max(body, core);
+  return Number.isFinite(v) ? Math.round(v) : 200;
+}
+
+/** 값 배열의 분위수 (q: 0~1). Infinity 도 크기 순서대로 센다 */
+export function quantileOf(values, q) {
+  if (!values.length) return 0;
+  const s = Float32Array.from(values).sort();
+  return s[Math.min(s.length - 1, Math.max(0, Math.floor((s.length - 1) * q)))];
 }
 
 /**
@@ -1209,17 +1337,19 @@ export class AutoCalibrator {
     this.status = sample.status;
     this.sample = sample;
     if (sample.status !== 'ok') { this.hold = Math.max(0, this.hold - dt * 2); if (this.hold === 0) this.avg = null; return null; }
-    if (!this.avg) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area }; this.hold = 0; return null; }
+    if (!this.avg) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area, need: sample.need || 0 }; this.hold = 0; return null; }
     const a = this.avg;
     const colorDiff = Math.hypot(sample.r - a.r, sample.g - a.g, sample.b - a.b);
     const areaRatio = sample.area / a.area;
     // 작은 물체는 한두 픽셀만 달라져도 크기 비율이 크게 흔들리므로 허용 폭을 넓힌다 (가만히 있는데 셈이 자꾸 처음부터 되는 것 방지)
     const small = a.area < 30;
-    if (colorDiff > (small ? 50 : 35) || areaRatio < (small ? 0.45 : 0.6) || areaRatio > (small ? 2.2 : 1.6)) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area }; this.hold = 0; return null; }
+    if (colorDiff > (small ? 50 : 35) || areaRatio < (small ? 0.45 : 0.6) || areaRatio > (small ? 2.2 : 1.6)) { this.avg = { r: sample.r, g: sample.g, b: sample.b, area: sample.area, need: sample.need || 0 }; this.hold = 0; return null; }
     a.r += (sample.r - a.r) * 0.2; a.g += (sample.g - a.g) * 0.2; a.b += (sample.b - a.b) * 0.2; a.area += (sample.area - a.area) * 0.2;
+    // 3초 동안 잰 '필요한 허용 오차'는 가장 큰 값 쪽으로 (조명이 깜박이거나 그늘이 지나가도 다 잡히게)
+    a.need = Math.max(a.need * 0.95, sample.need || 0);
     this.hold += dt;
     if (this.hold < this.holdSec) return null;
     const tol = Math.round(Math.min(120, Math.max(45, sample.dist * 0.5)));
-    return { r: Math.round(a.r), g: Math.round(a.g), b: Math.round(a.b), area: Math.round(a.area), tol, cx: sample.cx, cy: sample.cy, bg: sample.bg };
+    return { r: Math.round(a.r), g: Math.round(a.g), b: Math.round(a.b), area: Math.round(a.area), tol, cx: sample.cx, cy: sample.cy, bg: sample.bg, need: Math.round(a.need), dist: sample.dist };
   }
 }

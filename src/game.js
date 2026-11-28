@@ -494,6 +494,8 @@ export class Game {
           if (me) {
             const dd = dist(me, f);
             f.minDist = Math.min(f.minDist, dd);
+            // 확실하지 않은 자리로 닿음: 감점하지 않고 넘기되 날아오는 퍽마다 한 번 센다 (인식 기록)
+            if (!canHit && !f.hit && !f.unsure && tracked && puck.confident === false && now >= this.invulnUntil && dd < FLYER_R + PUCK_R) { f.unsure = true; this.stats.unsure = (this.stats.unsure || 0) + 1; }
             if (canHit && !f.hit && dd < FLYER_R + PUCK_R) {
               f.hit = true; this.stats.hits++; // 목숨 없음: 감점 + 1.2초 무적
               this.invulnUntil = now + 1200;
@@ -718,9 +720,12 @@ export class Game {
    * 같은 콘에 CONE_CONFIRM 프레임 연속 닿아야 충돌 (한 프레임 튄 값으로 감점하지 않게)
    */
   _checkCones(pp, now, onHit, sure = true) {
-    if (now < this.invulnUntil) { this._coneTouch = null; return; }
-    let touching = null;
-    if (sure) for (const c of this.cones) if (dist(pp, c) < c.r + PUCK_R) { touching = c; break; }
+    if (now < this.invulnUntil) { this._coneTouch = null; this._unsureCone = null; return; }
+    let over = null;
+    for (const c of this.cones) if (dist(pp, c) < c.r + PUCK_R) { over = c; break; }
+    // 확실하지 않은 자리로 콘에 닿음(감점하지 않고 넘김): 닿을 때마다 한 번 센다 (인식 기록 — 넘긴 충돌이 진짜였는지 녹화로 확인)
+    if (over && !sure) { if (this._unsureCone !== over) { this._unsureCone = over; this.stats.unsure = (this.stats.unsure || 0) + 1; } } else if (!over) this._unsureCone = null;
+    const touching = sure ? over : null;
     const prev = this._coneTouch;
     this._coneTouch = touching ? { cone: touching, n: prev && prev.cone === touching ? prev.n + 1 : 1 } : null;
     if (!touching || this._coneTouch.n < CONE_CONFIRM) return;

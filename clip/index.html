@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <title>장면 보기 — 퍽 드리블 트레이너</title>
+  <style>
+    :root { --ink: #1d1b17; --soft: #5a564e; --paper: #f4f1ea; --line: #d8d2c4; --red: #c8102e; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, 'Noto Sans KR', sans-serif; background: var(--paper); color: var(--ink); }
+    header, main { max-width: 980px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    p { margin: 4px 0; color: var(--soft); font-size: 14px; line-height: 1.5; }
+    .file { display: inline-flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 14px; border: 1px solid var(--ink); border-radius: 12px; background: #fff; font-weight: 600; cursor: pointer; }
+    .stage { background: #222; border-radius: 12px; overflow: hidden; }
+    canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+    .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+    .ctl input[type=range] { flex: 1 1 240px; }
+    button { font: inherit; padding: 7px 14px; border-radius: 10px; border: 1px solid var(--ink); background: #fff; cursor: pointer; }
+    .marks { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    .marks button { border-color: var(--red); color: var(--red); padding: 4px 10px; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13.5px; }
+    .grid div { padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .grid b { display: inline-block; min-width: 96px; color: var(--soft); font-weight: 600; }
+    .legend { font-size: 13px; color: var(--soft); }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 10px; vertical-align: -1px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>장면 보기</h1>
+    <p>운영자 화면(인식 기록과 녹화)에서 내려받은 장면 파일(puck-clip-….json)을 엽니다. 파일은 이 브라우저 안에서만 읽고 어디에도 보내지 않습니다.</p>
+    <label class="file">장면 파일 열기 <input type="file" id="file" accept=".json,application/json" /></label>
+    <p id="err" style="color: var(--red)"></p>
+  </header>
+  <main id="main" hidden>
+    <div class="stage"><canvas id="cv" width="720" height="400"></canvas></div>
+    <div class="ctl">
+      <button type="button" id="prev">◀</button>
+      <button type="button" id="play">재생</button>
+      <button type="button" id="next">▶</button>
+      <input type="range" id="seek" min="0" max="0" value="0" />
+      <span id="pos"></span>
+      <label><input type="checkbox" id="rerun" /> 지금 인식으로 다시 보기</label>
+    </div>
+    <p class="legend">녹화된 인식: <i style="background:#c8102e"></i>퍽(확실) <i style="background:#f59e0b"></i>퍽(확실하지 않음) <i style="background:#7c3aed"></i>블레이드로 이은 자리 <i style="background:#16a34a"></i>스틱 블레이드 · 다시 보기: 빨강 = 퍽으로 잡힌 픽셀, 초록 = 스틱(테이프)</p>
+    <div class="marks" id="marks"></div>
+    <div class="grid" id="info"></div>
+  </main>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

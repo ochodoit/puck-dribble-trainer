@@ -25,6 +25,8 @@ import { initCommunity } from './community-ui.js';
 import { memberStats } from './stats.js';
 import { initAnalytics, track } from './analytics.js';
 import { initInstall } from './install.js';
+import { VisionLog, qualitySummary, saveLog, loadLog, markReported, LOG_MIN_SEC } from './vision-log.js';
+import { VisionRecorder, clipToJson, clipFileName, frameSummary, REC_MAX_W, REC_KEY, REC_REASONS } from './vision-rec.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -52,6 +54,9 @@ const camRateAuto = new CameraRateAuto(); // '카메라 프레임: 자동' — �
 const vision = new Vision(settings.procWidth);
 const tracker = new Tracker();
 const stickBridge = new StickBridge(); // 스틱이 퍽을 가린 동안 블레이드로 퍽 자리를 잇는다 (스틱 지정 시)
+const visionLog = new VisionLog();     // 인식 품질 기록 (한 판마다 숫자만 — vision-log.js)
+const rec = new VisionRecorder();      // 운영자용 인식 녹화 (이상한 순간의 앞뒤 장면 — vision-rec.js)
+const recCanvas = document.createElement('canvas'), recCtx = recCanvas.getContext('2d'); // 녹화: 판 부분을 잘라 담는 캔버스
 const sfx = new Sfx();
 const game = new Game(sfx);
 game.onModeChange = () => applyDepthDirection(); // 앞뒤 방향은 게임마다 다르다 (depthFlip) — 모드를 바꾸는 즉시
@@ -90,7 +95,7 @@ const SLIDER_KEYS = ['puckTol', 'stickTol', 'floorWidthM', 'bgTransparency', 'pu
 
 // 디버그/테스트용 훅 (브라우저 콘솔에서 상태 확인: __puckTrainer.tracker 등).
 // 내 컴퓨터(localhost)에서 열었을 때만 만든다. 공개 사이트에서는 콘솔로 게임 상태를 바꿔 기록을 조작하는 데 쓰일 수 있어서
-if (isDevHost(location)) window.__puckTrainer = { settings, vision, tracker, game, app, mouse, i18n: { tr, setLang, getLang, missing: i18nMissing } };
+if (isDevHost(location)) window.__puckTrainer = { settings, vision, tracker, game, app, mouse, visionLog, rec, i18n: { tr, setLang, getLang, missing: i18nMissing } };
 
 // =============== 초기화 ===============
 if (!redirecting) init(); // 예전에 고른 다른 언어 주소로 옮겨 가는 중이면 시작하지 않음
@@ -565,9 +570,128 @@ function trackPlay(result) {
   });
 }
 
+// =============== 인식 기록 (1단계: 숫자) · 운영자 인식 녹화 (2단계: 장면) ===============
+/** 지금 게임의 감점 수와 '확실하지 않아 넘긴 충돌' 수 (반응 타겟의 hits 는 타겟 성공이라 빼고) */
+function penaltyCount() { return game.mode.id === 'arcade' ? game.arcade.hits || 0 : game.mode.id === 'reaction' ? 0 : game.stats?.hits || 0; }
+function unsureCount() { return game.mode.id === 'arcade' ? game.arcade.unsure || 0 : game.stats?.unsure || 0; }
+/** 녹화는 운영자 화면에서 켠 운영자 계정에서만 */
+function recOn() { return rec.enabled && isAdmin(app.account?.current()); }
+
+/**
+ * 판(영역) 부분만 낮은 해상도로 잘라 JPEG 로 (인식이 읽는 방향 그대로 — 거울 모드면 좌우를 바꿔서).
+ * 반환: { img: Promise<Blob>, c: [x0, y0, x1, y1] (처리 좌표의 자른 자리) } — 영역이 없으면 둘 다 null
+ */
+function captureBoard(video, result) {
+  const q = result?.floor?.quad, vw = video.videoWidth, vh = video.videoHeight;
+  if (!q || !vw || !vh) return { img: null, c: null };
+  const PW = vision.PW, PH = vision.PH, m = 4, xs = q.map((p) => p[0]), ys = q.map((p) => p[1]);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs) - m)), x1 = Math.min(PW, Math.ceil(Math.max(...xs) + m));
+  const y0 = Math.max(0, Math.floor(Math.min(...ys) - m)), y1 = Math.min(PH, Math.ceil(Math.max(...ys) + m));
+  const kx = vw / PW, ky = vh / PH, sw = (x1 - x0) * kx, sh = (y1 - y0) * ky;
+  if (!(sw > 4 && sh > 4)) return { img: null, c: null };
+  const W = Math.min(REC_MAX_W, Math.round(sw)), H = Math.max(2, Math.round((W * sh) / sw));
+  if (recCanvas.width !== W || recCanvas.height !== H) { recCanvas.width = W; recCanvas.height = H; }
+  recCtx.setTransform(vision.mirror ? -1 : 1, 0, 0, 1, vision.mirror ? W : 0, 0);
+  recCtx.drawImage(video, (vision.mirror ? PW - x1 : x0) * kx, y0 * ky, sw, sh, 0, 0, W, H);
+  recCtx.setTransform(1, 0, 0, 1, 0, 0);
+  const img = new Promise((res) => { try { recCanvas.toBlob((b) => res(b), 'image/jpeg', 0.6); } catch { res(null); } });
+  return { img, c: [x0, y0, x1, y1] };
+}
+
+/** 게임 중 카메라 프레임마다: 인식 상태를 세고(1단계), 운영자 녹화가 켜져 있으면 판 부분을 담고 이상한 순간을 잡는다(2단계) */
+function recordFrame(now, video, result, meas) {
+  visionLog.frame(tracker, meas, vision);
+  if (!recOn()) return;
+  const hits = penaltyCount(), unsure = unsureCount();
+  rec.push({ t: now, ...captureBoard(video, result), r: frameSummary(result, meas, tracker, { score: game.score, hits, unsure }) });
+  const w = app.recWatch;
+  if (w) {
+    if (tracker.jumps > w.jumps) rec.trigger('jump', now);
+    if (w.state !== 'lost' && tracker.state === 'lost') rec.trigger('lost', now);
+    if (hits > w.hits) rec.trigger('hit', now);
+    if (unsure > w.unsure) rec.trigger('unsure', now);
+  }
+  app.recWatch = { jumps: tracker.jumps, state: tracker.state, hits, unsure };
+}
+
+/** 새 게임: 인식 기록·녹화를 비우고, 녹화 장면 파일에 담을 인식 설정을 적어 둔다 */
+function startVisionLog() {
+  visionLog.reset(); rec.reset(); app.recWatch = null; app.lastQuality = null;
+  rec.meta = {
+    app: 'puck-trainer', mode: game.mode.id, rankKey: rankKey(game.mode.id, game.playSeconds, settings.invisible, settings.difficulty),
+    src: { PW: vision.PW, PH: vision.PH },
+    settings: { procWidth: vision.PW, floorMode: settings.floorMode, manualQuad: settings.manualQuad, puckModel: settings.puckModel, stickModel: settings.stickModel,
+      puckTol: settings.puckTol, stickTol: settings.stickTol, controller: settings.controller, whiteV: settings.whiteV, whiteC: settings.whiteC },
+  };
+}
+
+/** 게임이 끝남 (카메라 판, LOG_MIN_SEC 초 이상): 인식 품질 요약을 GA4 vision_quality 로 보내고 이 기기에 남긴다. 녹화 중인 장면은 마무리 */
+function trackVisionQuality(result) {
+  app.lastQuality = null;
+  rec.flush();
+  if (app.mouseMode || !(result.elapsed >= LOG_MIN_SEC) || !visionLog.frames) return;
+  const sum = qualitySummary(visionLog, {
+    mode: result.mode.id, seconds: result.seconds, level: result.level, elapsed: result.elapsed, fps: app.fps, procWidth: vision.PW,
+    hits: penaltyCount(), unsure: unsureCount(), shadowCut: vision.shadow?.puck, floorLuma: vision.shadow?.floor,
+    puckTol: settings.puckTol, stickTol: settings.stickTol, stick: !!settings.stickModel, puckModel: settings.puckModel,
+    quad: settings.floorMode === 'manual' ? settings.manualQuad : null, member: !!app.account?.current(),
+  });
+  app.lastQuality = saveLog(sum);
+  track('vision_quality', sum);
+}
+
+/** 결과 화면 '인식이 이상했어요': 같은 숫자를 vision_report 로 보내고, 운영자 녹화가 켜져 있으면 마지막 10초를 장면으로 */
+function reportVision() {
+  const q = app.lastQuality;
+  if (!q) return;
+  $('#btn-result-report').disabled = true;
+  markReported(q.at);
+  const { at, ...sum } = q;
+  track('vision_report', sum);
+  const clip = recOn() ? rec.report() : null;
+  toast(clip ? '알려 주셔서 고마워요 · 마지막 10초를 장면으로 남겼어요 (운영자 화면)' : '알려 주셔서 고마워요 · 인식을 고치는 데 쓸게요', 3500);
+}
+
+/** 운영자 화면 '인식 기록 · 녹화': 녹화 켜기, 남긴 장면 내려받기, 이 기기의 최근 인식 기록 */
+function setupVisionAdmin() {
+  try { rec.enabled = localStorage.getItem(REC_KEY) === '1'; } catch { rec.enabled = false; }
+  rec.onClip = () => { if (!$('#panel-admin').classList.contains('hidden')) renderVisionAdmin(); };
+  $('#btn-result-report').addEventListener('click', reportVision);
+  $('#adm-rec').addEventListener('change', (e) => {
+    rec.enabled = e.target.checked;
+    try { localStorage.setItem(REC_KEY, rec.enabled ? '1' : '0'); } catch { /* 무시 */ }
+    toast(rec.enabled ? '인식 녹화를 켰어요 · 이 기기 메모리에만 담아요' : '인식 녹화를 껐어요');
+  });
+  $('#adm-rec-clear').addEventListener('click', () => { rec.clear(); renderVisionAdmin(); });
+  $('#adm-rec-clips').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-clip]');
+    const clip = b && rec.clips.find((c) => c.id === b.dataset.clip);
+    if (!clip) return;
+    b.disabled = true;
+    try {
+      const url = URL.createObjectURL(new Blob([await clipToJson(clip)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = clipFileName(clip); document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } finally { b.disabled = false; }
+  });
+}
+
+function renderVisionAdmin() {
+  $('#adm-rec').checked = rec.enabled;
+  const gameName = (id) => MODES.find((m) => m.id === id)?.name || id || '';
+  const hm = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  $('#adm-rec-clips').innerHTML = rec.clips.length ? rec.clips.slice().reverse().map((c) => `<div class="adm-rec-clip"><span>${esc(hm(c.at))} · ${esc(gameName(c.meta?.mode))} · ${esc(c.reasons.map((r) => REC_REASONS[r] || r).join(', '))} · ${c.frames.length}프레임</span><button type="button" class="btn" data-clip="${esc(c.id)}">내려받기</button></div>`).join('')
+    : '<p class="muted">아직 남긴 장면이 없습니다</p>';
+  const rows = loadLog();
+  $('#adm-vlog').innerHTML = rows.length ? rows.map((x) => `<tr><td>${esc(hm(x.at))}</td><td>${esc(gameName(x.mode))}</td><td>${num(x.track_pct)}%</td><td>${num(x.sure_pct)}%</td><td>${num(x.bridged_pct)}%</td><td>${num(x.lost_count)}</td><td>${num(x.jump_count)}</td><td>${num(x.hits)} / ${num(x.unsure_touch)}</td><td>${x.reported ? '이상했어요' : ''}</td></tr>`).join('')
+    : '<tr><td colspan="9" class="muted">아직 기록이 없습니다 (카메라로 10초 넘게 한 판부터)</td></tr>';
+}
+
 // =============== 운영자 화면 ===============
 function setupAdmin() {
-  const openAdmin = () => { open($('#panel-admin')); renderAdmin(); };
+  const openAdmin = () => { open($('#panel-admin')); renderAdmin(); renderVisionAdmin(); };
+  setupVisionAdmin();
   $('#adm-stats-refresh').addEventListener('click', () => { app.adminActs = null; renderAdmin(); });
   $('#btn-admin').addEventListener('click', openAdmin);
   $('#btn-settings-admin').addEventListener('click', () => { close(els.panelSettings); openAdmin(); });
@@ -1632,6 +1756,8 @@ function loop(raw) {
       if (meas && result.puck.doubtful) meas.doubtful = true; // 애매한 조각: 자리로는 쓰되 '확실한 자리'(감점 판정)로는 세지 않는다
     }
     tracker.update(meas, now);
+    // 인식 기록(숫자)·운영자 녹화 — 카메라 프레임마다, 게임 중에만. 기록이 실패해도 게임은 그대로 (한 번만 알림)
+    if (game.running) { try { recordFrame(now, video, result, meas); } catch (e) { if (!app.recErr) { app.recErr = true; console.warn('vision log', e); } } }
 
   }
   if (!result) return;
@@ -2254,6 +2380,7 @@ function startRun(opts = {}) {
   if (game.mode.id !== 'free' && tracker.state === 'lost') { toast(settings.controller === 'stick' ? '스틱 블레이드가 인식(마름모 표시)된 뒤 시작하세요.' : '퍽이 인식(빨간 점 표시)된 뒤 시작하세요.'); }
   tracker.resetStats();
   game.start(tracker, opts);
+  startVisionLog();
   if (!app.mouseMode) track('game_start', { mode: game.mode.name, member: app.account?.current() ? 'member' : 'guest' });
   if (settings.invisible) toast('투명 모드 — 화면에 내 퍽이 보이지 않습니다. 손의 감각으로!', 2600);
   else if (visualRules().puck > 0) { const pt = visualRules().puck; toast(pt === 100 ? '내 퍽 투명도 100% — 화면에 퍽이 보이지 않습니다. 감각으로 영역에 들어가세요!' : `내 퍽 투명도 ${pt}%`, 2600); }
@@ -2266,6 +2393,7 @@ game.onEnd = (result) => {
   // 0점은 최고 기록으로 치지 않는다 (처음 한 판을 바로 멈췄을 때 '최고 기록! 0' 방지)
   const isBest = result.mode.id !== 'free' && result.reason !== 'manual' && Number(result.score) > 0 ? saveBest(result.rankKey || result.mode.id, result.score) : false;
   app.idleBlocked = result.reason === 'manual';
+  try { trackVisionQuality(result); } catch (e) { app.lastQuality = null; console.warn('vision log', e); } // 결과 화면의 '인식이 이상했어요'가 쓸 요약을 먼저 (실패해도 결과는 그대로)
   showResult(result, isBest);
   submitResult(result);
   recordPlay(result);
@@ -2311,6 +2439,9 @@ function showResult(result, isBest) {
   }
   els.resultTitle.textContent = title;
   els.resultBody.innerHTML = body.join('');
+  // 카메라로 10초 넘게 한 판: '인식이 이상했어요' (그 판의 인식 숫자를 보내고, 운영자 녹화가 켜져 있으면 마지막 10초를 장면으로)
+  const rp = $('#btn-result-report');
+  rp.classList.toggle('hidden', !app.lastQuality); rp.disabled = false;
   // 결과가 뜬 직후 1.5초는 세지 않음. blocked: 그때 퍽이 있던 쪽 (한 번 벗어나야 셈). manual: 중지로 끝남 (퍽 선택 없음)
   app.choice = { side: null, hold: 0, tick: -1, armAt: performance.now() + 1500, blocked: undefined, manual: result.reason === 'manual' };
   paintChoice(null);

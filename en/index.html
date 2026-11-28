@@ -491,6 +491,7 @@
       <div class="modal-card">
         <header><h2 id="result-title">Result</h2><button class="btn btn-ghost btn-close" data-close="panel-result">Close</button></header>
         <div id="result-body" class="result-body"></div>
+        <p class="result-report"><button type="button" id="btn-result-report" class="btn btn-ghost hidden">Recognition felt off</button></p>
         <p id="result-rank" class="result-rank hidden"></p>
         <div id="result-guest" class="result-guest hidden"></div>
         <div id="result-share" class="result-share hidden"></div>
@@ -606,6 +607,18 @@
             <button type="button" id="adm-stats-refresh" class="btn">Refresh</button>
             <a class="btn btn-ghost" href="https://analytics.google.com/analytics/web/#/a416394719p564426108/reports/intelligenthome" target="_blank" rel="noopener">Open Google Analytics</a>
           </div>
+        </section>
+        <section class="adm-sec" id="adm-vision">
+          <h3>Recognition log and recording</h3>
+          <p class="muted">Each camera game leaves numbers about how well the puck was recognized (no video). The last 30 games on this device are in the table below; everyone's numbers go to Google Analytics as the vision_quality event.</p>
+          <p class="muted">With recording on, only the board area is kept in this device's memory at low resolution during games. When the puck jumps, is lost or hits something, or 'Recognition felt off' is pressed on the result screen, the 10 seconds before and 2 seconds after are kept as a clip. Nothing is sent to a server; download a clip file and open it in the clip viewer to step through frames.</p>
+          <label class="adm-check"><input type="checkbox" id="adm-rec" /> Record recognition during games (this device only)</label>
+          <div id="adm-rec-clips" class="adm-rec-clips"></div>
+          <div class="row">
+            <button type="button" id="adm-rec-clear" class="btn btn-ghost">Delete all clips</button>
+            <a class="btn btn-ghost" href="../clip/" target="_blank" rel="noopener">Clip viewer</a>
+          </div>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>When</th><th>Game</th><th>Tracked</th><th>Sure</th><th>Bridged</th><th>Lost</th><th>Jumps</th><th>Hits / skipped</th><th></th></tr></thead><tbody id="adm-vlog"></tbody></table></div>
         </section>
         <section class="adm-sec">
           <h3>Open sign-up</h3>

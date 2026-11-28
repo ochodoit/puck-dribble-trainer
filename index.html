@@ -493,6 +493,7 @@
       <div class="modal-card">
         <header><h2 id="result-title">결과</h2><button class="btn btn-ghost btn-close" data-close="panel-result">닫기</button></header>
         <div id="result-body" class="result-body"></div>
+        <p class="result-report"><button type="button" id="btn-result-report" class="btn btn-ghost hidden">인식이 이상했어요</button></p>
         <p id="result-rank" class="result-rank hidden"></p>
         <div id="result-guest" class="result-guest hidden"></div>
         <div id="result-share" class="result-share hidden"></div>
@@ -608,6 +609,18 @@
             <button type="button" id="adm-stats-refresh" class="btn">새로 고침</button>
             <a class="btn btn-ghost" href="https://analytics.google.com/analytics/web/#/a416394719p564426108/reports/intelligenthome" target="_blank" rel="noopener">Google 애널리틱스 열기</a>
           </div>
+        </section>
+        <section class="adm-sec" id="adm-vision">
+          <h3>인식 기록과 녹화</h3>
+          <p class="muted">카메라로 한 판을 하면 퍽 인식 상태를 숫자로 남깁니다(영상은 없음). 이 기기의 최근 30판은 아래 표에, 모든 사용자의 숫자는 Google 애널리틱스의 vision_quality 이벤트로 모입니다.</p>
+          <p class="muted">녹화를 켜면 게임 중 판 부분만 낮은 해상도로 이 기기 메모리에 담아 두고, 퍽이 튀거나 놓치거나 충돌하거나 결과 화면에서 '인식이 이상했어요'를 누르면 그 앞 10초와 뒤 2초를 장면으로 남깁니다. 서버로 보내지 않으며, 장면 파일을 내려받아 장면 보기 도구에서 프레임마다 봅니다.</p>
+          <label class="adm-check"><input type="checkbox" id="adm-rec" /> 게임 중 인식 녹화 (이 기기에만)</label>
+          <div id="adm-rec-clips" class="adm-rec-clips"></div>
+          <div class="row">
+            <button type="button" id="adm-rec-clear" class="btn btn-ghost">장면 모두 지우기</button>
+            <a class="btn btn-ghost" href="clip/" target="_blank" rel="noopener">장면 보기 도구</a>
+          </div>
+          <div class="rank-table-wrap"><table class="rank-table adm-table"><thead><tr><th>때</th><th>게임</th><th>추적</th><th>확실</th><th>이음</th><th>놓침</th><th>튐</th><th>충돌 / 넘김</th><th></th></tr></thead><tbody id="adm-vlog"></tbody></table></div>
         </section>
         <section class="adm-sec">
           <h3>가입 준비</h3>

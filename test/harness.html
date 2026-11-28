@@ -20,6 +20,8 @@
   import { alphaLayer } from '../src/theme.js';
   import { rankKey, FLYER_R, WIDE_DRILLS, WIDE_HOLD_R, laneX, figure8Waypoints, FIGURE8_DIRS, GATE_DRAW_R, TARGET_DRAW_R, PUCK_R as ME_R, HIT_OVERLAP, circleOverlap, overlapReach, discRectOverlap, scoreScale, shownScore } from '../src/game.js';
   import { FLOOR_MODES, FLOOR_FLIP_MODES } from '../src/render.js';
+  import { VisionLog, qualitySummary, saveLog, loadLog, markReported, LOG_KEEP } from '../src/vision-log.js';
+  import { VisionRecorder, clipToJson, clipFileName, frameSummary, REC_PRE_MS, REC_POST_MS, REC_MAX_CLIPS } from '../src/vision-rec.js';
   import { makeFloorMapping } from '../src/geometry.js';
   import { memberStats, lastDays } from '../src/stats.js';
   import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
@@ -2045,6 +2047,57 @@
         res.score === 1010 && res.shown === 174 && item && item[1] === 174 && live === 174 && scoreScale('free') === 1 && scoreScale('bogus') === 1, { score: res.score, shown: res.shown, item, live });
       // RX 반응 타겟은 흰 판 (배경이 비치면 헷갈려서): 바닥 위 그리기·위아래 반전 목록에서 빠짐
       check('RX reaction target plays on the white board (not drawn on the camera floor)', !FLOOR_MODES.has('reaction') && !FLOOR_FLIP_MODES.has('reaction') && FLOOR_MODES.has('quick') && FLOOR_MODES.has('wide'));
+    }
+    // VL·VR) 데이터 쌓기: 인식 기록(1단계, 한 판마다 숫자만)과 운영자 인식 녹화(2단계, 이상한 순간의 앞뒤 장면)
+    {
+      // VL1 한 판 동안 프레임마다 세기 -> 요약 (GA4 매개변수 25개 이하, 숫자·짧은 글자만)
+      const lg = new VisionLog();
+      const tk = { state: 'tracked', confident: true, bridged: false, jumps: 3 };
+      for (let i = 0; i < 60; i++) lg.frame(tk, { u: 0.5, v: 0.5 }, { thinRemoved: 0 });                                                   // 확실한 자리
+      for (let i = 0; i < 20; i++) lg.frame({ ...tk, confident: false, bridged: true }, { u: 0.5, v: 0.5, bridged: true }, { thinRemoved: 12 }); // 블레이드로 이음 + 샤프트 지움
+      for (let i = 0; i < 10; i++) lg.frame({ ...tk, confident: false }, { u: 0.5, v: 0.5, doubtful: true }, { thinRemoved: 0 });           // 애매한 조각
+      for (let i = 0; i < 10; i++) lg.frame({ ...tk, state: 'lost', confident: false, jumps: 5 }, null, {});                                // 놓침 (그사이 튐 2번)
+      const sm = qualitySummary(lg, { mode: 'figure8', seconds: 0, level: 'normal', elapsed: 45, fps: 30, procWidth: 240, hits: 1, unsure: 2, shadowCut: 0.386, floorLuma: 230,
+        puckTol: 120, stickTol: 70, stick: true, puckModel: { r: 20, g: 20, b: 22 }, quad: [[0.25, 0.3], [0.75, 0.3], [0.85, 0.8], [0.15, 0.8]], member: true });
+      const nKeys = Object.keys(sm).length, flat = Object.values(sm).every((v) => typeof v === 'number' || (typeof v === 'string' && v.length <= 40));
+      check('VL1 per-game recognition numbers: tracked/sure/bridged/doubtful/thin %, lost and jumps, sized for GA4',
+        nKeys <= 25 && flat && sm.frames === 100 && sm.track_pct === 90 && sm.sure_pct === 60 && sm.bridged_pct === 20 && sm.doubtful_pct === 10 && sm.thin_pct === 20 && sm.lost_count === 1 && sm.jump_count === 2
+        && sm.unsure_touch === 2 && sm.shadow_cut === 39 && sm.puck_kind === 'dark' && sm.area_pct === 30 && sm.tilt === 71 && sm.stick_tol === 70 && sm.member === 'member', { nKeys, sm });
+      // VL2 이 기기 기록: 새것부터 30판까지, '인식이 이상했어요' 표시
+      const mem = new Map(), store = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)) };
+      for (let i = 0; i < 35; i++) saveLog({ mode: 'arcade', track_pct: i }, store, 1000 + i);
+      const rows = loadLog(store), marked = markReported(1034, store);
+      check('VL2 device log keeps the newest 30 games and marks a reported one', rows.length === LOG_KEEP && rows[0].at === 1034 && rows[LOG_KEEP - 1].at === 1005 && marked && loadLog(store)[0].reported === 1,
+        { len: rows.length, first: rows[0]?.at, last: rows[LOG_KEEP - 1]?.at });
+
+      // VR1 녹화: 최근 10초를 담아 두고, 이상한 순간 앞 10초 + 뒤 2초를 장면으로 (그사이 이상한 순간은 이유만 더함), 장면은 6개까지
+      const rc = new VisionRecorder(); let got = 0; rc.onClip = () => got++;
+      let t = 0;
+      const step = (ms) => { for (const e = t + ms; t < e; t += 33) rc.push({ t, img: null, c: [0, 0, 10, 10], r: { k: [0.5, 0.5, 't', 1, 0] } }); };
+      step(15000);
+      const ringSpan = rc.ring[rc.ring.length - 1].t - rc.ring[0].t;
+      const at = t; rc.trigger('jump', at); step(1000); rc.trigger('hit', t); step(1500);
+      const c1 = rc.clips[0], span = c1 ? [c1.frames[0].t - at, c1.frames[c1.frames.length - 1].t - at] : null;
+      check('VR1 recorder keeps the last ~12 s and saves the full 10 s before + 2 s after an odd moment (later reasons merge into it)',
+        got === 1 && ringSpan <= REC_PRE_MS + REC_POST_MS + 600 && !!c1 && span[0] >= -REC_PRE_MS && span[0] < -REC_PRE_MS + 40 && span[1] <= REC_POST_MS && span[1] > REC_POST_MS - 40 && c1.reasons.join() === 'jump,hit' && c1.marks.length === 2,
+        { ringSpan, span, reasons: c1?.reasons });
+      for (let i = 0; i < 8; i++) { rc.trigger('lost', t); step(2100); }
+      check('VR1 at most 6 clips are kept (oldest dropped)', rc.clips.length === REC_MAX_CLIPS && got === 9, { clips: rc.clips.length, got });
+      // VR2 게임이 끝난 뒤 '인식이 이상했어요': 마지막으로 담은 10초
+      const rr = new VisionRecorder(); t = 0;
+      for (; t < 20000; t += 33) rr.push({ t, img: null, c: null, r: null });
+      const last = t - 33, rep = rr.report();
+      check('VR2 report after the game keeps the last 10 s', !!rep && rep.reasons[0] === 'report' && rep.frames[rep.frames.length - 1].t === last && last - rep.frames[0].t <= REC_PRE_MS && last - rep.frames[0].t > REC_PRE_MS - 40, { n: rep?.frames.length });
+      // VR3 장면 파일: 프레임 시각은 장면 처음부터, 사진은 data URL, 프레임마다 인식 결과는 숫자 몇 개, 파일 이름
+      const blob = new Blob([new Uint8Array([255, 216, 255, 217])], { type: 'image/jpeg' });
+      const fr0 = frameSummary({ puck: { x: 10.123, y: 20.456, area: 30.789, doubtful: true }, stick: null }, { u: 0.5, v: 0.25, bridged: true }, { pos: { x: 0.5, y: 0.25 }, state: 'tracked', confident: false, bridged: true }, { score: 12.4, hits: 1, unsure: 2 });
+      const small = { at: Date.UTC(2026, 10, 28, 6, 30, 12), reasons: ['jump'], marks: [{ t: 1500, reason: 'jump' }], meta: { mode: 'figure8' },
+        frames: [{ t: 1000, img: Promise.resolve(blob), c: [1, 2, 3, 4], r: fr0 }, { t: 1033, img: null, c: null, r: null }] };
+      const js = JSON.parse(await clipToJson(small));
+      check('VR3 clip file: frame times from the clip start, photos as data URLs, compact per-frame recognition, file name',
+        js.kind === 'puck-trainer-clip' && js.frames[0].t === 0 && js.frames[1].t === 33 && js.marks[0].t === 500 && /^data:image\/jpeg;base64,/.test(js.frames[0].img) && js.frames[1].img === null
+        && JSON.stringify(js.frames[0].r) === JSON.stringify({ p: [10.12, 20.46, 30.79, 1], s: null, m: [0.5, 0.25, 1, 0], k: [0.5, 0.25, 't', 0, 1], g: [12, 1, 2] }) && /^puck-clip-\d{8}-\d{6}-jump\.json$/.test(clipFileName(small)),
+        { r: js.frames[0].r, name: clipFileName(small) });
     }
     // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
     {

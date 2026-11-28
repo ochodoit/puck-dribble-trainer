@@ -425,6 +425,9 @@ input[type="range"] { accent-color: var(--ink); height: 30px; width: 100%; }
 .stat.winner small { font-family: var(--script); font-size: 26px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--red); }
 .stat.winner b { color: var(--red); }
 .result-rank { margin: 14px 0 0; font-size: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 결과 화면 '인식이 이상했어요': 작게, 오른쪽 (카메라 판에서만) */
+.result-report { margin: 6px 0 0; text-align: right; }
+.result-report .btn { font-size: 12.5px; padding: 5px 12px; }
 
 /* 게임 종료 후 선택: 왼쪽 = 한 번 더, 오른쪽 = 모드 선택 (퍽을 2초 두면 채워지며 실행) */
 /* 결과가 길어도 고르는 버튼은 창 아래에 붙어 늘 보이게 */
@@ -712,6 +715,10 @@ html[lang="en"] .mode-card em { display: none; }           /* 영어에서는 �
 .adm-out b { font-family: var(--display); font-weight: 900; font-size: 22px; letter-spacing: 0.04em; }
 .adm-out input { flex: 1 1 240px; font-size: 13px; }
 .adm-table td { vertical-align: middle; }
+/* 운영자: 인식 기록과 녹화 */
+.adm-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 14px; font-weight: 600; }
+.adm-rec-clips { display: grid; gap: 6px; margin: 6px 0 10px; }
+.adm-rec-clip { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13.5px; }
 .adm-table tr.dim td { color: var(--mute); }
 .adm-table input { font-size: 13px; padding: 4px 8px; border-radius: 8px; }
 .adm-acts { white-space: nowrap; }

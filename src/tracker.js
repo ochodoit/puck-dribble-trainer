@@ -34,6 +34,7 @@ export class Tracker {
     this.seenSince = 0;       // 직접 본 측정이 끊기지 않고 이어진 첫 시각 (튀어서 옮기면 다시 셈)
     this.confident = false;   // 확실한 자리: 직접 본 측정이 CONFIRM_MS 이상 이어짐 (감점 판정은 이때만)
     this.bridged = false;     // 이번 자리가 블레이드로 이은 자리(가려진 퍽 추정)인지 — 화면에는 흐리게
+    this.jumps = 0;           // 통계: 튀는 값이 이어져 자리를 옮긴 횟수 (다른 물체로 옮겨 갔을 수 있는 순간 — 인식 기록·녹화)
   }
 
   resetStats() { this.touches = 0; this.distance = 0; this.dirX = 0; this.frames = 0; this.trackedFrames = 0; this.rejected = 0; }
@@ -87,7 +88,7 @@ export class Tracker {
           // 같은 곳으로 계속 측정됨 -> 진짜 이동(재획득): 속도 초기화 후 점프
           this.pos = { x: meas.u, y: meas.v };
           this.vel = { x: 0, y: 0 };
-          jumped = true;
+          jumped = true; this.jumps++;
         } else {
           const slow = this.speed < 0.15;
           const moved = Math.hypot(meas.u - this.pos.x, meas.v - this.pos.y);

@@ -81,6 +81,7 @@ export class Arcade {
     this.score = 0;
     this.touches = 0; this.streak = 0; this.maxStreak = 0; this.lastTouchAt = 0;
     this.passed = 0; this.items = 0; this.hits = 0;
+    this.unsure = 0; // 확실하지 않은 자리로 닿아 넘긴 충돌 수 (인식 기록)
     this.elapsed = 0;
     this.tDir = 0; this.tExt = null; this.tAnchor = null; // 터치 판정: 현재 방향, 그 방향의 끝점, 직전 터치 지점
     this.moveRef = null; this.lastMoveAt = 0;           // 멈춤 판정
@@ -176,6 +177,8 @@ export class Arcade {
       if (d < o.minDist) o.minDist = d;
       const touch = o.r + PUCK_R;
       if (!o.hit && d <= touch && canHit) this._onHit(o, now);
+      // 확실하지 않은 자리로 닿음: 감점하지 않고 넘기되 퍽마다 한 번 센다 (인식 기록)
+      else if (!o.hit && !o.unsure && d <= touch && tracked && puck.confident === false && now >= this.invulnUntil) { o.unsure = true; this.unsure++; }
       // 나를 겨냥한 퍽: 0.8초 안에 닿을 거리 위에서, 내 퍽과 같은 줄(닿는 폭 안)에 있었던 적이 있음
       const ahead = a.y - o.y;
       if (!o.threat && ahead > 0 && ahead < o.vy * THREAT_S && Math.abs(a.x - o.x) < touch) o.threat = true;

@@ -63,6 +63,8 @@ export const laneX = (n) => (n - 0.5) / WIDE_LANES;
 
 export const PUCK_R = 0.0125; // 내 퍽(잉크 정원) 반지름 = 목표 판정에 쓰는 크기 (경기장 가로 대비). 예전(0.025)의 절반 — 구역이 겹쳐 읽히지 않게
 const CONE_R = 0.045;
+// 8자 콘 충돌: 확실한 자리(추적기 confident)가 같은 콘에 이만큼 연속 프레임 닿아야 감점 (한 프레임 튄 값으로 감점하지 않게)
+export const CONE_CONFIRM = 2;
 // 목표 지점 크기 (경기장 가로 대비): 예전의 절반
 export const TARGET_DRAW_R = 0.02125; // 반응 타겟 원 반지름 (예전의 절반)
 const REACT_APPROACH = 0.4;       // 타겟 쪽으로 이만큼(폭/초) 빠르게 다가가기 시작하면 '반응'
@@ -239,6 +241,7 @@ export class Game {
     this.lastTickSec = -1;
     this._puckTouchesBase = 0;
     this._f8Prev = null;
+    this._coneTouch = null; // 8자: 지금 닿아 있는 콘과 연속 프레임 수 (CONE_CONFIRM)
     this._prevMe = null;
     this.f8Hold = null; // 8자 시작 대기 {t: 가운데 원에 퍽을 둔 시간(초)}. null 이면 진행 중
     this.quickSet = 0;  // 퀵 핸즈: 지금 세트 (0 = 3시, 1 = 6시, 2 = 9시)
@@ -444,7 +447,8 @@ export class Game {
         this.stats.maxFlyers = Math.max(this.stats.maxFlyers, this.flyers.length);
         this.hits = this.stats.hits;
         this.score = Math.max(0, Math.floor(this.elapsed) * 10 + this.stats.dodged * 5 + this.stats.close * 15 - this.stats.hits * DODGE_HIT_PENALTY);
-        const canHit = me && tracked && now >= this.invulnUntil;
+        // 감점은 확실한 자리로만 (블레이드로 이은 자리·튄 직후 자리로 '맞았다'고 하지 않게)
+        const canHit = me && tracked && puck.confident !== false && now >= this.invulnUntil;
         for (const f of this.flyers) {
           if (now < f.launchAt) continue;              // 가장자리 경고 중
           f.x += f.vx * dt; f.y += f.vy * dt;           // 직선 이동 (속도 일정)
@@ -530,8 +534,9 @@ export class Game {
             if (this.wpIndex === 0) { this.stats.laps++; this.score += 4; this._pop(this.center.x, this.center.y, `${this.stats.laps}바퀴!`, C.red, 'script'); this.sfx?.target(); }
             this.instruction = `다음 게이트 ${this.wpIndex + 1}/${this.waypoints.length}`;
           }
-          this._checkCones(me, now, () => { this.stats.hits++; this.score = Math.max(0, this.score - 2); });
-        }
+          // 게이트 통과는 블레이드로 이은 자리로도 세지만(블레이드 밑에 덮고 끌고 가는 퍽), 콘 충돌(감점)은 확실한 자리로만
+          this._checkCones(me, now, () => { this.stats.hits++; this.score = Math.max(0, this.score - 2); }, puck.confident !== false);
+        } else this._coneTouch = null;
         break;
       }
       case 'quick': {
@@ -671,19 +676,25 @@ export class Game {
     }
   }
 
-  _checkCones(pp, now, onHit) {
-    if (now < this.invulnUntil) return;
-    for (const c of this.cones) {
-      if (dist(pp, c) < c.r + PUCK_R) {
-        c.hitUntil = now + 500;
-        this.invulnUntil = now + 1200;
-        this._pop(c.x, c.y - 0.08, '충돌!', C.red);
-        this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
-        this.sfx?.hit();
-        onHit(c);
-        return;
-      }
-    }
+  /**
+   * 콘 충돌. sure: 확실한 자리(추적기 confident — 직접 본 퍽이 이어짐)일 때만 센다. 블레이드로 이은 자리·예측 자리·튄 직후 자리로는 감점하지 않는다.
+   * 같은 콘에 CONE_CONFIRM 프레임 연속 닿아야 충돌 (한 프레임 튄 값으로 감점하지 않게)
+   */
+  _checkCones(pp, now, onHit, sure = true) {
+    if (now < this.invulnUntil) { this._coneTouch = null; return; }
+    let touching = null;
+    if (sure) for (const c of this.cones) if (dist(pp, c) < c.r + PUCK_R) { touching = c; break; }
+    const prev = this._coneTouch;
+    this._coneTouch = touching ? { cone: touching, n: prev && prev.cone === touching ? prev.n + 1 : 1 } : null;
+    if (!touching || this._coneTouch.n < CONE_CONFIRM) return;
+    this._coneTouch = null;
+    const c = touching;
+    c.hitUntil = now + 500;
+    this.invulnUntil = now + 1200;
+    this._pop(c.x, c.y - 0.08, '충돌!', C.red);
+    this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
+    this.sfx?.hit();
+    onHit(c);
   }
 
   /** 와이드 드리블: i번째 훈련 시작 (처음 또는 시간이 지나 다음 훈련으로) */

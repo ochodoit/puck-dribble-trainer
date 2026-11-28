@@ -1627,7 +1627,10 @@ function loop(raw) {
       if (pu && result.puck.doubtful) pu.doubtful = true;
       meas = stickBridge.step(pu, toUV(result.stick), now);
       if (meas?.bridged && m) { const [bx, by] = m.toPx(meas.u, meas.v); vision.holdPuckAt(bx, by); }
-    } else meas = toUV(result.puck);
+    } else {
+      meas = toUV(result.puck);
+      if (meas && result.puck.doubtful) meas.doubtful = true; // 애매한 조각: 자리로는 쓰되 '확실한 자리'(감점 판정)로는 세지 않는다
+    }
     tracker.update(meas, now);
 
   }

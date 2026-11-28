@@ -5,7 +5,11 @@
 
 export const BRIDGE_NEAR = 0.15;      // 퍽과 블레이드가 이 거리(바닥 폭 기준) 안이면 '붙어 있음'
 export const BRIDGE_RECENT_MS = 250;  // 퍽이 사라지기 직전 이 시간 안에 붙어 있었어야 블레이드로 잇는다 (멀리서 사라진 퍽은 잇지 않음)
-export const BRIDGE_MAX_MS = 1500;    // 가장 오래 잇는 시간 (그 뒤로는 추적기의 예측·놓침 처리)
+export const BRIDGE_MAX_MS = 1500;    // 블레이드가 빨리 움직일 때 가장 오래 잇는 시간 (그 뒤로는 추적기의 예측·놓침 처리)
+// 천천히 덮고 끌 때: 블레이드가 느리게(바닥 폭/초 BRIDGE_SLOW_SPEED 아래) 움직이거나 멈춰 있으면 퍽은 그 밑에 그대로 있을 것이라
+// BRIDGE_SLOW_MS 까지 잇는다 (예전엔 1.5초 만에 놓쳐 화면의 퍽이 흐려지다 사라졌다). 한 번 끝나면 퍽이 다시 보일 때까지 다시 잇지 않는다
+export const BRIDGE_SLOW_MS = 5000;
+export const BRIDGE_SLOW_SPEED = 0.4;
 // 블레이드에 붙어 있던(또는 블레이드 밑에 가려진) 퍽: '블레이드 + 간격' 자리에서 이만큼 넘게 떨어진 애매한 조각
 // (Vision 의 doubtful: 가늘고 긴 조각·작은 조각·떼어 낸 조각)은 퍽이 아니라 퍽과 같은 색 스틱 샤프트로 본다.
 // 퍽 색과 스틱 테이프 색만 따라간다 (샤프트 색이 퍽과 같아도 샤프트 윗부분을 퍽으로 잡지 않게)
@@ -20,20 +24,34 @@ export class StickBridge {
     this.lostAt = null;        // 퍽이 사라진 시각 (보이는 동안 null)
     this.armed = false;        // 이번에 사라진 퍽을 블레이드로 이을지 (사라지는 순간에 정함)
     this.active = false;       // 지금 블레이드로 잇는 중
+    this.expired = false;      // 이번 가림은 잇는 시간이 끝남 (퍽이 다시 보일 때까지 잇지 않음)
+    this.lastBlade = null;     // 직전 블레이드 자리 {u, v, t}
+    this.bladeSpeed = null;    // 블레이드 속도 (바닥 폭/초, 부드럽게)
   }
+
+  /** 블레이드가 천천히 움직이거나 멈춰 있음 -> 가려진 퍽을 오래(BRIDGE_SLOW_MS) 잇는다 */
+  get slow() { return this.bladeSpeed !== null && this.bladeSpeed < BRIDGE_SLOW_SPEED; }
 
   /**
    * 한 프레임. puck: {u, v, doubtful?} | null, stick: {u, v} | null (이번 프레임 측정). now: ms
    * 반환: 추적기에 넣을 측정값 — 퍽이 보이면 퍽 그대로, 가려졌으면 {u, v, bridged: true}, 둘 다 아니면 null
    */
   step(puck, stick, now) {
+    if (stick) {
+      const lb = this.lastBlade;
+      if (lb && now > lb.t) {
+        const v = Math.hypot(stick.u - lb.u, stick.v - lb.v) / ((now - lb.t) / 1000);
+        this.bladeSpeed = this.bladeSpeed === null ? v : this.bladeSpeed + (v - this.bladeSpeed) * 0.3;
+      }
+      this.lastBlade = { u: stick.u, v: stick.v, t: now };
+    }
     // 블레이드에 붙어 있던(가려진) 퍽인데 이번 측정이 애매한 조각이고 블레이드 + 간격 자리에서 멀면: 샤프트로 보고 버린다
     if (puck?.doubtful && stick && this.offset && (this.active || now - this.nearAt <= BRIDGE_RECENT_MS)) {
       const eu = stick.u + this.offset.u, ev = stick.v + this.offset.v;
       if (Math.hypot(puck.u - eu, puck.v - ev) > BRIDGE_TRUST) puck = null;
     }
     if (puck) {
-      this.lostAt = null; this.armed = false; this.active = false;
+      this.lostAt = null; this.armed = false; this.active = false; this.expired = false;
       if (stick) {
         const du = puck.u - stick.u, dv = puck.v - stick.v;
         if (Math.hypot(du, dv) < BRIDGE_NEAR) {
@@ -50,8 +68,11 @@ export class StickBridge {
     if (this.lostAt === null) {
       this.lostAt = now;
       this.armed = !!this.offset && now - this.nearAt <= BRIDGE_RECENT_MS;
+      this.expired = false;
     }
-    this.active = this.armed && !!stick && now - this.lostAt <= BRIDGE_MAX_MS;
+    // 잇는 시간: 블레이드가 천천히 움직이면(덮은 채 끌기·멈춤) 길게, 빨리 움직이면 1.5초
+    if (now - this.lostAt > (this.slow ? BRIDGE_SLOW_MS : BRIDGE_MAX_MS)) this.expired = true;
+    this.active = this.armed && !this.expired && !!stick;
     if (!this.active) return null;
     const u = Math.min(1, Math.max(0, stick.u + this.offset.u));
     const v = Math.min(1, Math.max(0, stick.v + this.offset.v));

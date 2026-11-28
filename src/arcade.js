@@ -161,7 +161,8 @@ export class Arcade {
     }
 
     const a = this.avatar;
-    const canHit = tracked && now >= this.invulnUntil && !!a;
+    // 감점(충돌)은 확실한 자리로만: 블레이드로 이은 자리·튄 직후 자리(추적기 confident 아님)로는 맞았다고 하지 않는다
+    const canHit = tracked && puck.confident !== false && now >= this.invulnUntil && !!a;
 
     // 내려오는 퍽: 이동 + 판정 (원-원)
     for (const o of this.obstacles) {
@@ -449,7 +450,7 @@ export class Arcade {
     }
     const invuln = now < this.invulnUntil;
     if (invuln && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
-    const predicted = puck?.state === 'predicted';
+    const predicted = puck?.state === 'predicted' || !!puck?.bridged; // 안 보이는 퍽(예측·블레이드로 이은 자리)은 흐리게
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = ghost ? rgba(C.ink, 0.3) : predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
     ctx.globalAlpha = 1;

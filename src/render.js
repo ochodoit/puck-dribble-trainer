@@ -185,7 +185,7 @@ export class Renderer {
       }
       if (!me) return;
       const [cx, cy] = P(me.x, me.y), r = PUCK_R * S;
-      const predicted = puck.state === 'predicted';
+      const predicted = puck.state === 'predicted' || !!puck.bridged; // 안 보이는 퍽(예측·블레이드로 이은 자리)은 흐리게
       // 충돌 직후 무적 시간(퍽 피하기·8자 콘)에는 깜빡임
       if (game.running && now < game.invulnUntil && Math.floor(now / 100) % 2 === 0) ctx.globalAlpha = 0.3;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = predicted ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
@@ -306,7 +306,7 @@ export class Renderer {
       }
       const r = Math.max(3 * this.dpr, PUCK_R * pxPerX(me.x, me.y)); // 그 자리의 바닥 가로 축척 (u = 평면 x)
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = puck.state === 'predicted' ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
+      ctx.fillStyle = puck.state === 'predicted' || puck.bridged ? rgba(C.ink, 0.45) : C.ink; ctx.fill();
       ctx.lineWidth = hair; ctx.strokeStyle = rgba(C.paper, 0.9); ctx.stroke(); // 어두운 바닥에서도 보이게 얇은 종이색 가장자리
     });
   }
@@ -515,7 +515,7 @@ export class Renderer {
     if (!puck.pos) return;
     const [cx, cy] = uvToC(puck.pos.x, puck.pos.y);
     const r = Math.max(unit * 0.02, rFloor * 1.5);
-    const predicted = puck.state === 'predicted';
+    const predicted = puck.state === 'predicted' || !!puck.bridged;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
     if (predicted) ctx.setLineDash([hair * 3, hair * 3]);
     inkStroke(ctx, hair * 1.2, C.ink);

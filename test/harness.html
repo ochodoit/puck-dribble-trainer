@@ -1626,8 +1626,16 @@
       const sb3 = new StickBridge(); t = 0;
       for (let i = 0; i < 5; i++) { sb3.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
       const lostAt = t; let lastOk = null;
-      for (let i = 0; i < 70; i++) { if (sb3.step(null, { u: 0.52, v: 0.5 }, t)) lastOk = t; t += 33; }
-      check('B3 bridging stops after 1.5 s', lastOk !== null && lastOk - lostAt >= 1400 && lastOk - lostAt <= 1500 && !sb3.active, { held: lastOk - lostAt });
+      // 블레이드가 빨리 움직이는 동안(좌우로 흔듦): 1.5초에서 끝. 끝난 뒤 블레이드가 멈춰도 퍽이 다시 보일 때까지 다시 잇지 않는다
+      for (let i = 0; i < 70; i++) { if (sb3.step(null, { u: 0.52 + (i % 2 ? 0.03 : -0.03), v: 0.5 }, t)) lastOk = t; t += 33; }
+      let resumed = false; for (let i = 0; i < 30; i++) { if (sb3.step(null, { u: 0.52, v: 0.5 }, t)) resumed = true; t += 33; }
+      check('B3 bridging stops after 1.5 s while the blade moves fast, and does not restart', lastOk !== null && lastOk - lostAt >= 1400 && lastOk - lostAt <= 1500 && !sb3.active && !resumed, { held: lastOk - lostAt, resumed });
+      // 천천히 덮고 끄는 동안(블레이드가 느리거나 멈춤): 퍽은 그 밑에 있을 것이라 5초까지 잇는다
+      const sb3s = new StickBridge(); t = 0;
+      for (let i = 0; i < 5; i++) { sb3s.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
+      const lostS = t; let lastS = null;
+      for (let i = 0; i < 180; i++) { if (sb3s.step(null, { u: 0.52 + i * 0.001, v: 0.5 }, t)) lastS = t; t += 33; }
+      check('B3 a slowly moving (or still) blade over the puck keeps it bridged up to 5 s', lastS !== null && lastS - lostS >= 4900 && lastS - lostS <= 5000 && !sb3s.active, { held: lastS - lostS });
       const sb4 = new StickBridge(); t = 0;
       for (let i = 0; i < 5; i++) { sb4.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
       check('B4 no blade in view -> nothing to bridge with', sb4.step(null, null, t) === null);
@@ -1951,6 +1959,58 @@
       // SH6 그림자 규칙은 바닥이 밝고 물체가 검정·회색일 때만 (색 있는 테이프·퍽은 색으로 이미 갈리고, 어두운 바닥에선 끔)
       const blk = { r: 20, g: 20, b: 22 }, org = { r: 249, g: 115, b: 22 }, c6 = shadowCut(blk, makeMatcher(blk, 95), 230);
       check('SH6 shadow rule: only gray/black objects on a light floor', c6 > 0.3 && c6 < 0.45 && shadowCut(org, makeMatcher(org, 70), 230) === 0 && shadowCut(blk, makeMatcher(blk, 95), 90) === 0, { cut: +c6.toFixed(3) });
+    }
+    // CF) 확실한 자리로만 감점: 퍽이 스틱에 가려진 순간 스틱(샤프트)을 퍽으로 잡아 튄 자리·블레이드로 이은 자리로 콘·날아오는 퍽에 '닿았다'고 하지 않는다
+    {
+      // CF1 추적기: 직접 본 측정이 150ms 이어져야 확실. 블레이드로 이은 자리·애매한 조각·튄 직후·다시 보인 직후는 아님
+      const tk = new Tracker(); let t = 0;
+      const feed = (m) => { tk.update(m, t); t += 33; return tk.confident; };
+      const first = [0, 1, 2, 3].map(() => feed({ u: 0.5, v: 0.5 }));                 // 0~99ms: 아직
+      for (let i = 0; i < 3; i++) feed({ u: 0.5, v: 0.5 });
+      const steady = tk.confident;                                                        // 165ms 넘음: 확실
+      const br = feed({ u: 0.52, v: 0.5, bridged: true }), brFlag = tk.bridged;          // 블레이드로 이은 자리
+      const db = feed({ u: 0.52, v: 0.5, doubtful: true });                              // 애매한 조각
+      const back = feed({ u: 0.52, v: 0.5 });                                             // 다시 보인 직후
+      for (let i = 0; i < 5; i++) feed({ u: 0.52, v: 0.5 });
+      const again = tk.confident;
+      for (let i = 0; i < 3; i++) feed({ u: 0.9, v: 0.9 });                              // 멀리 튄 값: 3프레임 무시
+      const jumpFrame = feed({ u: 0.9, v: 0.9 }), jumpedTo = !!tk.pos && Math.abs(tk.pos.x - 0.9) < 1e-9; // 계속 그 자리 -> 옮김
+      for (let i = 0; i < 5; i++) feed({ u: 0.9, v: 0.9 });
+      const afterJump = tk.confident;
+      check('CF1 tracker: sure only after 150 ms of the puck seen directly (not bridged, not a doubtful piece, not right after a jump or reappearing)',
+        first.every((c) => !c) && steady && !br && brFlag && !db && !back && again && !jumpFrame && jumpedTo && afterJump, { first, steady, br, brFlag, db, back, again, jumpFrame, jumpedTo, afterJump });
+
+      // CF2 8자 콘: 확실한 자리가 같은 콘에 2프레임 연속 닿아야 감점 (한 프레임 튄 값·확실하지 않은 자리는 감점 없음)
+      const gc = new Game(null); gc.setMode('figure8');
+      const tp = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', confident: true, trail: [], touches: 0, speed: 0, distance: 0 };
+      gc.start(tp, { handsFree: true });
+      let tc = 800000;
+      const q0 = gc.toPlane(0, 0), q1 = gc.toPlane(1, 1), c0 = gc.cones[0];
+      const onCone = { x: (c0.x - q0.x) / (q1.x - q0.x), y: (c0.y - q0.y) / (q1.y - q0.y) }, away = { x: 0.5, y: 0.5 };
+      const step = (p, sure) => { tp.pos = { ...p }; tp.confident = sure; gc.update(0.033, tp, tc); tc += 33; return gc.stats.hits; };
+      step(away, true);
+      step(onCone, true); const one = step(away, true);
+      step(onCone, false); step(onCone, false); const unsure = step(onCone, false);
+      step(away, true);
+      step(onCone, true); const two = step(onCone, true);
+      check('CF2 figure 8: a cone hit needs a sure puck on the same cone 2 frames in a row', one === 0 && unsure === 0 && two === 1, { one, unsure, two });
+
+      // CF3 퍽 피하기·아케이드: 확실하지 않은 자리로는 맞았다고 하지 않음 (확실하면 그대로 감점)
+      const gd = new Game(null); gd.setMode('obstacle'); gd.plane = { A: 0.6, flip: true };
+      const td = { pos: { x: 0.5, y: 0.5 }, state: 'tracked', confident: true, touches: 0, distance: 0, speed: 0, frames: 1, trackedFrames: 1, trackRate: 1, trail: [] };
+      gd.start(td); let tt = 900000;
+      for (let i = 0; i < 40; i++) { gd.update(0.033, { ...td, state: 'predicted' }, tt); tt += 33; }
+      const fl = gd.flyers.find((x) => tt >= x.launchAt) || gd.flyers[0]; fl.launchAt = 0; fl.hit = false; fl.x = 0.4; fl.y = 0.3; fl.vx = 0; fl.vy = 0;
+      gd.invulnUntil = 0; gd.stats.hits = 0;
+      gd.update(0.033, { ...td, pos: { x: 0.4, y: 0.5 }, confident: false }, tt); tt += 33;
+      const dUnsure = gd.stats.hits;
+      gd.update(0.033, { ...td, pos: { x: 0.4, y: 0.5 }, confident: true }, tt); tt += 33;
+      const dSure = gd.stats.hits;
+      const arU = mk(); let ta = toPlay(arU, 30000); arU.obstacles.push(fall(0.5, 0.1));
+      for (let i = 0; i < 40; i++) { arU.update(0.033, { ...fakePuck(0.5, 0.5), confident: false }, ta); ta += 33; }
+      const arS = mk(); ta = toPlay(arS, 40000); arS.obstacles.push(fall(0.5, 0.1));
+      for (let i = 0; i < 40; i++) { arS.update(0.033, { ...fakePuck(0.5, 0.5), confident: true }, ta); ta += 33; }
+      check('CF3 puck dodge and arcade: no penalty from an unsure position, the usual penalty from a sure one', dUnsure === 0 && dSure === 1 && arU.hits === 0 && arS.hits === 1, { dUnsure, dSure, arUnsure: arU.hits, arSure: arS.hits });
     }
     // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
     {

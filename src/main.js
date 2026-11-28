@@ -1,7 +1,7 @@
 // 앱 오케스트레이션: 카메라 -> 영상처리 -> 추적 -> 게임 -> 렌더/HUD
 import { isDevHost } from './guard.js'; // 맨 먼저: 공식 주소·내 컴퓨터가 아니면 여기서 멈춤 (복제 사이트·iframe 막기)
 import { Camera, CameraRateAuto, describeCameraError } from './camera.js';
-import { Vision, AutoCalibrator, colorsTooClose } from './vision.js';
+import { Vision, AutoCalibrator, colorsTooClose, stickSizeUnknown } from './vision.js';
 import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
 import { placementCheck } from './placement.js';
@@ -2945,7 +2945,8 @@ function refreshCalibUI() {
   if (sm) {
     els.swatchStick.style.background = `rgb(${sm.r},${sm.g},${sm.b})`;
     els.swatchStick.classList.remove('none');
-    els.calibStickDesc.textContent = '등록됨';
+    // 물체에 붙지 못하고 누른 자리 색만 잰 등록(넓이 4): 인식은 블레이드 크기를 어림해 쓰지만, 다시 지정하면 더 정확하다
+    els.calibStickDesc.textContent = stickSizeUnknown(sm, pm) ? '등록됨 · 크기를 못 재어 다시 지정하면 더 정확해요' : '등록됨';
   } else {
     els.swatchStick.style.background = '';
     els.swatchStick.classList.add('none');

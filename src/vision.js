@@ -1,5 +1,5 @@
 // 영상 처리: 흰 바닥 영역, 퍽, 스틱 인식 (의존성 없는 순수 JS)
-import { makeFloorMapping, quadBounds, quadScanlines } from './geometry.js';
+import { makeFloorMapping, quadBounds, quadScanlines, insetQuad } from './geometry.js';
 
 const FLOOR_EMA = 0.15;        // 자동 바닥 영역 스무딩 계수
 const FLOOR_ON_FRAMES = 10;    // 흰 바닥으로 전환하기 위한 연속 검출 프레임
@@ -32,6 +32,24 @@ const SMOOTH_SHRINK = 3;
 // 카메라가 꽤 낮아도(20° 안팎) 짧은 반지름이 등록 반지름의 0.8배 남짓이라 남는다
 export const THIN_RHO = 0.7;
 export const THIN_LONG = 2.5;
+// 고리 모양 퍽: 가운데 로고·반사가 밝아 퍽 색에서 빠지면 퍽 마스크가 고리(도넛)가 되고, 고리는 ρ 보다 얇아 통째로 '가는 부분'이 된다.
+// 샤프트에 닿으면 샤프트와 함께 지워져 보이는 퍽을 놓쳤다 (사용자 녹화에서 퍽을 놓친 프레임의 대부분).
+// 그래서 가는 줄을 재기 전에 퍽 색으로 둘러싸인 구멍(그 자리 퍽 넓이의 HOLE_MAX 배까지, 테두리 짧은 변이 긴 변의 HOLE_ROUND 배 이상)을 퍽으로 메운다
+export const HOLE_MAX = 0.5;
+const HOLE_ROUND = 0.25;
+// 영역 테두리(PUCK_EDGE 처리 px 띠)에서 안쪽으로 뻗은 얇은 퍽 후보 = 영역 밖에서 들어온 스틱 샤프트 윗부분(블레이드에 붙는 끝 토막)·발:
+// 점수 × EDGE_K, 애매한 조각으로. 얇다 = 두께(가장 깊은 안쪽 거리 / 그 자리 퍽 반지름)가 EDGE_THIN 미만 (온전한 퍽은 녹화에서 0.87 넘게).
+// 테두리에 반쯤 걸쳐 잘린 퍽(두께 0.5 안팎)은 긴 축이 테두리와 나란해 건드리지 않는다. 두께는 가려진 퍽 조각·로고 구멍이 열린 퍽도
+// 얇게 나와 테두리에 걸치지 않은 후보에는 쓰지 않는다
+const PUCK_EDGE = 1.5;
+export const EDGE_THIN = 0.8;
+const EDGE_K = 0.5;
+// 스틱은 게임 영역 가장자리 띠(처리 px)를 읽지 않는다: 영역 테두리에 걸친 바깥 바닥·벽·판 끝 선이 테이프 색으로 잡혀
+// 블레이드 대신 '테두리 줄'이 스틱으로 잡히고, 블레이드로 잇는 퍽이 그 줄(판 위쪽 끝)로 튀던 문제. 블레이드는 띠보다 커서 걸쳐도 잡힌다
+export const STICK_EDGE = 3;
+// 등록한 스틱 넓이를 믿을 수 없을 때(물체에 붙지 못하고 누른 자리 색만 잰 등록: 넓이 4) 블레이드 테이프 넓이 어림 = 퍽 넓이 × STICK_GUESS.
+// 넓이 4 를 그대로 쓰면 5px 짜리 아무 테이프 색 조각이나 '블레이드'가 된다
+export const STICK_GUESS = 2;
 // 그림자 거르기: 그림자는 바닥이 어두워진 것이라 검정·회색 물체보다 훨씬 밝다. 무채색 물체는 '그 자리 바닥 밝기 대비 비율'이
 // 물체 자신의 비율에서 바닥 쪽으로 SHADOW_STEP 만큼 간 곳보다 밝으면 그림자로 보고 칠하지 않는다 (색 있는 퍽·테이프는 색으로 이미 갈린다).
 // 바닥이 밝고(SHADOW_MIN_FLOOR) 물체보다 충분히 밝을 때만 (어두운 바닥은 그림자가 흐리고 물체와 밝기가 가까워 진짜 물체까지 지울 수 있다)
@@ -300,10 +318,13 @@ export class Vision {
     this.shadow = { puck: +pCut.toFixed(3), stick: +sCut.toFixed(3), floor: fl ? fl.global : 0 }; // 확인용 (테스트·콘솔)
     // 칠해진 테두리 (가는 줄 지우기·스틱 정리를 그 안에서만)
     const pb = { x0: W, y0: H, x1: -1, y1: -1 }, sbb = { x0: W, y0: H, x1: -1, y1: -1 };
+    // 스틱을 읽는 행별 x 범위: 영역을 STICK_EDGE 만큼 안쪽으로 줄인 사각형 (가장자리 띠의 테이프 색은 스틱도 퍽도 아님)
+    const scanS = sMatch ? quadScanlines(insetQuad(quadH, STICK_EDGE * roi.sx), H) : null;
     for (let y = y0; y <= y1; y++) {
       const xa = scan[y * 2], xb = scan[y * 2 + 1];
       if (xa < 0) continue;
       const xEnd = Math.min(W - 1, xb), lrow = fl ? fl.cy[y] * fl.GX : 0;
+      const sxa = scanS && scanS[y * 2] >= 0 ? scanS[y * 2] : W, sxb = scanS && scanS[y * 2] >= 0 ? scanS[y * 2 + 1] : -1;
       for (let x = xa, i = y * W + xa, p = i * 4; x <= xEnd; x++, i++, p += 4) {
         const r = d[p], g = d[p + 1], b = d[p + 2];
         let mp = matchPixel(pMatch, r, g, b), ms = !!sMatch && matchPixel(sMatch, r, g, b);
@@ -313,19 +334,20 @@ export class Vision {
           if (ms && sCut && k > sCut) ms = false;
         }
         if (mp && ms && exclusive) { if (colorDist2(r, g, b, pKey) <= colorDist2(r, g, b, sKey)) ms = false; else mp = false; }
+        if (ms && (x < sxa || x > sxb)) ms = false;
         if (mp) { puckMask[i] = 1; if (x < pb.x0) pb.x0 = x; if (x > pb.x1) pb.x1 = x; if (y < pb.y0) pb.y0 = y; pb.y1 = y; }
         if (ms) { stickMask[i] = 1; if (x < sbb.x0) sbb.x0 = x; if (x > sbb.x1) sbb.x1 = x; if (y < sbb.y0) sbb.y0 = y; sbb.y1 = y; }
       }
     }
     // 덩어리 찾기는 읽은 해상도로, 결과(중심·면적·테두리·모양)는 처리 좌표로 바꿔 아래 고르기는 예전 기준 그대로
     const hb = { x0: 0, y0: 0, x1: W - 1, y1: H - 1 };
-    const components = (mask, minArea) => this._components(mask, hb, Math.max(1, Math.floor(minArea * hiArea)), W, H).map((c) => liftComp(c, lift));
+    const components = (mask, minArea, extra = null) => this._components(mask, hb, Math.max(1, Math.floor(minArea * hiArea)), W, H, extra).map((c) => liftComp(c, lift));
 
     const floorW = Math.max(10, bounds.x1 - bounds.x0);
 
     // ---- 4) 스틱 블롭 선택 (퍽보다 먼저: 타격 시 탐색 범위 확대에 사용) ----
     if (sm) {
-      const expS = sm.area > 0 ? sm.area : Math.max(20, 0.785 * Math.pow(floorW * 0.05, 2));
+      const sA = stickArea(sm, pm), expS = sA > 0 ? sA : Math.max(20, 0.785 * Math.pow(floorW * 0.05, 2));
       const minS = Math.max(5, expS * 0.2);
       const scomps = mergeClose(components(stickMask, Math.max(3, Math.floor(minS * 0.5))), 2);
       let sbest = null, sbestScore = 0;
@@ -355,10 +377,11 @@ export class Vision {
     // 퍽 색 가는 줄(스틱 샤프트·스틱과 날의 그림자) 지우기: 등록한 퍽 크기를 알 때만 (원근대로 줄마다 퍽 크기를 맞춘다).
     // 샤프트 그림 등에 섞인 테이프 색 점(고른 블레이드가 아닌 스틱 색)은 줄을 잇는 데만 쓴다 — 점에 끊긴 샤프트 토막도 한 줄로 보고 지우게.
     // 블레이드는 잇지 않는다: 블레이드에 반쯤 가려진 퍽 조각이 블레이드를 타고 샤프트와 한 줄로 묶여 지워지지 않게
-    this.thinRemoved = 0;
+    this.thinRemoved = 0; this.holesFilled = 0;
+    let depthOK = false; // 안쪽 거리(dtA)를 이번 프레임 퍽 마스크로 쟀는가 (퍽 후보 두께)
     if (calibrated && pb.x1 >= 0) {
       const R = Math.sqrt((pm.area * hiArea) / Math.PI); // 영역 한가운데 퍽 반지름 (읽은 px)
-      if (R >= 1.5) this.thinRemoved = this._dropThin(W, H, pb, R, mapping, roi, sm && sbb.x1 >= 0 ? { mask: stickMask, bb: sbb } : null);
+      if (R >= 1.5) { this.thinRemoved = this._dropThin(W, H, pb, R, mapping, roi, sm && sbb.x1 >= 0 ? { mask: stickMask, bb: sbb } : null); depthOK = true; }
     }
     // 스틱은 고른 덩어리(블레이드 테이프)만: 샤프트·바닥에 점처럼 섞인 테이프 색은 미리보기에도 칠하지 않는다
     if (sm) this._finishBlob(stickMask, sbb, W);
@@ -374,7 +397,10 @@ export class Vision {
     const last = this.lastPuck;
     // 빠르게 움직이면 모션 블러로 덩어리가 길어지므로 면적 상한을 넓힘 (추적 끊김 -> 마커 튐 방지)
     if (last) { const sp = Math.hypot(last.vx, last.vy) / PW; maxA *= 1 + Math.min(1.5, sp / 0.02); }
-    const comps = mergeClose(components(puckMask, Math.max(2, Math.floor((last ? minNear : minA) * 0.6))), 2);
+    // 영역 테두리에 걸친 덩어리(c.edge): 영역 밖에서 들어온 것(스틱 샤프트 윗부분·발)이거나 반쯤 나간 퍽
+    const scanP = quadScanlines(insetQuad(quadH, PUCK_EDGE * roi.sx), H);
+    const comps = mergeClose(components(puckMask, Math.max(2, Math.floor((last ? minNear : minA) * 0.6)), { depth: depthOK ? this.dtA : null, scan: scanP }), 2);
+    const rP = Math.sqrt(expArea / Math.PI), rsc = this._rsc;
 
     // 추적 게이트: 예측 위치 + 탐색 반경. 스틱이 퍽 근처면(타격 직후) 반경 확대
     let predX = 0, predY = 0, sigma = 0.12 * PW, reacquiring = false;
@@ -413,7 +439,18 @@ export class Vision {
         prox = Math.exp(-Math.sqrt(dx * dx + dy * dy) / sigma);
       }
       const areaFit = 1 - Math.min(1, Math.abs(Math.log(c.area / expArea)) / areaScale);
-      const score = fill * (0.5 + 0.5 * aspect) * (0.35 + 0.65 * prox) * (0.3 + 0.7 * areaFit);
+      // 영역 테두리에서 안쪽으로 뻗은 얇은 덩어리(영역 밖에서 들어온 샤프트 윗부분·발): 점수를 깎고 애매한 조각으로.
+      // 테두리에 반쯤 걸쳐 잘린 퍽은 얇아도 테두리를 따라 누워 있어(긴 축이 변과 나란) 그대로 둔다
+      c.edgeThin = false;
+      if (c.edge && depthOK && c.depth > 0) {
+        const hy = Math.min(H - 1, Math.max(0, Math.round((cy - lift.ay) * roi.sy)));
+        c.depthRatio = c.depth / 3 / roi.sx / (rP * (rsc[hy] || 1));
+        if (c.depthRatio < EDGE_THIN) {
+          const sh = blobShape(c);
+          c.edgeThin = !!sh && sh.elong < 0.8 && Math.abs(Math.cos(sh.angle - nearestEdgeAngle(quad, cx, cy))) < 0.5;
+        }
+      }
+      const score = fill * (0.5 + 0.5 * aspect) * (0.35 + 0.65 * prox) * (0.3 + 0.7 * areaFit) * (c.edgeThin ? EDGE_K : 1);
       c.cx = cx; c.cy = cy; c.score = score;
       result.puckCandidates.push(c);
       if (score > bestScore) { bestScore = score; best = c; }
@@ -450,7 +487,7 @@ export class Vision {
         thin = !blur;
       }
       result.puck = { x: best.cx, y: best.cy, area: best.area, w: best.maxx - best.minx + 1, h: best.maxy - best.miny + 1, score: bestScore, split,
-        elong: shape ? shape.elong : 1, doubtful: split || best.area < minA || thin };
+        elong: shape ? shape.elong : 1, edgeThin: !!best.edgeThin, doubtful: split || best.area < minA || thin || !!best.edgeThin };
       // 가려져 작아진 조각·떼어 낸 부분은 퍽 크기 기억을 바꾸지 않는다 (다시 다 보일 때 '크기가 다르다'고 거부하지 않게)
       const partial = best.area < minA || split;
       if (last && last.missed === 0) {
@@ -548,8 +585,14 @@ export class Vision {
   }
 
   /** 4-연결 컴포넌트 라벨링 (mask를 소비: 방문한 픽셀은 2로 표시). mask 는 PW×PH (기본) 또는 읽은 영역 W×H */
-  _components(mask, bounds, minArea, PW = this.PW, PH = this.PH) {
+  /**
+   * 마스크(1)를 4-연결 덩어리로 (지나간 픽셀은 2). extra (퍽만):
+   *  depth — 안쪽 거리 배열(_dropThin 의 챔퍼 3-4): 덩어리마다 가장 깊은 값 c.depth (퍽 크기 원이 들어가는지)
+   *  scan  — 행별 x 범위(영역을 조금 줄인 것): 그 밖 픽셀이 있으면 c.edge (영역 테두리에 걸친 덩어리)
+   */
+  _components(mask, bounds, minArea, PW = this.PW, PH = this.PH, extra = null) {
     const { stack } = this;
+    const depth = extra?.depth || null, scan = extra?.scan || null;
     const comps = [];
     const bx0 = Math.max(0, Math.floor(bounds.x0)), bx1 = Math.min(PW - 1, Math.ceil(bounds.x1));
     const by0 = Math.max(0, Math.floor(bounds.y0)), by1 = Math.min(PH - 1, Math.ceil(bounds.y1));
@@ -560,11 +603,13 @@ export class Vision {
         let sp = 0;
         stack[sp++] = start;
         mask[start] = 2;
-        const c = { area: 0, sx: 0, sy: 0, sxx: 0, syy: 0, sxy: 0, minx: x, maxx: x, miny: y, maxy: y, bxsum: 0, bxn: 0, seed: start };
+        const c = { area: 0, sx: 0, sy: 0, sxx: 0, syy: 0, sxy: 0, minx: x, maxx: x, miny: y, maxy: y, bxsum: 0, bxn: 0, seed: start, depth: 0, edge: false };
         while (sp > 0) {
           const i = stack[--sp];
           const px = i % PW, py = (i - px) / PW;
           c.area++; c.sx += px; c.sy += py; c.sxx += px * px; c.syy += py * py; c.sxy += px * py;
+          if (depth !== null && depth[i] > c.depth) c.depth = depth[i];
+          if (scan !== null && !c.edge) { const a = scan[py * 2]; if (a < 0 || px < a || px > scan[py * 2 + 1]) c.edge = true; }
           if (px < c.minx) c.minx = px; if (px > c.maxx) c.maxx = px;
           if (py < c.miny) c.miny = py;
           if (py > c.maxy) { c.maxy = py; c.bxsum = px; c.bxn = 1; } else if (py === c.maxy) { c.bxsum += px; c.bxn++; }
@@ -626,34 +671,37 @@ export class Vision {
     if (bridge) { bx0 = Math.min(bx0, bridge.bb.x0); by0 = Math.min(by0, bridge.bb.y0); bx1 = Math.max(bx1, bridge.bb.x1); by1 = Math.max(by1, bridge.bb.y1); }
     const x0 = Math.max(0, bx0 - 1), x1 = Math.min(W - 1, bx1 + 1), y0 = Math.max(0, by0 - 1), y1 = Math.min(H - 1, by1 + 1);
     const rs = this._rowScales(mapping, roi, x0, x1, y0, y1);
+    // 0) 고리 모양 퍽의 구멍(밝은 로고·반사)을 메워 두께를 퍽 그대로 잰다 (고리째 가는 줄로 지우지 않게)
+    this.holesFilled = this._fillHoles(W, x0, y0, x1, y1, R, rs, br);
     // 1) 안쪽 거리: 퍽 색(+ 잇는 점) 픽셀에서 가장 가까운 바닥까지 (챔퍼 3-4: 3 = 1px)
     for (let y = y0; y <= y1; y++) for (let x = x0, i = y * W + x0; x <= x1; x++, i++) A[i] = mask[i] || (br !== null && br[i] === 2) ? BIG : 0;
     chamfer(A, W, x0, y0, x1, y1, 0);
     // 2) 깎기(안쪽 거리 > ρ) 한 곳에서 다시 ρ 만큼 넓히기 = 두꺼운 부분 (B: 깎고 남은 곳까지의 거리)
     for (let y = y0; y <= y1; y++) { const t = 3 * THIN_RHO * R * rs[y]; for (let x = x0, i = y * W + x0; x <= x1; x++, i++) B[i] = A[i] > t ? 0 : BIG; }
     chamfer(B, W, x0, y0, x1, y1, BIG);
-    // 3) 가는 부분 = 퍽 색인데 두꺼운 부분에서 ρ(+1px: 거리 근사로 퍽 가장자리가 빠지지 않게) 안에 들지 않는 곳 (A 에 1)
+    // 3) 가는 부분 = 퍽 색인데 두꺼운 부분에서 ρ(+1px: 거리 근사로 퍽 가장자리가 빠지지 않게) 안에 들지 않는 곳 (B 에 1.
+    //    A 의 안쪽 거리는 그대로 두어 퍽 후보 고를 때 두께로 쓴다)
     let thin = 0;
     for (let y = y0; y <= y1; y++) {
       const t = 3 * THIN_RHO * R * rs[y] + 3;
-      for (let x = x0, i = y * W + x0; x <= x1; x++, i++) { const v = (mask[i] || (br !== null && br[i] === 2)) && B[i] > t ? 1 : 0; A[i] = v; thin += v; }
+      for (let x = x0, i = y * W + x0; x <= x1; x++, i++) { const v = (mask[i] || (br !== null && br[i] === 2)) && B[i] > t ? 1 : 0; B[i] = v; thin += v; }
     }
     if (!thin) return 0;
     // 4) 가는 부분을 4-연결 덩어리로 묶어, 길이(테두리 대각선)가 그 자리 퍽 지름 × THIN_LONG 이상이면 지운다
     const stack = this.stack, list = this.list;
     let removed = 0;
     for (let y = y0; y <= y1; y++) for (let x = x0, i = y * W + x0; x <= x1; x++, i++) {
-      if (A[i] !== 1) continue;
+      if (B[i] !== 1) continue;
       let sp = 0, n = 0, minx = x, maxx = x, miny = y, maxy = y, sy = 0;
-      stack[sp++] = i; A[i] = 2;
+      stack[sp++] = i; B[i] = 2;
       while (sp > 0) {
         const j = stack[--sp], jx = j % W, jy = (j - jx) / W;
         list[n++] = j; sy += jy;
         if (jx < minx) minx = jx; if (jx > maxx) maxx = jx; if (jy < miny) miny = jy; if (jy > maxy) maxy = jy;
-        if (jx > x0 && A[j - 1] === 1) { A[j - 1] = 2; stack[sp++] = j - 1; }
-        if (jx < x1 && A[j + 1] === 1) { A[j + 1] = 2; stack[sp++] = j + 1; }
-        if (jy > y0 && A[j - W] === 1) { A[j - W] = 2; stack[sp++] = j - W; }
-        if (jy < y1 && A[j + W] === 1) { A[j + W] = 2; stack[sp++] = j + W; }
+        if (jx > x0 && B[j - 1] === 1) { B[j - 1] = 2; stack[sp++] = j - 1; }
+        if (jx < x1 && B[j + 1] === 1) { B[j + 1] = 2; stack[sp++] = j + 1; }
+        if (jy > y0 && B[j - W] === 1) { B[j - W] = 2; stack[sp++] = j - W; }
+        if (jy < y1 && B[j + W] === 1) { B[j + W] = 2; stack[sp++] = j + W; }
       }
       if (Math.hypot(maxx - minx + 1, maxy - miny + 1) >= THIN_LONG * 2 * R * rs[Math.round(sy / n)]) {
         for (let k = 0; k < n; k++) mask[list[k]] = 0;
@@ -661,6 +709,51 @@ export class Vision {
       }
     }
     return removed;
+  }
+
+  /**
+   * 퍽 마스크의 작은 구멍 메우기 (테두리 x0..x1 × y0..y1 안, 읽은 px). 벽 = 퍽 색 + 잇는 점(br 2: 고른 블레이드가 아닌 테이프 색).
+   * 테두리에서 시작해 벽을 넘지 않고 닿는 빈 곳은 바깥이고, 닿지 못한 빈 곳이 구멍이다. 구멍마다
+   *  - 그 자리 퍽 넓이의 HOLE_MAX 배 이하이고, 가늘고 길지 않으며 (테두리 짧은 변이 긴 변의 HOLE_ROUND 배 이상)
+   *  - 둘레의 절반 이상이 퍽 색이며 (샤프트 테이프 점으로 둘러싸인 바닥은 아님)
+   *  - 고른 블레이드(br 3)가 섞이지 않았으면
+   * 퍽 마스크에 칠한다. 반환: 메운 픽셀 수
+   */
+  _fillHoles(W, x0, y0, x1, y1, R, rs, br) {
+    const mask = this.puckMask, L = this.dtB, stack = this.stack, list = this.list;
+    // L: 0 벽, 1 빈 곳, 2 바깥, 3 지금 재는 구멍
+    for (let y = y0; y <= y1; y++) for (let x = x0, i = y * W + x0; x <= x1; x++, i++) L[i] = mask[i] || (br !== null && br[i] === 2) ? 0 : 1;
+    let sp = 0;
+    const out = (k) => { if (L[k] === 1) { L[k] = 2; stack[sp++] = k; } };
+    for (let x = x0; x <= x1; x++) { out(y0 * W + x); out(y1 * W + x); }
+    for (let y = y0 + 1; y < y1; y++) { out(y * W + x0); out(y * W + x1); }
+    while (sp > 0) {
+      const j = stack[--sp], jx = j % W, jy = (j - jx) / W;
+      if (jx > x0) out(j - 1); if (jx < x1) out(j + 1); if (jy > y0) out(j - W); if (jy < y1) out(j + W);
+    }
+    let filled = 0, onP = 0, onB = 0;
+    // 테두리 픽셀은 모두 바깥이나 벽이라 구멍 픽셀의 이웃은 늘 테두리 안
+    const hole = (k) => { const v = L[k]; if (v === 1) { L[k] = 3; stack[sp++] = k; } else if (v === 0) { if (mask[k]) onP++; else onB++; } };
+    for (let y = y0 + 1; y < y1; y++) for (let x = x0 + 1, i = y * W + x; x < x1; x++, i++) {
+      if (L[i] !== 1) continue;
+      let n = 0, blade = false, minx = x, maxx = x, miny = y, maxy = y;
+      onP = 0; onB = 0; sp = 0; stack[sp++] = i; L[i] = 3;
+      while (sp > 0) {
+        const j = stack[--sp], jx = j % W, jy = (j - jx) / W;
+        list[n++] = j;
+        if (jx < minx) minx = jx; if (jx > maxx) maxx = jx; if (jy < miny) miny = jy; if (jy > maxy) maxy = jy;
+        if (br !== null && br[j] === 3) blade = true;
+        hole(j - 1); hole(j + 1); hole(j - W); hole(j + W);
+      }
+      // 가늘고 긴 틈(샤프트와 그 그림자가 나란히 달리다 둘러싼 틈)은 메우지 않는다: 메우면 두 줄이 두꺼운 띠가 되어 남는다.
+      // 한두 픽셀 구멍(로고 글자·반사·잡음)은 메운다 — 녹화에서 퍽 고리를 끊는 대부분이 이것
+      const pa = Math.PI * (R * rs[y]) ** 2, bw = maxx - minx + 1, bh = maxy - miny + 1;
+      if (!blade && n <= HOLE_MAX * pa && Math.min(bw, bh) >= HOLE_ROUND * Math.max(bw, bh) && onP >= onB) {
+        for (let k = 0; k < n; k++) mask[list[k]] = 1;
+        filled += n;
+      }
+    }
+    return filled;
   }
 
   /**
@@ -1219,6 +1312,20 @@ function chamfer(A, W, x0, y0, x1, y1, out) {
  * 물체 비율 rp = 물체 밝기 / 지금 바닥 밝기 (아주 검은 물체도 영상에선 16 아래로 잘 안 내려감), 문턱 = rp 에서 바닥 쪽으로 SHADOW_STEP.
  * 0 = 거르지 않음 (색 있는 물체, 바닥이 어둡거나 물체와 밝기가 가까움)
  */
+/**
+ * 등록한 스틱(블레이드 테이프) 넓이를 믿을 수 없는가: 물체에 붙지 못하고 누른 자리 색만 잰 등록(바닥과의 색 차이를 모름)인데
+ * 등록한 퍽 넓이의 절반도 안 된다 (예: 넓이 4). 이때는 다시 지정하면 더 정확하다고 알려 준다
+ */
+export function stickSizeUnknown(sm, pm) {
+  return !!sm && !(sm.bgDist > 0) && pm?.area > 0 && !(sm.area >= pm.area * 0.5);
+}
+
+/** 스틱 덩어리 크기 기준으로 쓸 블레이드 테이프 넓이 (처리 px). 믿을 수 없는 등록이면 퍽 넓이 × STICK_GUESS, 스틱이 없으면 0 */
+export function stickArea(sm, pm) {
+  if (!sm) return 0;
+  return stickSizeUnknown(sm, pm) ? Math.max(sm.area || 0, pm.area * STICK_GUESS) : sm.area;
+}
+
 export function shadowCut(model, matcher, floorY) {
   if (!model || !matcher || matcher.chroma) return 0;
   const Yp = Math.max(16, 0.299 * model.r + 0.587 * model.g + 0.114 * model.b);
@@ -1408,6 +1515,17 @@ export function separateTouching(d, px, w, h, toP, sx, sy, bg) {
  * 덩어리 모양 (2차 모멘트): elong = 짧은 축 / 긴 축 (원·퍽 1에 가깝고, 가늘고 길수록 0), angle = 긴 축 방향(라디안).
  * 모멘트가 없는 덩어리(떼어 낸 조각 등)는 null
  */
+/** 점 (x, y) 에서 가장 가까운 다각형 변의 방향 (라디안) */
+export function nearestEdgeAngle(quad, x, y) {
+  let best = Infinity, ang = 0;
+  for (let k = 0; k < quad.length; k++) {
+    const [ax, ay] = quad[k], [bx, by] = quad[(k + 1) % quad.length], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2)), d = Math.hypot(x - ax - t * dx, y - ay - t * dy);
+    if (d < best) { best = d; ang = Math.atan2(dy, dx); }
+  }
+  return ang;
+}
+
 export function blobShape(c) {
   if (!c || c.sxx === undefined || !(c.area > 0)) return null;
   const n = c.area, mx = c.sx / n, my = c.sy / n;
@@ -1453,6 +1571,8 @@ export function mergeClose(comps, gap) {
         if (a.minx > c.maxx + gap || c.minx > a.maxx + gap || a.miny > c.maxy + gap || c.miny > a.maxy + gap) continue;
         a.area += c.area; a.sx += c.sx; a.sy += c.sy;
         if (a.sxx !== undefined && c.sxx !== undefined) { a.sxx += c.sxx; a.syy += c.syy; a.sxy += c.sxy; }
+        if (c.depth > (a.depth || 0)) a.depth = c.depth;
+        if (c.edge) a.edge = true;
         // 합친 조각들의 시작 픽셀 (스틱 마스크에 고른 덩어리만 남길 때 이 자리들에서 다시 이어 칠한다)
         if (a.seed !== undefined || c.seed !== undefined) a.seeds = (a.seeds || (a.seed !== undefined ? [a.seed] : [])).concat(c.seeds || (c.seed !== undefined ? [c.seed] : []));
         a.minx = Math.min(a.minx, c.minx); a.maxx = Math.max(a.maxx, c.maxx);

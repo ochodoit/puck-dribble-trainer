@@ -6,7 +6,7 @@
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
 <script type="module">
-  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp, matchDistance, makeMatcher, matchPixel, shadowCut } from '../src/vision.js';
+  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp, matchDistance, makeMatcher, matchPixel, shadowCut, stickSizeUnknown, stickArea } from '../src/vision.js';
   import { chooseTolerance, falseBlobs, chooseProcWidth, needFromTest, preferLowRate } from '../src/autotune.js';
   import { Tracker } from '../src/tracker.js';
   import { StickBridge } from '../src/occlusion.js';
@@ -22,7 +22,7 @@
   import { FLOOR_MODES, FLOOR_FLIP_MODES } from '../src/render.js';
   import { VisionLog, qualitySummary, saveLog, loadLog, markReported, LOG_KEEP } from '../src/vision-log.js';
   import { VisionRecorder, clipToJson, clipFileName, frameSummary, REC_PRE_MS, REC_POST_MS, REC_MAX_CLIPS } from '../src/vision-rec.js';
-  import { makeFloorMapping } from '../src/geometry.js';
+  import { makeFloorMapping, insetQuad } from '../src/geometry.js';
   import { memberStats, lastDays } from '../src/stats.js';
   import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
   import { LocalAccountStore, ageGroupOf, validateProfile, jerseyOf, hashPin, normCode, codeLabel, makeCode, CODE_CHARS, codeStatus, memberBadge, rankAmong, instaId, instaDmLink, betaState, isActiveMember, validateFeedback, LAPSED, RESERVED_NICK_RE, validateStrongPassword, rankSummaryOf, validateEdit, addMonths, couponUntil, lotteryPool, drawLottery, INVITE_MAX, codeInfo, SAME_PW_MSG, NEED_TEMP_MSG } from '../src/account.js';
@@ -1642,6 +1642,14 @@
       const sb4 = new StickBridge(); t = 0;
       for (let i = 0; i < 5; i++) { sb4.step({ u: 0.5, v: 0.5 }, { u: 0.52, v: 0.5 }, t); t += 33; }
       check('B4 no blade in view -> nothing to bridge with', sb4.step(null, null, t) === null);
+      // B7 '스틱'이 한 프레임에 멀리 튐 (영역 테두리 줄·스틱 윗부분을 스틱으로 잡음): 그 자리로 퍽을 옮기지 않고 이번 가림은 그만 잇는다
+      const sb7 = new StickBridge(); t = 0;
+      for (let i = 0; i < 5; i++) { sb7.step({ u: 0.5, v: 0.6 }, { u: 0.52, v: 0.6 }, t); t += 33; }
+      const h1 = sb7.step(null, { u: 0.53, v: 0.6 }, t); t += 33;   // 블레이드 밑에 가려짐 -> 이음
+      const h2 = sb7.step(null, { u: 0.3, v: 0.02 }, t); t += 33;   // 스틱이 판 위쪽 끝으로 튐
+      const h3 = sb7.step(null, { u: 0.53, v: 0.6 }, t); t += 33;   // 다시 블레이드
+      check('B7 a far one-frame jump of the "stick" (edge line, top of the stick) ends the bridge instead of moving the puck there',
+        h1?.bridged && h2 === null && h3 === null && !sb7.active, { h1, h2, h3 });
     }
     // B5) 퍽과 같은 색(검정) 스틱 샤프트: 블레이드(주황 테이프)가 퍽을 덮으면, 퍽처럼 보이는 샤프트 조각(반사광으로 끊긴 토막,
     //     특히 바닥 먼 쪽의 굵은 윗부분)이 아니라 테이프(블레이드) + 간격으로 퍽을 잇는다. 블레이드가 비키면 다시 진짜 퍽
@@ -1886,6 +1894,7 @@
         const gr = c.createRadialGradient(P.x, P.y, 0, P.x, P.y, P.r);
         gr.addColorStop(0, 'rgb(18,18,20)'); gr.addColorStop(0.7, 'rgb(22,22,24)'); gr.addColorStop(1, 'rgb(46,46,48)');
         c.fillStyle = gr; c.beginPath(); c.ellipse(P.x, P.y, P.r, P.r * 0.8, 0, 0, Math.PI * 2); c.fill();
+        if (o.logo) { c.fillStyle = 'rgb(196,198,192)'; c.beginPath(); c.ellipse(P.x, P.y, P.r * 0.55, P.r * 0.44, 0, 0, Math.PI * 2); c.fill(); } // 밝은 로고 -> 고리 모양 퍽
         const id = c.getImageData(0, 0, W, H), d = id.data; let s = o.seed || 5;
         const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
         for (let i = 0; i < d.length; i += 4) { const n = (rnd() + rnd() - 1) * 6; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
@@ -1938,10 +1947,11 @@
         colorFrac(r1.c.shaft) > 0.9 && colorFrac(r1.c.shadow) > 0.9 && frac(r1.c.shaft) < 0.03 && frac(r1.c.shadow) < 0.03 && frac(r1.c.puck) > 0.9 && r1.at !== null && r1.at < 1.5
         && frac(r1.c.blade) > 0.85 && r1.c.stickOut === 0 && r1.stickAt !== null && r1.stickAt < 3,
         { shaft: [frac(r1.c.shaft), colorFrac(r1.c.shaft)], shadow: [frac(r1.c.shadow), colorFrac(r1.c.shadow)], puck: frac(r1.c.puck), at: r1.at, blade: frac(r1.c.blade), stickOut: r1.c.stickOut, stickAt: r1.stickAt, cut: r1.v.shadow, thin: r1.v.thinRemoved });
-      // SH2 아주 진한 그림자 (바닥의 30% — 밝기로는 못 가름): 가늘고 긴 모양으로 지운다 (그림자 줄·날 그림자)
+      // SH2 아주 진한 그림자 (바닥의 30% — 밝기로는 못 가름): 가늘고 긴 모양으로 지운다 (그림자 줄·날 그림자).
+      //     뒤꿈치에서 샤프트와 그림자가 붙어 퍽만큼 두꺼워진 곳은 남는다 (그림자의 5% 남짓: 퍽 구멍 메우기가 그 안의 잡음 구멍도 메워서)
       const r2 = run(mkS({ shadow: 0.3 }), { shadow: true });
       check('SH2 a very dark stick + blade shadow (brightness alone cannot tell) is dropped by its thin, long shape',
-        colorFrac(r2.c.shadow) > 0.9 && frac(r2.c.shadow) < 0.05 && frac(r2.c.shaft) < 0.03 && frac(r2.c.puck) > 0.9 && r2.at !== null && r2.at < 1.5,
+        colorFrac(r2.c.shadow) > 0.9 && frac(r2.c.shadow) < 0.07 && frac(r2.c.shaft) < 0.03 && frac(r2.c.puck) > 0.9 && r2.at !== null && r2.at < 1.5,
         { shadow: [frac(r2.c.shadow), colorFrac(r2.c.shadow)], shaft: frac(r2.c.shaft), puck: frac(r2.c.puck), at: r2.at, thin: r2.v.thinRemoved });
       // SH3 퍽이 샤프트에 닿아 있음: 샤프트만 떨어져 나가고 퍽 자리는 그대로 (예전: 한 덩어리 '너무 큼'으로 놓치거나 중심이 샤프트 쪽으로)
       const tP = 0.45, nx = 0.672, ny = -0.741, Pt = { x: heel.x + (top.x - heel.x) * tP + nx * 36, y: heel.y + (top.y - heel.y) * tP + ny * 36, r: 30 };
@@ -1962,6 +1972,52 @@
       // SH6 그림자 규칙은 바닥이 밝고 물체가 검정·회색일 때만 (색 있는 테이프·퍽은 색으로 이미 갈리고, 어두운 바닥에선 끔)
       const blk = { r: 20, g: 20, b: 22 }, org = { r: 249, g: 115, b: 22 }, c6 = shadowCut(blk, makeMatcher(blk, 95), 230);
       check('SH6 shadow rule: only gray/black objects on a light floor', c6 > 0.3 && c6 < 0.45 && shadowCut(org, makeMatcher(org, 70), 230) === 0 && shadowCut(blk, makeMatcher(blk, 95), 90) === 0, { cut: +c6.toFixed(3) });
+      // SH7 가운데 로고가 밝아 고리 모양인 퍽이 샤프트에 닿음: 고리는 퍽보다 얇아 샤프트와 함께 '가는 줄'로 지워졌다 -> 구멍을 메워 퍽 그대로
+      const r7 = run(mkS({ P: Pt, logo: true }));
+      check('SH7 a ring-shaped puck (light logo) touching the shaft is still found: the logo hole is filled before thin-line removal',
+        r7.at !== null && r7.at < 1.5 && frac(r7.c.puck) > 0.85 && frac(r7.c.shaft) < 0.05 && r7.v.holesFilled > 0, { at: r7.at, puck: frac(r7.c.puck), shaft: frac(r7.c.shaft), holes: r7.v.holesFilled, thin: r7.v.thinRemoved });
+      // 영역 테두리 장면 (영역 = 화면 전체 모드의 사각형, 위쪽 변이 y≈14): 테이프 색 띠·샤프트 끝 토막·반쯤 걸친 퍽
+      const mkE = (o = {}) => {
+        const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+        const c = cv.getContext('2d'); c.fillStyle = 'rgb(232,230,224)'; c.fillRect(0, 0, W, H);
+        c.fillStyle = 'rgb(249,115,22)';
+        if (o.edgeLine) c.fillRect(100, 6, 1080, 14);                                                   // 위쪽 테두리에 걸친 테이프 색 띠 (판 밖 바닥·벽)
+        if (o.blade) { c.beginPath(); c.roundRect(B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0, 8); c.fill(); }
+        if (o.specks) for (const x of [300, 600, 900]) c.fillRect(x, 300, 16, 16);                      // 작은 테이프 색 점들 (블레이드 없음)
+        c.fillStyle = 'rgb(24,24,26)';
+        if (o.stub) c.fillRect(o.stub - 15, -40, 30, 115);                                              // 위쪽 테두리 밖에서 들어온 샤프트 끝 토막 (퍽 반지름만 한 굵기)
+        if (o.P) { c.beginPath(); c.ellipse(o.P.x, o.P.y, o.P.r, o.P.r * 0.8, 0, 0, Math.PI * 2); c.fill(); }
+        const id = c.getImageData(0, 0, W, H), d = id.data; let s = 9;
+        const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+        for (let i = 0; i < d.length; i += 4) { const n = (rnd() + rnd() - 1) * 6; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+        c.putImageData(id, 0, 0);
+        const out = document.createElement('canvas'); out.width = W; out.height = H;
+        const oc = out.getContext('2d'); oc.filter = 'blur(1px)'; oc.drawImage(cv, 0, 0);
+        return out;
+      };
+      const runE = (cv, s, seed = null) => { const v = new Vision(240); v.mirror = false; v.setSourceSize(W, H); v.process(cv, base); if (seed) v.seedPuck(seed.x * k, seed.y * k, puckModel.area); return v.process(cv, s); };
+      // SH8 영역 테두리에 걸친 테이프 색 띠는 스틱이 아니다 (블레이드가 없으면 스틱 없음, 있으면 블레이드)
+      const e1 = runE(mkE({ edgeLine: true }), sT), e2 = runE(mkE({ edgeLine: true, blade: true }), sT);
+      const bladeAt = e2.stick ? Math.hypot(e2.stick.x - ((B.x0 + B.x1) / 2) * k, e2.stick.y - ((B.y0 + B.y1) / 2) * k) : null;
+      check('SH8 a tape-colored line along the area edge is not the stick (no blade -> no stick; with a blade -> the blade)',
+        e1.stick === null && bladeAt !== null && bladeAt < 3, { line: e1.stick && [+e1.stick.x.toFixed(1), +e1.stick.y.toFixed(1), +e1.stick.area.toFixed(1)], bladeAt });
+      // SH9 스틱 등록이 물체에 붙지 못해 넓이 4 로 저장됨: 블레이드 크기를 퍽 넓이로 어림해 작은 테이프 색 점을 스틱으로 잡지 않는다
+      const badStick = { ...stickModel, area: 4, need: 0, bgDist: 0 };
+      const e3 = runE(mkE({ specks: true }), { ...sT, stickModel: badStick }), e4 = runE(mkE({ blade: true }), { ...sT, stickModel: badStick });
+      const bladeAt4 = e4.stick ? Math.hypot(e4.stick.x - ((B.x0 + B.x1) / 2) * k, e4.stick.y - ((B.y0 + B.y1) / 2) * k) : null;
+      check('SH9 a stick registered with an unknown size (area 4) does not turn small tape-colored specks into the stick; the real blade still counts',
+        e3.stick === null && bladeAt4 !== null && bladeAt4 < 3 && stickSizeUnknown(badStick, puckModel) && !stickSizeUnknown(stickModel, puckModel) && stickArea(badStick, puckModel) === puckModel.area * 2,
+        { speck: e3.stick && +e3.stick.area.toFixed(1), bladeAt4, guess: stickArea(badStick, puckModel) });
+      // SH10 영역 위쪽 밖에서 들어온 샤프트 끝 토막(퍽 반지름만 한 굵기, 짧아 가는 줄로 안 지워짐)은 애매한 조각.
+      //      영역 왼쪽 변에 반쯤 걸친 퍽은 얇아도 변을 따라 누워 있어 그대로 퍽
+      const e5 = runE(mkE({ stub: 700 }), sT, { x: 700, y: 50 }), e6 = runE(mkE({ P: { x: 26, y: 400, r: 30 } }), sT);
+      check('SH10 a shaft stub entering from the area edge is a doubtful piece (score cut); a puck half over the left edge is still a plain puck',
+        (!e5.puck || (e5.puck.doubtful && e5.puck.edgeThin)) && !!e6.puck && !e6.puck.doubtful && !e6.puck.edgeThin && Math.abs(e6.puck.y - 400 * k) < 1.5,
+        { stub: e5.puck && [+e5.puck.x.toFixed(1), +e5.puck.y.toFixed(1), +e5.puck.area.toFixed(1), +e5.puck.score.toFixed(2), e5.puck.doubtful], half: e6.puck && [+e6.puck.x.toFixed(1), +e6.puck.y.toFixed(1), +e6.puck.area.toFixed(1), e6.puck.doubtful] });
+      // SH11 사각형 안쪽으로 줄이기 (꼭짓점 도는 방향과 상관없이)
+      const iq = insetQuad([[0, 0], [10, 0], [10, 10], [0, 10]], 1), iq2 = insetQuad([[0, 0], [0, 10], [10, 10], [10, 0]], 1);
+      const near = (a, b) => a.every(([x, y], i) => Math.abs(x - b[i][0]) < 1e-9 && Math.abs(y - b[i][1]) < 1e-9);
+      check('SH11 insetQuad moves every edge inward', near(iq, [[1, 1], [9, 1], [9, 9], [1, 9]]) && near(iq2, [[1, 1], [1, 9], [9, 9], [9, 1]]), { iq, iq2 });
     }
     // CF) 확실한 자리로만 감점: 퍽이 스틱에 가려진 순간 스틱(샤프트)을 퍽으로 잡아 튄 자리·블레이드로 이은 자리로 콘·날아오는 퍽에 '닿았다'고 하지 않는다
     {

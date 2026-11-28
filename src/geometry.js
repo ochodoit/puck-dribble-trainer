@@ -65,6 +65,28 @@ export function quadBounds(quad) {
   return { x0, y0, x1, y1 };
 }
 
+/**
+ * 볼록 사각형을 변마다 안쪽으로 e 만큼 옮긴 사각형 (이웃한 두 변을 옮긴 직선의 교점이 새 꼭짓점).
+ * 변이 거의 나란해 교점을 못 구하면 원래 사각형
+ */
+export function insetQuad(quad, e) {
+  let a2 = 0;
+  for (let k = 0; k < 4; k++) { const [x1, y1] = quad[k], [x2, y2] = quad[(k + 1) % 4]; a2 += x1 * y2 - x2 * y1; }
+  const s = a2 >= 0 ? 1 : -1; // 꼭짓점 도는 방향에 맞춰 안쪽 법선
+  const lines = quad.map(([x1, y1], k) => {
+    const [x2, y2] = quad[(k + 1) % 4], L = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const nx = (-(y2 - y1) / L) * s, ny = ((x2 - x1) / L) * s;
+    return { nx, ny, c: nx * x1 + ny * y1 + e }; // 안쪽: nx·x + ny·y >= c
+  });
+  const out = [];
+  for (let k = 0; k < 4; k++) {
+    const a = lines[(k + 3) % 4], b = lines[k], det = a.nx * b.ny - a.ny * b.nx;
+    if (Math.abs(det) < 1e-9) return quad;
+    out.push([(a.c * b.ny - a.ny * b.c) / det, (a.nx * b.c - a.c * b.nx) / det]);
+  }
+  return out;
+}
+
 /** 볼록 사각형의 각 행(y)별 x 범위 (스캔라인) -> Int16Array [xmin,xmax] * h */
 export function quadScanlines(quad, h) {
   const out = new Int16Array(h * 2);

@@ -14,6 +14,10 @@ export const BRIDGE_SLOW_SPEED = 0.4;
 // (Vision 의 doubtful: 가늘고 긴 조각·작은 조각·떼어 낸 조각)은 퍽이 아니라 퍽과 같은 색 스틱 샤프트로 본다.
 // 퍽 색과 스틱 테이프 색만 따라간다 (샤프트 색이 퍽과 같아도 샤프트 윗부분을 퍽으로 잡지 않게)
 export const BRIDGE_TRUST = 0.05;
+// 블레이드 자리가 한 번에 BRIDGE_JUMP_MIN 넘게, 바닥 폭/초 BRIDGE_JUMP_SPEED 보다 빨리 튀면 블레이드가 아닌 다른 것(영역 테두리 줄·
+// 스틱 윗부분 테이프 등)을 스틱으로 잡은 것이다. 그 자리로 퍽을 옮기지 않고 이번 가림은 더 잇지 않는다 (퍽이 판 끝으로 튀던 문제)
+export const BRIDGE_JUMP_MIN = 0.15;
+export const BRIDGE_JUMP_SPEED = 8;
 
 export class StickBridge {
   constructor() { this.reset(); }
@@ -37,11 +41,13 @@ export class StickBridge {
    * 반환: 추적기에 넣을 측정값 — 퍽이 보이면 퍽 그대로, 가려졌으면 {u, v, bridged: true}, 둘 다 아니면 null
    */
   step(puck, stick, now) {
+    let jumped = false;
     if (stick) {
       const lb = this.lastBlade;
       if (lb && now > lb.t) {
-        const v = Math.hypot(stick.u - lb.u, stick.v - lb.v) / ((now - lb.t) / 1000);
-        this.bladeSpeed = this.bladeSpeed === null ? v : this.bladeSpeed + (v - this.bladeSpeed) * 0.3;
+        const dist = Math.hypot(stick.u - lb.u, stick.v - lb.v), v = dist / ((now - lb.t) / 1000);
+        jumped = dist > BRIDGE_JUMP_MIN && v > BRIDGE_JUMP_SPEED;
+        if (!jumped) this.bladeSpeed = this.bladeSpeed === null ? v : this.bladeSpeed + (v - this.bladeSpeed) * 0.3;
       }
       this.lastBlade = { u: stick.u, v: stick.v, t: now };
     }
@@ -71,7 +77,7 @@ export class StickBridge {
       this.expired = false;
     }
     // 잇는 시간: 블레이드가 천천히 움직이면(덮은 채 끌기·멈춤) 길게, 빨리 움직이면 1.5초
-    if (now - this.lostAt > (this.slow ? BRIDGE_SLOW_MS : BRIDGE_MAX_MS)) this.expired = true;
+    if (now - this.lostAt > (this.slow ? BRIDGE_SLOW_MS : BRIDGE_MAX_MS) || jumped) this.expired = true;
     this.active = this.armed && !this.expired && !!stick;
     if (!this.active) return null;
     const u = Math.min(1, Math.max(0, stick.u + this.offset.u));

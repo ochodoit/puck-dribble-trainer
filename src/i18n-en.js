@@ -43,6 +43,7 @@ export const EN = {
   '새 물체를 원 안에 3초': 'New object in the circle for 3 s',
   '{0} 색 지정 완료': '{0} color set',
   '등록됨': 'Registered',
+  '크기를 못 재어 다시 지정하면 더 정확해요': 'size was not measured, register again for better accuracy',
   // 가운데 원 안내 (짧게)
   '등록된 퍽 다시 인식 중 — 가만히': 'Re-detecting the registered puck — hold still',
   '너무 커요 — 카메라에서 더 멀리': 'Too big — move it farther from the camera',

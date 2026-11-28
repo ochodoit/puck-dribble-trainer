@@ -63,8 +63,12 @@ export class Arcade {
     this.peek = false;     // 설정의 투명도 슬라이더를 끄는 동안: 게임 전이어도 플레이 중 농도로 미리 보여 줌
     this.phase = 'idle';   // idle | countdown | play
     this.mult = SCORE_MULT.normal; // 점수 배율 (start 에서 난이도대로)
+    this.scoreK = 1;       // 보이는 점수 배율 (game.js scoreScale — 게임 시작 때 받음). 원점수 × scoreK 가 화면 점수
     this.reset();
   }
+
+  /** 원점수 pts 가 화면에서 몇 점으로 보이는지 (띄우는 +·− 숫자용, 0점으로 보이지 않게 1 이상) */
+  _shown(pts) { return Math.max(1, Math.round(pts * (this.scoreK || 1))); }
 
   /** 점수 = 쌓인 점수(points, 터치는 0.5 단위)를 반올림한 정수. 랭킹·화면에는 정수만 나간다 */
   get score() { return Math.round(this.points || 0); }
@@ -188,7 +192,7 @@ export class Arcade {
       p.y += p.vy * dt;
       if (a && tracked && !p.taken && Math.hypot(a.x - p.x, a.y - p.y) < p.r + PUCK_R) {
         p.taken = true; this.items++;
-        this._addScore(this.coinPoints, p.x, p.y - PUCK_R * 2.5, `+${this.coinPoints}`);
+        this._addScore(this.coinPoints, p.x, p.y - PUCK_R * 2.5, `+${this._shown(this.coinPoints)}`);
         this.sfx?.target?.();
       }
     }
@@ -284,9 +288,9 @@ export class Arcade {
     this.points = Math.max(0, (this.points || 0) - pen);
     this.invulnUntil = now + INVULN_MS;
     this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
-    this._pop(this.avatar.x, this.avatar.y - PUCK_R * 2.5, `충돌 −${pen}`, C.red, 800, 'small');
+    this._pop(this.avatar.x, this.avatar.y - PUCK_R * 2.5, `충돌 −${this._shown(pen)}`, C.red, 800, 'small');
     this.sfx?.hit?.();
-    this.instruction = `충돌 −${pen} · 1.5초 무적`;
+    this.instruction = `충돌 −${this._shown(pen)} · 1.5초 무적`;
   }
 
   _addScore(pts, x, y, label, color = C.inkSoft, style = 'small') {
@@ -410,7 +414,7 @@ export class Arcade {
     const W = S, y = zt - W * 0.2, r = fs * 0.55;
     let x = W / 2 - fs * 9.5;
     drawCoin(ctx, x, y, r * 1.5, Math.max(1, W / (ctx.canvas.clientWidth || W)));
-    text(ctx, `먹기 +${COIN_POINTS}`, x + r * 2.4, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
+    text(ctx, `먹기 +${this._shown(this.coinPoints)}`, x + r * 2.4, y, fs * 0.9, { weight: 600, align: 'left', halo: false });
     x = W / 2 + fs * 1.2;
     PUCK_COLORS.forEach((c, i) => { ctx.beginPath(); ctx.arc(x + i * r * 1.5, y, r, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill(); });
     text(ctx, '피하기', x + PUCK_COLORS.length * r * 1.5 + r * 0.6, y, fs * 0.9, { weight: 600, align: 'left', halo: false });

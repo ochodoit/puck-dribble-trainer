@@ -1,5 +1,5 @@
 // 게임/트레이닝 로직. 좌표는 바닥 정규화 좌표 (u: 0..1 가로, v: 0..1 세로)
-import { Arcade } from './arcade.js';
+import { Arcade, SCORE_MULT } from './arcade.js';
 import { clockNow } from './clock.js';
 import { C } from './theme.js';
 
@@ -38,6 +38,38 @@ export const rankKey = (modeId, seconds, invisible = false, level = 'normal') =>
   const lv = modeLevel(modeId, level);
   return (m?.timed ? `${modeId}@${seconds}` : modeId) + (invisible ? '-inv' : '') + (lv === 'normal' ? '' : `-${lv}`);
 };
+
+/**
+ * 점수 기준 하나로 맞추기: 게임마다 원래 점수(원점수)의 크기가 달랐다 (8자 드리블 수십 점, 퍽 피하기 1분 1000점 안팎).
+ * 화면에 보이는 점수 = 원점수 × 배율(랭킹 키마다). 1분(한 판)·보통에서 잘한 판이 100점대 후반이고, 시간(1·3·5분 = 1 : 2.1 : 2.9)과
+ * 난이도(쉬움·보통·어려움 = 1 : 1.15 : 1.3)에 따라 길고 어려울수록 커져 최대 500점대.
+ * 원점수는 그대로 저장·비교한다 (랭킹·최고 기록·자랑 글은 같은 키 안에서만 비교하므로 순서가 그대로) — 보일 때만 배율을 곱한다.
+ * 그래서 예전에 플레이한 기록도 보일 때 같은 기준으로 낮춰지거나 높여진다.
+ * 기본 배율은 베타 랭킹의 실제 상위 기록으로 맞췄다 (아케이드 1분 200~365, 퍽 피하기 1분 935~1010, 와이드 1분 158~239, 8자 10~28, 반응 타겟 5~42)
+ */
+export const SCORE_TIME = { 60: 1, 180: 2.1, 300: 2.9 };
+export const SCORE_LEVEL = { easy: 1, normal: 1.15, hard: 1.3 };
+// 게임별 기본 배율: 1분(시간이 정해진 게임은 한 판)·쉬움(난이도 없는 게임은 보통) 원점수 1점 -> 보이는 점수
+export const SCORE_BASE = { arcade: 0.7, obstacle: 0.15, wide: 0.713, quick: 0.437, figure8: 6, reaction: 4 };
+const LEGACY_QUICK_SCALE = 4; // 예전 퀵 핸즈(20초 한 판, 시간 없는 키 'quick') 기록
+
+/** 랭킹 키(rankKey)의 점수 배율. 모르는 키·자유 연습은 1 */
+export function scoreScale(key) {
+  const m = /^([a-z0-9]+)(?:@(\d+))?(-inv)?(?:-(easy|hard))?$/.exec(String(key || ''));
+  if (!m) return 1;
+  const id = m[1], sec = m[2] ? Number(m[2]) : 0, lv = m[4] || 'normal';
+  const base = SCORE_BASE[id];
+  if (!base) return 1;
+  if (id === 'quick' && !sec) return LEGACY_QUICK_SCALE;
+  // 원점수는 시간에 비례해 쌓이므로 분으로 나눈 뒤 시간 배율을 곱한다 (시간이 정해진 게임·예전 키는 1)
+  const min = sec / 60 || 1, time = (SCORE_TIME[sec] ?? min) / min;
+  if (id === 'arcade') return (base * time * SCORE_LEVEL[lv]) / (SCORE_MULT[lv] || 1); // 아케이드 원점수에는 난이도 배율이 이미 들어 있다
+  if (id === 'obstacle') return base * time * SCORE_LEVEL[lv];
+  return base * time; // 와이드·퀵 핸즈(난이도 없음)·8자·반응 타겟
+}
+
+/** 보이는 점수 = 원점수 × 배율 (반올림, 0 아래 없음). key: 랭킹 키 */
+export const shownScore = (key, raw) => Math.max(0, Math.round((Number(raw) || 0) * scoreScale(key)));
 
 /**
  * 와이드 드리블의 3가지 훈련 (고른 시간만큼 하나씩 이어서).
@@ -217,6 +249,10 @@ export class Game {
   get limit() { return this.mode.timed ? this.playSeconds * (this.mode.stages || 1) : this.mode.duration; }
   /** 지금 몇 번째 훈련인지 (0부터) */
   get stage() { return this.mode.stages ? Math.min(this.mode.stages - 1, Math.floor(this.elapsed / this.playSeconds)) : 0; }
+  /** 지금 게임(모드·시간·투명·난이도)의 점수 배율 (scoreScale) */
+  get scoreK() { return scoreScale(rankKey(this.mode.id, this.playSeconds, this.invisible, this.difficulty)); }
+  /** 화면에 보이는 점수 = 원점수(this.score) × 배율 */
+  get shownScore() { return Math.max(0, Math.round((Number(this.score) || 0) * this.scoreK)); }
   /** 지금 훈련의 남은 시간(초) */
   get stageLeft() { return this.mode.stages ? Math.max(0, Math.min(this.timeLeft, this.playSeconds * (this.stage + 1) - this.elapsed)) : this.timeLeft; }
 
@@ -341,6 +377,7 @@ export class Game {
     switch (this.mode.id) {
       case 'arcade':
         this.arcade.start(puck, this.difficulty, !!opts.handsFree);
+        this.arcade.scoreK = this.scoreK; // 아케이드가 띄우는 +코인·충돌 숫자도 보이는 점수 기준으로
         this.instruction = this.arcade.instruction;
         break;
       case 'obstacle':
@@ -460,7 +497,7 @@ export class Game {
             if (canHit && !f.hit && dd < FLYER_R + PUCK_R) {
               f.hit = true; this.stats.hits++; // 목숨 없음: 감점 + 1.2초 무적
               this.invulnUntil = now + 1200;
-              this._pop(f.x, f.y - 0.08, `충돌 −${DODGE_HIT_PENALTY}`, C.red);
+              this._pop(f.x, f.y - 0.08, `충돌 −${Math.max(1, Math.round(DODGE_HIT_PENALTY * this.scoreK))}`, C.red);
               this.effects.push({ type: 'flash', t0: now, dur: 350, age: 0 });
               this.sfx?.hit();
             }
@@ -470,7 +507,7 @@ export class Game {
             f.counted = true;
             if (!f.hit) {
               this.stats.dodged++;
-              if (f.minDist < FLYER_R + PUCK_R + 0.035) { this.stats.close++; this._pop(me?.x ?? 0.5, (me?.y ?? A / 2) - 0.1, '아슬! +15', C.red, 'script'); this.sfx?.rep(); }
+              if (f.minDist < FLYER_R + PUCK_R + 0.035) { this.stats.close++; this._pop(me?.x ?? 0.5, (me?.y ?? A / 2) - 0.1, `아슬! +${Math.max(1, Math.round(15 * this.scoreK))}`, C.red, 'script'); this.sfx?.rep(); }
             }
           }
         }
@@ -765,7 +802,7 @@ export class Game {
         r.items = [['점수', this.score], ['완주 바퀴', s.laps], ['통과 게이트', s.gates], ['콘 충돌', s.hits]];
         break;
       case 'quick':
-        r.items = [['터치 수', s.touches], ...QUICK_SETS.map((q, i) => [q.label, s.sets?.[i] ?? 0]),
+        r.items = [['점수', this.score], ['터치 수', s.touches], ...QUICK_SETS.map((q, i) => [q.label, s.sets?.[i] ?? 0]),
           ['초당 터치', (s.touches / Math.max(1, this.elapsed)).toFixed(2)], ['게임 시간', `${minutes} × ${this.mode.stages}`]];
         break;
       case 'reaction': {
@@ -786,6 +823,9 @@ export class Game {
           : [['터치(방향 전환)', s.touches || 0], ['이동 거리', `${(s.distance || 0).toFixed(1)} 폭`], ['연습 시간', `${Math.round(this.elapsed)}s`]];
       }
     }
+    // 보이는 점수 (원점수 × 배율): 결과 화면의 '점수'는 이것으로. r.score 는 원점수 그대로 (최고 기록·랭킹에 저장·비교)
+    r.shown = shownScore(r.rankKey, r.score);
+    for (const it of r.items) if (it[0] === '점수') it[1] = r.shown;
     if (this.tracker?.frames) {
       r.trackRate = this.tracker.trackRate;
       r.items.push(['퍽 추적률', `${Math.round(r.trackRate * 100)}%`]);

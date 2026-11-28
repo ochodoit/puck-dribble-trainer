@@ -4,6 +4,7 @@ import { attendanceSummary, monthGrid, dayKey, keyInfo, sparkPoints, hoursMinute
 import { renderAbility } from './ability-ui.js';
 import { passName } from './account.js';
 import { postTag } from './community-ui.js';
+import { shownScore } from './game.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { kept: '정회원 (운영자 유지)', lapsed: '베타 종료 · 정회원 기간 끝남' };
@@ -196,7 +197,7 @@ export function initMe(deps) {
     if (!keys.length) { body.innerHTML = '<tr><td colspan="5" class="muted">아직 기록이 없습니다. 게임을 끝까지 하면 여기에 쌓입니다</td></tr>'; return; }
     body.innerHTML = keys.map((k) => {
       const b = best.find((x) => x.mode === k);
-      return `<tr data-key="${esc(k)}"><td>${esc(keyLabel(k))}</td><td class="num">${b ? b.score : '-'}</td><td class="num">${b ? b.plays : (recent[k]?.length || 0)}</td>
+      return `<tr data-key="${esc(k)}"><td>${esc(keyLabel(k))}</td><td class="num">${b ? shownScore(k, b.score) : '-'}</td><td class="num">${b ? b.plays : (recent[k]?.length || 0)}</td>
         <td class="me-rank">${b ? '…' : '-'}</td><td>${spark(recent[k])}</td></tr>`;
     }).join('');
     // 순위는 게임마다 따로 불러와 채운다 (전체·내 국가·내 팀)

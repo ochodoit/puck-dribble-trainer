@@ -2,6 +2,7 @@
 // 글을 누르면 오른쪽(좁은 화면은 글 아래)에 도전한 사람 수와 상위 5위 기록이 보인다.
 // 저장은 community.js 의 저장소가 맡고, 게임 쪽 동작(코스 불러오기 등)은 host 콜백으로 넘긴다.
 import { boardFor, challengerCount, postAge, bragKey, BOARD_TOP, TITLE_MAX, BODY_MAX } from './community.js';
+import { shownScore } from './game.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sec = (v) => `${Number(v).toFixed(1)}s`;
@@ -66,7 +67,7 @@ export function initCommunity(host) {
     if (!bp) return '<p class="post-sum"><span>원본 코스 기록 보기</span><i>›</i></p>';
     const rows = boardFor(bp), n = challengerCount(bp);
     const top = rows[0];
-    const lead = top ? `<span>1위</span> <b data-ugc>${esc(top.nick)}</b> <strong>${bp.type === 'record' ? `${num(top.score)}점` : `평균 ${sec(top.avg)}`}</strong>` : '<span>아직 기록 없음</span>';
+    const lead = top ? `<span>1위</span> <b data-ugc>${esc(top.nick)}</b> <strong>${bp.type === 'record' ? `${shownScore(bragKey(bp), num(top.score))}점` : `평균 ${sec(top.avg)}`}</strong>` : '<span>아직 기록 없음</span>';
     const limit = bp.type === 'record' ? postAge(bp) : null;
     return `<p class="post-sum"><span class="cnt">도전 ${n}명</span>${lead}${limit !== null ? `<span class="age">${num(limit)}세 이하 기록</span>` : ''}<i>상위 ${BOARD_TOP}위 ›</i></p>`;
   }
@@ -86,7 +87,7 @@ export function initCommunity(host) {
     const rule = bp.type === 'record' ? `<p class="detail-rule">${ruleText}</p>` : '';
     const items = rows.slice(0, BOARD_TOP).map((r) => `<li class="${r.rank === 1 ? 'holder' : ''}${me && r.uid === me.id ? ' me' : ''}">
       <span class="rk">${r.rank}</span><b data-ugc>${esc(r.nick)}</b>${jersey(r.number)}${r.author ? '<em>글쓴이</em>' : '<em class="sp"></em>'}${bp.type === 'record'
-        ? `<span class="t">${num(r.score)}점</span><small></small>`
+        ? `<span class="t">${shownScore(bragKey(bp), num(r.score))}점</span><small></small>`
         : `<span class="t">평균 ${sec(r.avg)}</span><small>최고 ${sec(r.best)}</small>`}</li>`).join('');
     const board = rows.length ? `<ol class="detail-board">${items}</ol>` : '<p class="post-empty">아직 기록이 없습니다 — 첫 기록의 주인공이 되어 보세요</p>';
     const top = rows[0];
@@ -105,7 +106,7 @@ export function initCommunity(host) {
     const tag = postTag(p);
     let main = '';
     if (p.type === 'record') {
-      main = `<div class="post-score"><b>${Number(p.score)}</b><span>${esc(modeLabel(p))}</span></div>`;
+      main = `<div class="post-score"><b>${shownScore(bragKey(p), Number(p.score))}</b><span>${esc(modeLabel(p))}</span></div>`;
     } else {
       const beat = p.type === 'beat' && p.ref
         ? `<p class="beat-line"><span>갈아치운 기록</span> <b data-ugc>${esc(p.ref.nick)}</b><strong>평균 ${sec(p.ref.avg)} → ${sec(p.record.avg)}</strong></p>` : '';
@@ -184,11 +185,11 @@ export function initCommunity(host) {
       if (d.result) {
         const old = d.existing;
         // 기록 자랑은 모드(모드·시간·투명)마다 하나: 이미 있으면 그 글이 새 기록으로 바뀐다
-        const replace = old ? `<p class="replace-note"><span>이 모드의 내 자랑 글이 이미 있습니다</span> <b data-ugc>${esc(old.title)}</b> <strong>${Number(old.score)}점</strong> <span>— 올리면 그 글이 이 기록으로 바뀝니다 (응원·도전 기록은 그대로)</span></p>` : '';
-        pv.innerHTML = `<div class="post-score"><b>${Number(d.result.score)}</b><span>${esc(modeLabel(d.result))}</span></div>${replace}`;
+        const replace = old ? `<p class="replace-note"><span>이 모드의 내 자랑 글이 이미 있습니다</span> <b data-ugc>${esc(old.title)}</b> <strong>${shownScore(bragKey(old), Number(old.score))}점</strong> <span>— 올리면 그 글이 이 기록으로 바뀝니다 (응원·도전 기록은 그대로)</span></p>` : '';
+        pv.innerHTML = `<div class="post-score"><b>${shownScore(bragKey(d.result), Number(d.result.score))}</b><span>${esc(modeLabel(d.result))}</span></div>${replace}`;
         if (old) $('#comm-submit').textContent = '자랑 글 바꾸기';
       } else { ok = false; pv.innerHTML = '<p class="muted">자랑할 기록이 아직 없습니다. 게임을 끝까지 플레이하면 결과 화면에서 바로 자랑할 수 있습니다.</p>'; }
-      $('#comm-body').placeholder = '한마디 (예: 드디어 1000점 돌파!)';
+      $('#comm-body').placeholder = '한마디 (예: 드디어 300점 돌파!)';
     } else {
       const c = d.course;
       if (c && c.points.length >= 2) {

@@ -25,7 +25,7 @@ const inv = (val, a, b) => (b === a ? 0.5 : (val - a) / (b - a));
  * 포인터 위치 -> 추적 좌표 {u, v}
  * ctx: { view, canvas, modeList, choiceTrack, modeOpen, resultOpen, game, topInset, cursorFlip, puckFlip, floorMap, PW, PH }
  * cursorFlip: 모드 선택 커서가 v를 뒤집어 쓰는지. puckFlip: 바닥 위 화면에서 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리는 중
- * (퀵 핸즈·반응 타겟) — 커서 자리에 퍽이 보이도록 거꾸로 읽는다
+ * (퀵 핸즈) — 커서 자리에 퍽이 보이도록 거꾸로 읽는다
  */
 export function pointerToUV(px, py, ctx) {
   const { view, canvas, game } = ctx;
@@ -47,7 +47,7 @@ export function pointerToUV(px, py, ctx) {
     return { u: clamp01(inv(nx, z0.x, z1.x)), v: clamp01(inv(ny * a.aspect, z0.y, z1.y)) };
   }
   if ((game.running && !FLOOR_MODES.has(game.mode.id)) || game.mode.id === 'free') {
-    // 평면 경기장(흰 판: 퍽 피하기·8자 드리블·자유 연습 — 자유 연습은 코스 편집 중에도): 캔버스 안 경기장 사각형 기준
+    // 평면 경기장(흰 판: 퍽 피하기·8자 드리블·반응 타겟·자유 연습 — 자유 연습은 코스 편집 중에도): 캔버스 안 경기장 사각형 기준
     const f = dodgeField(canvas.width, canvas.height, ctx.topInset);
     const fx = (f.x / canvas.width) * vr.width + vr.left, fy = (f.y / canvas.height) * vr.height + vr.top;
     const fw = (f.w / canvas.width) * vr.width, fh = (f.h / canvas.height) * vr.height;
@@ -55,7 +55,7 @@ export function pointerToUV(px, py, ctx) {
     const p0 = game.toPlane(0, 0), p1 = game.toPlane(1, 1);
     return { u: clamp01(inv(X, p0.x, p1.x)), v: clamp01(inv(Y, p0.y, p1.y)) };
   }
-  // 그 밖(바닥 위 게임: 와이드·퀵 핸즈·반응 타겟 · 대기 중 가운데 원): 카메라 화면 좌표 그대로
+  // 그 밖(바닥 위 게임: 와이드·퀵 핸즈 · 대기 중 가운데 원): 카메라 화면 좌표 그대로
   // (내 퍽을 위아래 반대 자리에 그리는 중이면 거꾸로). 바닥 = 수동으로 맞춘 네 모서리(있으면), 없으면 화면 전체
   const [u, v] = ctx.floorMap ? ctx.floorMap.toUV(nx * ctx.PW, ny * ctx.PH) : [nx, ny];
   return { u: clamp01(u), v: clamp01(ctx.puckFlip ? 1 - v : v) };

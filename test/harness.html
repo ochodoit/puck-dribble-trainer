@@ -18,7 +18,8 @@
   import { Arcade, PUCK_R, HIT_PENALTY, TOUCH_POINTS, COIN_POINTS, SCORE_MULT, FIELD_MARGIN, PUCK_COLORS, FALL_R, COIN_R } from '../src/arcade.js';
   import { C } from '../src/theme.js';
   import { alphaLayer } from '../src/theme.js';
-  import { rankKey, FLYER_R, WIDE_DRILLS, WIDE_HOLD_R, laneX, figure8Waypoints, FIGURE8_DIRS, GATE_DRAW_R, TARGET_DRAW_R, PUCK_R as ME_R, HIT_OVERLAP, circleOverlap, overlapReach, discRectOverlap } from '../src/game.js';
+  import { rankKey, FLYER_R, WIDE_DRILLS, WIDE_HOLD_R, laneX, figure8Waypoints, FIGURE8_DIRS, GATE_DRAW_R, TARGET_DRAW_R, PUCK_R as ME_R, HIT_OVERLAP, circleOverlap, overlapReach, discRectOverlap, scoreScale, shownScore } from '../src/game.js';
+  import { FLOOR_MODES, FLOOR_FLIP_MODES } from '../src/render.js';
   import { makeFloorMapping } from '../src/geometry.js';
   import { memberStats, lastDays } from '../src/stats.js';
   import { analyticsAllowed, initAnalytics, track, GA_ID } from '../src/analytics.js';
@@ -2011,6 +2012,39 @@
       const arS = mk(); ta = toPlay(arS, 40000); arS.obstacles.push(fall(0.5, 0.1));
       for (let i = 0; i < 40; i++) { arS.update(0.033, { ...fakePuck(0.5, 0.5), confident: true }, ta); ta += 33; }
       check('CF3 puck dodge and arcade: no penalty from an unsure position, the usual penalty from a sure one', dUnsure === 0 && dSure === 1 && arU.hits === 0 && arS.hits === 1, { dUnsure, dSure, arUnsure: arU.hits, arSure: arS.hits });
+    }
+    // SC) 점수 기준 하나로: 게임마다 크기가 다르던 원점수(8자 수십 점, 퍽 피하기 1분 1000점 안팎)를 랭킹 키마다 배율로 맞춘다.
+    //     1분(한 판)·보통의 잘한 판은 100점대, 시간·난이도에 따라 길고 어려울수록 최대 500점대. 원점수는 그대로 저장, 보일 때만 배율
+    {
+      // SC1 베타 랭킹의 실제 상위 기록(예전 기록)이 새 기준에서 모두 100점대
+      const beta = { arcade: shownScore('arcade@60', 365), dodge: shownScore('obstacle@60', 1010), wide: shownScore('wide@60', 239), figure8: shownScore('figure8', 28), reaction: shownScore('reaction', 42), quickOld: shownScore('quick', 46) };
+      check('SC1 old top records (beta leaderboard) all land in the 100s on the new scale', Object.values(beta).every((v) => v >= 100 && v < 200), beta);
+      // SC2 같은 실력(분당 원점수가 같음)이면 시간·난이도에 따라 커지고, 5분·어려움도 500점대 (600 아래). 아케이드 원점수에는 난이도 배율이 들어 있다
+      const perMin = { arcade: 200, obstacle: 1000, wide: 239, quick: 390 };
+      const rows = {}; let mono = true, top = 0;
+      for (const [id, r] of Object.entries(perMin)) {
+        const lvls = id === 'arcade' || id === 'obstacle' ? ['easy', 'normal', 'hard'] : ['normal'];
+        let prevT = 0;
+        for (const sec of [60, 180, 300]) {
+          let prevL = 0;
+          for (const lv of lvls) {
+            const v = shownScore(rankKey(id, sec, false, lv), r * (sec / 60) * (id === 'arcade' ? SCORE_MULT[lv] : 1));
+            rows[rankKey(id, sec, false, lv)] = v; top = Math.max(top, v);
+            if (v <= prevL) mono = false; prevL = v;
+          }
+          if (prevL <= prevT) mono = false; prevT = prevL;
+        }
+      }
+      check('SC2 same skill: score grows with time and difficulty, 1 min in the 100s and 5 min hard in the 500s', mono && top >= 500 && top < 600 && rows['arcade@60-easy'] >= 100 && rows['arcade@60-easy'] < 200 && rows['obstacle@60'] < 200, { top, rows });
+      // SC3 게임이 끝나면 결과 '점수'와 화면 점수는 보이는 점수, 저장·비교하는 r.score 는 원점수 그대로. 자유 연습·모르는 키는 배율 1
+      const gs = new Game(null); gs.setMode('obstacle'); gs.playSeconds = 60; gs.difficulty = 'normal';
+      gs.start({ pos: { x: 0.5, y: 0.5 }, state: 'tracked', trail: [], touches: 0, speed: 0, distance: 0, frames: 1, trackedFrames: 1, trackRate: 1 });
+      gs.score = 1010; const live = gs.shownScore;
+      const res = gs.stop('time'), item = res.items.find(([k]) => k === '점수');
+      check('SC3 result and HUD show the scaled score while the raw score is kept for records; free practice and unknown keys unscaled',
+        res.score === 1010 && res.shown === 174 && item && item[1] === 174 && live === 174 && scoreScale('free') === 1 && scoreScale('bogus') === 1, { score: res.score, shown: res.shown, item, live });
+      // RX 반응 타겟은 흰 판 (배경이 비치면 헷갈려서): 바닥 위 그리기·위아래 반전 목록에서 빠짐
+      check('RX reaction target plays on the white board (not drawn on the camera floor)', !FLOOR_MODES.has('reaction') && !FLOOR_FLIP_MODES.has('reaction') && FLOOR_MODES.has('quick') && FLOOR_MODES.has('wide'));
     }
     // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
     {

@@ -6,7 +6,7 @@ import { Tracker } from './tracker.js';
 import { StickBridge } from './occlusion.js';
 import { placementCheck } from './placement.js';
 import { chooseTolerance, needFromTest, chooseProcWidth, preferLowRate } from './autotune.js';
-import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R } from './game.js';
+import { Game, MODES, PLAY_MINUTES, rankKey, levelLabel, PUCK_R, F8_HOLD_R, shownScore } from './game.js';
 import { C, rgba } from './theme.js';
 import { Renderer, dodgeField, FLOOR_MODES, FLOOR_FLIP_MODES } from './render.js';
 import { Sfx } from './audio.js';
@@ -417,10 +417,10 @@ async function renderRank() {
   try {
     const rows = await app.account.leaderboard(mode, rankFilters(), 100);
     els.rankBody.innerHTML = rows.length ? rows.map((r) => `<tr class="${u && r.uid === u.id ? 'me' : ''} ${r.rank <= 3 ? 'top' + r.rank : ''}">
-      <td>${r.rank}</td><td>${esc(r.nick)}${r.number != null ? ` <span class="jersey">${jerseyLabel(r.number)}</span>` : ''}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${num(r.score)}</td></tr>`).join('')
+      <td>${r.rank}</td><td>${esc(r.nick)}${r.number != null ? ` <span class="jersey">${jerseyLabel(r.number)}</span>` : ''}</td><td>${esc(r.team)}</td><td>${esc(countryLabel(r.country))}</td><td>${esc(r.ageGroup)}</td><td>${shownScore(mode, num(r.score))}</td></tr>`).join('')
       : '<tr><td colspan="6" class="muted">아직 기록이 없습니다. 게임을 끝까지 플레이하면 등록됩니다.</td></tr>';
     const me = u ? await app.account.myRank(mode, rankFilters()) : null;
-    els.rankMe.textContent = u ? (me ? `내 순위: ${me.rank}위 / ${me.total}명 (최고 ${me.score}점)` : '이 조건에 내 기록이 없습니다') : '로그인하면 내 순위가 표시됩니다';
+    els.rankMe.textContent = u ? (me ? `내 순위: ${me.rank}위 / ${me.total}명 (최고 ${shownScore(mode, me.score)}점)` : '이 조건에 내 기록이 없습니다') : '로그인하면 내 순위가 표시됩니다';
   } catch (err) {
     els.rankBody.innerHTML = `<tr><td colspan="6" class="error">랭킹을 불러오지 못했습니다: ${esc(err.message || err)}</td></tr>`;
   }
@@ -443,7 +443,7 @@ async function submitResult(result) {
     const parts = [];
     if (all) parts.push(`전체 ${all.rank}위/${all.total}명`);
     if (age) parts.push(`${u.ageGroup} ${age.rank}위/${age.total}명`);
-    els.resultRank.innerHTML = `<span class="script">${improved && Number(result.score) > 0 ? '최고 기록!' : `최고 ${best}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
+    els.resultRank.innerHTML = `<span class="script">${improved && Number(result.score) > 0 ? '최고 기록!' : `최고 ${shownScore(key, best)}`}</span> ${parts.join(' · ')} <button type="button" class="btn btn-ghost" id="btn-result-rank">랭킹 보기</button>`;
     els.resultRank.classList.remove('hidden');
     $('#btn-result-rank').addEventListener('click', () => { close(els.panelResult); openRank(result.mode.id); });
   } catch (err) {
@@ -561,7 +561,7 @@ function trackPlay(result) {
   }
   track('game_end', {
     mode: result.mode.name, member: app.account?.current() ? 'member' : 'guest',
-    completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed), score: Math.round(Number(result.score) || 0),
+    completed: result.reason === 'manual' ? 'no' : 'yes', play_seconds: Math.round(result.elapsed), score: result.shown ?? Math.round(Number(result.score) || 0), // 보이는 점수 기준
   });
 }
 
@@ -1685,7 +1685,7 @@ function stepMouse(now) {
     meas = pointerToUV(mouse.x, mouse.y, {
       floorMap, PW: vision.PW, PH: vision.PH,
       view: els.view, canvas: renderer.canvas, game, topInset: renderer.topInset, cursorFlip: !settings.reverseDepth,
-      // 퀵 핸즈·반응 타겟 화면: 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리므로 커서도 그 자리로 (대기 중 가운데 원은 진짜 자리)
+      // 퀵 핸즈 화면: 내 퍽을 영상 속 퍽과 위아래 반대 자리에 그리므로 커서도 그 자리로 (대기 중 가운데 원은 진짜 자리)
       puckFlip: renderer.view === 'floor' && FLOOR_FLIP_MODES.has(game.mode.id) && game.plane.flip,
       modeList: els.modeList, modeOpen: !els.panelMode.classList.contains('hidden'),
       choiceTrack: $('#choice-track'), resultOpen: !els.panelResult.classList.contains('hidden'),
@@ -2175,7 +2175,7 @@ function updateHud(force) {
   const sc = game.mode.id !== 'free' ? app.scoreChallenge : null;
   els.hudInstruction.textContent = game.running ? (app.paused ? '일시정지 · 창을 닫으면 이어서 합니다' : game.instruction)
     : !app.started ? '' : ch ? `도전 · ${ch.title}${ch.holder ? ` · 1위 평균 ${ch.holder.avg.toFixed(1)}s` : ''}`
-      : sc ? `도전 · ${sc.nick} · ${sc.score}점` : settings.autoStart && !app.mouseMode ? '퍽을 원에 3초 또는 시작' : '시작을 누르세요';
+      : sc ? `도전 · ${sc.nick} · ${shownScore(sc.key, sc.score)}점` : settings.autoStart && !app.mouseMode ? '퍽을 원에 3초 또는 시작' : '시작을 누르세요';
   $('#app').classList.toggle('playing', game.running);
   $('#app').classList.toggle('hide-cursor', !!app.mouseMode && game.running && renderer.puckAlpha < 1);
   const f8 = game.mode.id === 'figure8' && app.started && !app.areaEditing && !app.setup;
@@ -2195,7 +2195,7 @@ function updateHud(force) {
     const e = game.running ? game.elapsed : 0;
     els.hudTimer.textContent = `${Math.floor(e / 60)}:${String(Math.floor(e % 60)).padStart(2, '0')}`;
   }
-  els.hudScore.textContent = String(game.score);
+  els.hudScore.textContent = String(game.shownScore); // 보이는 점수 (원점수 × 게임별 배율 — game.js scoreScale)
   els.hudLives.textContent = game.running && game.mode.timed && game.hits > 0 ? `충돌 ${game.hits}` : '';
   if (game.mode.stages) els.hudLives.textContent = game.mode.id === 'quick' ? `세트 ${(game.running ? game.quickSet : 0) + 1}/${game.mode.stages}` : `훈련 ${game.stage + 1}/${game.mode.stages}`;
   // 자유 연습 코스: 사이클 진행(완료/목표)과 평균·가장 빠른 사이클 시간
@@ -2281,12 +2281,12 @@ function showResult(result, isBest) {
   if (result.reason === 'time') title += ' — 시간 종료';
   if (result.reason === 'done') title += ' — 완주';
   const body = [];
-  if (isBest) body.push(`<div class="stat full winner"><small>최고 기록!</small><b>${result.score}</b></div>`);
+  if (isBest) body.push(`<div class="stat full winner"><small>최고 기록!</small><b>${result.shown ?? result.score}</b></div>`);
   for (const [k, v] of result.items) { if (isBest && k === '점수') continue; body.push(`<div class="stat"><small>${k}</small><b>${v}</b></div>`); }
 
   if (app.versus) {
     const vs = app.versus;
-    vs.scores[vs.current] = result.score;
+    vs.scores[vs.current] = result.shown ?? result.score; // 대결은 같은 조건이라 보이는 점수로 비교·표시
     if (vs.current === 0) {
       title = `${vs.names[0]} 완료 · 다음: ${vs.names[1]}`;
       els.btnNext.classList.remove('hidden');
@@ -2446,7 +2446,7 @@ function challengeMode(post) {
   const rule = u && u.id === post.uid ? '내 글이라 도전 기록에는 오르지 않습니다'
     : u && !canRecordOn(u, post) ? `기록 등록은 ${postAge(post)}세 이하만 (연습만 가능)`
       : !u ? '로그인하면 도전 기록에 오릅니다' : '';
-  const head = `${label} — ${post.score}점에 도전!`;
+  const head = `${label} — ${shownScore(bragKey(post), post.score)}점에 도전!`;
   toast(rule ? `${head} · ${rule}` : head, 4500);
 }
 
@@ -2541,7 +2541,7 @@ async function renderScoreChallenge(result, sc, show) {
   const u = app.account?.current();
   const brag = () => community.compose({ type: 'record' });
   const openBoard = () => community.open({ filter: 'record', select: sc.id });
-  const target = `<span>도전</span> <b data-ugc>${esc(sc.nick)}</b> <strong>${num(sc.score)}점</strong>`;
+  const target = `<span>도전</span> <b data-ugc>${esc(sc.nick)}</b> <strong>${shownScore(sc.key, num(sc.score))}점</strong>`;
   if (!u || lapsedNow()) {
     show(`${target} <span>${u ? LAPSED : '로그인하면 도전 기록에 올라갑니다'}</span>`, '도전 기록 보기', openBoard);
     return;
@@ -2560,7 +2560,7 @@ async function renderScoreChallenge(result, sc, show) {
     let html;
     if (r.isHolder && r.improved && ph && ph.uid !== u.id) {
       sfx.target?.();
-      html = `<span class="script">신기록!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${num(ph.score)}점 → ${num(result.score)}점</strong>`;
+      html = `<span class="script">신기록!</span> <span>1위를 넘었습니다</span> <b data-ugc>${esc(ph.nick)}</b> <strong>${shownScore(sc.key, num(ph.score))}점 → ${shownScore(sc.key, num(result.score))}점</strong>`;
     } else {
       html = `${target} <span>도전 기록 ${r.rank}위 / ${r.total}명</span>${r.improved ? ' <span>내 최고 기록 갱신</span>' : ''}`;
     }
@@ -2600,7 +2600,7 @@ function renderModeList() {
     const card = document.createElement('button');
     card.className = 'mode-card' + (m.id === game.mode.id ? ' selected' : '');
     const key = rankKey(m.id, game.playSeconds, settings.invisible, settings.difficulty);
-    const best = scores[key] !== undefined ? `<span class="best">최고 ${scores[key]}</span>` : '';
+    const best = scores[key] !== undefined ? `<span class="best">최고 ${shownScore(key, scores[key])}</span>` : '';
     const time = m.timed ? timeLabel(m, settings.playMinutes * 60) : m.duration ? `${m.duration}초` : '자유';
     card.innerHTML = `<span class="no">${String(cell + 1).padStart(2, '0')}</span><span class="time">${time}</span><b>${m.name}</b><em>${m.en}</em><small>${m.desc}</small>${best}`;
     card.addEventListener('click', () => {
@@ -2881,7 +2881,7 @@ function drawTransparencyPreview(result) {
   ctx.fillStyle = rgba(C.paper, renderer.wash); ctx.fillRect(0, 0, w, h); // 평면 판의 종이 배경
   ctx.beginPath(); ctx.arc(w * 0.72, h * 0.4, w * 0.045, 0, Math.PI * 2); ctx.fillStyle = C.red; ctx.fill(); // 목표 하나
   // 내 퍽: 지금 보이는 자리 — 평면 판 게임은 판에서와 같은 자리, 바닥 위 게임은 영역 안 자리
-  // (와이드는 영상 속 진짜 퍽 자리, 퀵 핸즈·반응 타겟은 위아래 반대). 못 찾으면 왼쪽 아래
+  // (와이드는 영상 속 진짜 퍽 자리, 퀵 핸즈는 위아래 반대). 못 찾으면 왼쪽 아래
   const obj = settings.controller === 'stick' ? result?.stick : p, m = result?.floor?.mapping;
   let uv = null, pos = { x: 0.3, y: 0.62 };
   if (obj && m) { const [u, v] = m.toUV(obj.x, obj.y); if (u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05) uv = { x: u, y: v }; }
@@ -2961,16 +2961,16 @@ function drawPeek(now) {
 
 /**
  * 게임마다 배경·퍽 투명도 규칙 (bg·puck: 실제로 쓰는 투명도 %, bgLock·puckLock: 이 게임에서 설정을 못 바꾸는지)
- *  - 아케이드·퍽 피하기·8자 드리블·자유 연습: 배경 0 고정 (흰 화면), 퍽만 조절
+ *  - 아케이드·퍽 피하기·8자 드리블·자유 연습·반응 타겟: 배경 0 고정 (흰 화면), 퍽만 조절
+ *    (반응 타겟은 배경이 비치면 타겟과 헷갈려서 흰 판으로)
  *  - 와이드 드리블: 배경 0~100 그대로 (슬라이더대로 카메라가 비침 — 끄는 동안 실제 화면에서 바로 보임).
  *    배경 0 이면 퍽 0~100, 배경을 1 이상 주면 퍽 투명도 0 고정 (영상 속 진짜 퍽이 보이므로)
  *  - 퀵 핸즈: 배경만 조절, 퍽 투명도 0 고정
- *  - 반응 타겟 (퀵 핸즈처럼 영역 안에서 배경을 보며): 둘 다 조절
  */
 function visualRules(modeId = game.mode.id) {
   const bgSet = settings.bgTransparency, puckSet = settings.puckTransparency;
   switch (modeId) {
-    case 'arcade': case 'obstacle': case 'figure8': case 'free':
+    case 'arcade': case 'obstacle': case 'figure8': case 'free': case 'reaction':
       return { bg: 0, puck: puckSet, bgLock: true, puckLock: false };
     case 'wide':
       return bgSet > 0 ? { bg: bgSet, puck: 0, bgLock: false, puckLock: true } : { bg: 0, puck: puckSet, bgLock: false, puckLock: false };
@@ -3012,8 +3012,8 @@ function refreshVisualLocks() {
  * 게임마다 앞뒤(위아래) 방향: true = 판정 평면의 위아래를 카메라 영상과 반대로 (퍽을 카메라 쪽으로 밀면 화면 위로).
  *  - 아케이드 (아래쪽 플레이 존): 카메라 쪽으로 밀면 위로 (퍽들이 내려오는 쪽)
  *  - 퍽 피하기·8자 드리블 (흰 화면): 카메라 쪽으로 밀면 위로 (판 위쪽 = 카메라쪽, 아래쪽 = 몸쪽)
- *  - 자유 연습 (흰 화면): 퍽 피하기와 같음 — 카메라 쪽으로 밀면 위로
- *  - 퀵 핸즈·반응 타겟 (영역 안, 배경이 보임): 화면(영상)은 그대로 두고 내 퍽만 위아래 반대로 — 카메라 쪽으로 밀면 위로
+ *  - 자유 연습·반응 타겟 (흰 화면): 퍽 피하기와 같음 — 카메라 쪽으로 밀면 위로
+ *  - 퀵 핸즈 (영역 안, 배경이 보임): 화면(영상)은 그대로 두고 내 퍽만 위아래 반대로 — 카메라 쪽으로 밀면 위로
  *  - 와이드 드리블: 영상 속 진짜 퍽 자리 그대로 (렌더러가 평면의 뒤집기를 되돌려 그리므로 이 값과 상관없음)
  * 설정 '위아래 반대로'(reverseDepth)를 켜면 와이드 드리블을 뺀 모든 게임이 반대로 바뀐다
  */

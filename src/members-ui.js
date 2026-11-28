@@ -7,6 +7,7 @@ import { monthGrid, dayKey, sparkPoints, hoursMinutes, keyInfo } from './activit
 import { addMonths, passName, EXT_PASS } from './account.js';
 import { gameKeyTools } from './me-ui.js';
 import { renderAbility } from './ability-ui.js';
+import { shownScore } from './game.js';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const STATE_LABEL = { beta: '베타 기간', kept: '유지', coupon: '이용권', lapsed: '종료' };
@@ -308,7 +309,7 @@ export function initMembers(deps) {
     const keys = [...new Set([...best.map((b) => b.mode), ...Object.keys(recent)])].filter((k) => keyInfo(k).modeId !== 'free').sort((a, b) => keyOrder(a) - keyOrder(b));
     body.innerHTML = keys.length ? keys.map((k) => {
       const b = best.find((x) => x.mode === k), vals = (recent[k] || []).map((x) => x.s);
-      return `<tr><td>${esc(keyLabel(k))}</td><td class="num">${b ? b.score : '-'}</td><td class="num">${b ? b.plays : vals.length}</td><td>${spark(vals)}</td></tr>`;
+      return `<tr><td>${esc(keyLabel(k))}</td><td class="num">${b ? shownScore(k, b.score) : '-'}</td><td class="num">${b ? b.plays : vals.length}</td><td>${spark(vals)}</td></tr>`;
     }).join('') : `<tr><td colspan="4" class="muted">${esc(tr('아직 게임 기록이 없습니다'))}</td></tr>`;
   }
 

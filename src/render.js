@@ -10,14 +10,14 @@ export function dodgeField(W, H, topInset = 0) {
 }
 
 /** 평면 판(화면 전체) 대신 카메라 영상 위 실제 바닥(영역 안)에 원근대로 그리는 모드 — 배경(카메라)이 보이는 게임 */
-export const FLOOR_MODES = new Set(['wide', 'quick', 'reaction']);
+export const FLOOR_MODES = new Set(['wide', 'quick']);
 /**
- * 바닥 위 게임 중 내 퍽의 위아래 움직임을 영상 속 진짜 퍽과 반대로 하는 모드: 퀵 핸즈·반응 타겟.
+ * 바닥 위 게임 중 내 퍽의 위아래 움직임을 영상 속 진짜 퍽과 반대로 하는 모드: 퀵 핸즈.
  * 화면(카메라 영상·영역)은 그대로 두고, 평면 경기장(판정 좌표)을 영역 안에 그대로 그린다 — 평면이 뒤집혀 있으면(plane.flip)
  * 카메라 쪽으로 밀 때 내 퍽이 영역 안에서 위로 간다. 와이드 드리블은 영상 속 진짜 퍽 자리 그대로.
- * (자유 연습은 퍽 피하기처럼 흰 평면 판)
+ * (자유 연습·반응 타겟은 퍽 피하기처럼 흰 평면 판 — 반응 타겟은 배경이 비치면 헷갈려서 흰 화면으로)
  */
-export const FLOOR_FLIP_MODES = new Set(['quick', 'reaction']);
+export const FLOOR_FLIP_MODES = new Set(['quick']);
 
 export class Renderer {
   constructor(canvas) {
@@ -119,13 +119,13 @@ export class Renderer {
       return;
     }
 
-    // ---- 와이드 드리블·퀵 핸즈·반응 타겟: 카메라 영상 위 실제 바닥(영역 안)에 원근대로 (와이드의 내 퍽 = 영상 속 진짜 퍽 자리) ----
+    // ---- 와이드 드리블·퀵 핸즈: 카메라 영상 위 실제 바닥(영역 안)에 원근대로 (와이드의 내 퍽 = 영상 속 진짜 퍽 자리) ----
     if (view === 'floor') {
-      const drawFloor = { wide: this._drawWide, quick: this._drawQuick, reaction: this._drawReaction }[game.mode.id];
+      const drawFloor = { wide: this._drawWide, quick: this._drawQuick }[game.mode.id];
       drawFloor.call(this, ctx, W, H, game, puck, now, uvToC);
     } else {
-      // ---- 퍽 피하기·8자 드리블·자유 연습은 평면 경기장에서 (위에서 내려다본 흰 판 = 영역 전체. 판정도 같은 평면 좌표) ----
-      const drawField = { obstacle: this._drawDodge, figure8: this._drawFigure8, free: this._drawCourse }[game.mode.id] || this._drawDodge;
+      // ---- 퍽 피하기·8자 드리블·자유 연습·반응 타겟은 평면 경기장에서 (위에서 내려다본 흰 판 = 영역 전체. 판정도 같은 평면 좌표) ----
+      const drawField = { obstacle: this._drawDodge, figure8: this._drawFigure8, free: this._drawCourse, reaction: this._drawReaction }[game.mode.id] || this._drawDodge;
       drawField.call(this, ctx, W, H, game, puck, now, { calib, idleHold });
     }
 
@@ -487,16 +487,16 @@ export class Renderer {
   }
 
   /**
-   * 반응 타겟 (바닥 위, 영역 안): 진한 빨간 정원 하나 (그 자리의 바닥 축척대로 — 먼 쪽은 작게).
-   * 영상 속 검정 퍽과 헷갈리지 않게 빨강. 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다
+   * 반응 타겟 평면 (흰 판 — 퍽 피하기와 같은 평면 경기장. 배경이 비치면 헷갈려서 배경 투명도 0 고정): 진한 빨간 정원 하나
+   * (잉크색 내 퍽과 헷갈리지 않게 빨강). 나타날 때 큰 고리가 0.3초 동안 줄어들며 자리를 잡는다
    */
-  _drawReaction(ctx, W, H, game, puck, now, uvToC) {
+  _drawReaction(ctx, W, H, game, puck, now) {
     ctx.save();
-    const K = this._floorField(ctx, W, H, game, uvToC);
-    const { f, P, hair, fs, pxPerX } = K;
+    const K = this._field(ctx, W, H, game);
+    const { f, S, P, hair, fs } = K;
     const pulse = 0.5 + 0.5 * Math.sin(now / 180);
     for (const t of game.targets) {
-      const [cx, cy] = P(t.x, t.y), r = t.r * pxPerX(t.x, t.y);
+      const [cx, cy] = P(t.x, t.y), r = t.r * S;
       const age = (now - t.born) / 1000;
       if (age >= 0 && age < 0.3) {
         const k = 1 - age / 0.3;
@@ -504,7 +504,7 @@ export class Renderer {
       }
       this._nextDot(ctx, cx, cy, r, pulse, hair, C.red);
     }
-    this._drawMeFloor(ctx, game, puck, now, K);
+    this._drawMe(ctx, game, puck, now, K);
     if (!game.running) text(ctx, game.mode.desc, f.x + f.w / 2, f.y + f.h / 2, fs, { weight: 600, color: C.inkSoft, halo: true });
     this._fieldEffects(ctx, game, K, W, 0.05);
     ctx.restore();

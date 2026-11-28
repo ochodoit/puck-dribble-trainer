@@ -8,7 +8,7 @@
 //  - 안전 (위쪽): 이 값으로 영역을 칠했을 때 바닥·그림자·얼룩이 '퍽만 한 덩어리'로 생기지 않는 값 (vision.distanceMap 으로 확인)
 // need 보다 조금 넓게(× 1.35 → 1.2 → 1.1 중 안전한 가장 큰 값) 잡고, 그래도 안 되면 조금 좁혀 보고(퍽이 일부만 칠해져도
 // 추적은 됨), 그래도 안 되면 퍽과 거의 같은 색이 영역에 있는 것이라 need 그대로 두고 알린다.
-import { labelBlobs, mergeBlobs } from './vision.js';
+import { labelBlobs, mergeBlobs, THIN_RHO, THIN_LONG } from './vision.js';
 
 export const TOL_MIN = 25;
 export const TOL_MAX = 180;
@@ -36,9 +36,12 @@ export function falseBlobs(map, tol, area, kind = 'puck') {
   if (ratio > FLOOR_RATIO) return { bad: true, ratio, worst: Infinity };
   if (!cnt) return { bad: false, ratio, worst: 0 };
   const lo = Math.max(3, area * (kind === 'stick' ? 0.3 : 0.25)), hi = kind === 'stick' ? Infinity : area * 3;
+  const R = Math.sqrt(area / Math.PI);
   let worst = 0;
   for (const b of mergeBlobs(labelBlobs(mask, w, h), 2)) {
     const a = b.px.length;
+    // 추적이 지우는 가늘고 긴 줄(퍽 색 스틱 샤프트·그림자, vision THIN_*)은 퍽으로 잡히지 않으므로 세지 않는다
+    if (kind === 'puck' && thinLine(b, a, R)) continue;
     if (a >= lo && a <= hi && a > worst) worst = a;
   }
   return { bad: worst > 0, ratio, worst };
@@ -120,3 +123,10 @@ export function preferLowRate({ noise, luma }) {
 }
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+/** 덩어리가 퍽보다 가늘고 긴 줄인지 (길이 = 테두리 대각선 ≥ 퍽 지름 × THIN_LONG, 평균 폭 = 면적 / 길이 ≤ 2ρ). R: 퍽 반지름 */
+function thinLine(b, a, R) {
+  if (!(R > 0)) return false;
+  const len = Math.hypot(b.maxx - b.minx + 1, b.maxy - b.miny + 1);
+  return len >= THIN_LONG * 2 * R && a / len <= 2 * THIN_RHO * R;
+}

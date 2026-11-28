@@ -6,7 +6,7 @@
 <canvas id="scene" width="640" height="480"></canvas>
 <canvas id="arcade" width="1280" height="720"></canvas>
 <script type="module">
-  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp, matchDistance, makeMatcher, matchPixel } from '../src/vision.js';
+  import { Vision, AutoCalibrator, colorsTooClose, colorDist, liftComp, matchDistance, makeMatcher, matchPixel, shadowCut } from '../src/vision.js';
   import { chooseTolerance, falseBlobs, chooseProcWidth, needFromTest, preferLowRate } from '../src/autotune.js';
   import { Tracker } from '../src/tracker.js';
   import { StickBridge } from '../src/occlusion.js';
@@ -1778,18 +1778,22 @@
       }
       check('AT1 match distance agrees with the color matcher (gray and saturated models)', agree === tot, { agree, tot });
 
-      // AT2 그림자·얼룩: 퍽만 한 회색 점(퍽 색에서 약 115 떨어짐)이 영역에 있으면 예전 기준(바닥과 차이의 절반, 최대 120)은 그 점까지 퍽으로 칠한다.
-      // 자동 맞춤은 퍽 안의 색 퍼짐(need)은 다 잡고 그 점은 빼는 값을 고른다
+      // AT2 그림자·얼룩: 퍽만 한 회색 점(퍽 색에서 약 115 떨어짐, 바닥 밝기의 42%)은 색만 보면 예전 기준(바닥과 차이의 절반, 최대 120)으로 퍽 색이다.
+      // 이제는 바닥이 어두워진 색(그림자 규칙: 그 자리 바닥 대비 밝기)이라 허용 오차와 상관없이 퍽으로 칠하지 않는다 -> 자동 맞춤도 그 점 때문에 좁히지 않고
+      // 퍽 안의 색 퍼짐(need)은 다 잡는다
       const sh = mkT({ spots: [{ color: 'rgb(96,96,98)', x: 300, y: 200, rx: 30, ry: 22 }] });
       const v2 = openT(sh), s2 = v2.autoCalibSample('puck');
       const map2 = v2.distanceMap(s2, { exclude: [zoneOf(s2)] });
       const old2 = Math.round(Math.min(120, Math.max(45, s2.dist * 0.5)));
+      const spotColor = matchPixel(makeMatcher(s2, old2), 96, 96, 98);
+      const nearAt = (rr) => rr.puckCandidates.some((c) => Math.hypot(c.cx - 300 * k, c.cy - 200 * k) < 8);
+      const nearOld = nearAt(v2.process(sh.cv, { ...baseT, puckModel: { r: s2.r, g: s2.g, b: s2.b, area: s2.area }, puckTol: old2 }));
       const t2 = tuneT(v2, s2);
       const r2 = v2.process(sh.cv, { ...baseT, puckModel: { r: s2.r, g: s2.g, b: s2.b, area: s2.area }, puckTol: t2.tol });
-      const nearSpot = r2.puckCandidates.some((c) => Math.hypot(c.cx - 300 * k, c.cy - 200 * k) < 8);
-      check('AT2 a puck-sized shadow/stain: the old rule paints it as a puck, auto-tune keeps it out and still covers the whole puck',
-        s2.status === 'ok' && falseBlobs(map2, old2, s2.area).bad && t2.status === 'ok' && t2.tol >= s2.need && !nearSpot && !!r2.puck && Math.hypot(r2.puck.x - 120, r2.puck.y - 67.5) < 2,
-        { need: s2.need, old: old2, tuned: t2.tol, status: t2.status, nearSpot, puck: r2.puck && [+r2.puck.x.toFixed(1), +r2.puck.y.toFixed(1)] });
+      const nearSpot = nearAt(r2);
+      check('AT2 a puck-sized shadow/stain: puck-colored by the old rule, but read as a shadow (never painted); auto-tune keeps the whole puck',
+        s2.status === 'ok' && spotColor && !falseBlobs(map2, old2, s2.area).bad && !nearOld && t2.status === 'ok' && t2.tol >= s2.need && !nearSpot && !!r2.puck && Math.hypot(r2.puck.x - 120, r2.puck.y - 67.5) < 2,
+        { need: s2.need, old: old2, spotColor, nearOld, tuned: t2.tol, status: t2.status, nearSpot, puck: r2.puck && [+r2.puck.x.toFixed(1), +r2.puck.y.toFixed(1)] });
 
       // AT2b 얼룩이 퍽 자신의 색 퍼짐 안(퍽 가장자리 색과 비슷)이면 조금 좁혀(narrow) 얼룩은 빼고 퍽은 그대로 잡는다
       const sb = mkT({ spots: [{ color: 'rgb(80,80,82)', x: 300, y: 200, rx: 30, ry: 22 }] });
@@ -1843,6 +1847,110 @@
       const old = sanitizeSettings({ ...DEFAULT_SETTINGS, puckModel: { r: 1, g: 2, b: 3, area: 50 } });
       check('AT9 settings keep the auto-tune basis and the dark-room camera choice', sv.puckModel.need === 61 && sv.puckModel.bgDist === 300 && sv.stickModel.need === 40 && sv.camDark === true && old.puckModel.need === 0 && old.camDark === false,
         { puck: sv.puckModel, camDark: sv.camDark });
+    }
+    // SH) 스틱은 테이프만, 퍽은 퍽만 읽는다: 퍽과 같은 색(검정) 샤프트, 스틱·날의 그림자, 사람 그림자는 퍽으로 칠하지 않고(미리보기 빨강·추적),
+    //     샤프트에 섞인 테이프 색 점은 스틱으로 칠하지 않는다(초록). 고치기 전: 샤프트 전체와 그림자 줄·날 그림자가 빨강, 테이프 색 점이 초록
+    {
+      const W = 1280, H = 720, k = 240 / 1280;
+      const B = { x0: 520, x1: 660, y0: 400, y1: 428 };                                        // 블레이드 테이프 (주황)
+      const heel = { x: B.x0 + 6, y: B.y0 + 6 }, top = { x: heel.x - 330, y: heel.y - 300 };   // 샤프트: 뒤꿈치에서 왼쪽 위로
+      // 스틱 그림자: 바닥에 닿은 뒤꿈치에서는 스틱 바로 옆, 높이 올라간 위쪽일수록 멀리 (조명이 왼쪽 위). 날 그림자는 날 아래쪽
+      const sh0 = { x: heel.x + 20, y: heel.y + 30 }, sh1 = { x: top.x + 60, y: top.y + 160 }, BS = { x0: B.x0 + 25, y0: B.y0 + 45, w: B.x1 - B.x0, h: 30 };
+      const mkS = (o = {}) => {
+        const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+        const c = cv.getContext('2d'), floor = [232, 230, 224];
+        const shade = (f) => `rgb(${floor.map((v) => Math.round(v * f))})`;
+        c.fillStyle = `rgb(${floor})`; c.fillRect(0, 0, W, H);
+        if (o.body) { c.fillStyle = shade(o.body); c.fillRect(760, 300, 520, 420); }               // 사람 그림자 (오른쪽 아래)
+        if (o.shadow) {
+          c.strokeStyle = shade(o.shadow); c.lineWidth = 24; c.lineCap = 'round';
+          c.beginPath(); c.moveTo(sh0.x, sh0.y); c.lineTo(sh1.x, sh1.y); c.stroke();
+          c.fillStyle = shade(o.shadow); c.beginPath(); c.roundRect(BS.x0, BS.y0, BS.w, BS.h, 10); c.fill();
+        }
+        c.strokeStyle = 'rgb(24,24,26)'; c.lineWidth = 20; c.lineCap = 'round';                    // 샤프트 (퍽과 같은 검정)
+        c.beginPath(); c.moveTo(heel.x, heel.y); c.lineTo(top.x, top.y); c.stroke();
+        c.fillStyle = 'rgb(249,115,22)'; c.beginPath(); c.roundRect(B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0, 8); c.fill();
+        if (o.specks) for (const t of [0.5, 0.65, 0.8]) c.fillRect(heel.x + (top.x - heel.x) * t - 6, heel.y + (top.y - heel.y) * t - 6, 12, 12); // 샤프트 그림 (테이프 색)
+        const P = o.P || { x: 900, y: 420, r: 30 };
+        const gr = c.createRadialGradient(P.x, P.y, 0, P.x, P.y, P.r);
+        gr.addColorStop(0, 'rgb(18,18,20)'); gr.addColorStop(0.7, 'rgb(22,22,24)'); gr.addColorStop(1, 'rgb(46,46,48)');
+        c.fillStyle = gr; c.beginPath(); c.ellipse(P.x, P.y, P.r, P.r * 0.8, 0, 0, Math.PI * 2); c.fill();
+        const id = c.getImageData(0, 0, W, H), d = id.data; let s = o.seed || 5;
+        const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+        for (let i = 0; i < d.length; i += 4) { const n = (rnd() + rnd() - 1) * 6; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+        c.putImageData(id, 0, 0);
+        const out = document.createElement('canvas'); out.width = W; out.height = H;
+        const oc = out.getContext('2d'); oc.filter = 'blur(1px)'; oc.drawImage(cv, 0, 0);
+        return { cv: out, P };
+      };
+      const base = { ...settings, floorMode: 'full', manualQuad: null, puckModel: { r: 0, g: 0, b: 0, area: 0 }, stickModel: null, puckTol: 95, stickTol: 70 };
+      // 등록: 그림자 없는 장면에서 퍽·테이프를 눌러 잰다 (앱의 '터치로 지정')
+      const vr = new Vision(240); vr.mirror = false; vr.setSourceSize(W, H); vr.process(mkS().cv, base);
+      const ps = vr.sampleObject(900 * k, 420 * k, 95), bs = vr.sampleObject(((B.x0 + B.x1) / 2) * k, ((B.y0 + B.y1) / 2) * k, 70);
+      const puckModel = { r: ps.r, g: ps.g, b: ps.b, area: ps.area, need: ps.need, bgDist: Math.round(ps.dist) };
+      const stickModel = { r: bs.r, g: bs.g, b: bs.b, area: bs.area, need: bs.need, bgDist: Math.round(bs.dist) };
+      // 허용 오차는 넓게(자동 맞춤이 넓힐 수 있는 만큼): 색만 보면 샤프트·그림자까지 퍽 색에 든다
+      const TOL = 160, sT = { ...base, puckModel, puckTol: TOL, stickModel, stickTol: bs.tol };
+      const seg = (x, y, a, b) => { const vx = b.x - a.x, vy = b.y - a.y, t = Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / (vx * vx + vy * vy))); return { d: Math.hypot(x - a.x - t * vx, y - a.y - t * vy), t }; };
+      const run = (sc, o = {}) => {
+        const v = new Vision(240); v.mirror = false; v.setSourceSize(W, H);
+        v.process(sc.cv, base);
+        v.seedPuck(sc.P.x * k, sc.P.y * k, puckModel.area);
+        const r = v.process(sc.cv, sT), m = makeMatcher(puckModel, TOL), fd = v.frame.data;
+        const c = { puck: [0, 0], shaft: [0, 0, 0], shadow: [0, 0, 0], body: [0, 0, 0], blade: [0, 0], stickOut: 0 }; // [픽셀 수, 퍽(또는 스틱)으로 칠함, 색만 보면 퍽 색]
+        for (let y = 0; y < v.PH; y++) for (let x = 0; x < v.PW; x++) {
+          const i = v._roiIndex(x, y); if (i < 0) continue;
+          const X = (x + 0.5) / k, Y = (y + 0.5) / k, pm = v.puckMask[i] ? 1 : 0, smk = v.stickMask[i] ? 1 : 0, p = (y * v.PW + x) * 4;
+          const col = matchPixel(m, fd[p], fd[p + 1], fd[p + 2]) ? 1 : 0;
+          const dP = Math.hypot((X - sc.P.x) / sc.P.r, (Y - sc.P.y) / (sc.P.r * 0.8));
+          const nearBlade = X > B.x0 - 16 && X < B.x1 + 16 && Y > B.y0 - 16 && Y < B.y1 + 16;
+          if (smk && !nearBlade) c.stickOut++;
+          if (dP < 0.75) { c.puck[0]++; c.puck[1] += pm; continue; }
+          if (X > B.x0 + 8 && X < B.x1 - 8 && Y > B.y0 + 6 && Y < B.y1 - 6) { c.blade[0]++; c.blade[1] += smk; continue; }
+          if (dP < 1.6 || nearBlade) continue;                                                     // 퍽·날 둘레(바닥과 섞인 가장자리)는 세지 않음
+          const s1 = seg(X, Y, heel, top);
+          if (s1.d < 5 && s1.t > 0.1) { c.shaft[0]++; c.shaft[1] += pm; c.shaft[2] += col; continue; }
+          if (s1.d < 16) continue;
+          const s2 = seg(X, Y, sh0, sh1);
+          const inBS = X > BS.x0 + 8 && X < BS.x0 + BS.w - 8 && Y > BS.y0 + 7 && Y < BS.y0 + BS.h - 7;
+          if (o.shadow && ((s2.d < 6 && s2.t > 0.15) || inBS)) { c.shadow[0]++; c.shadow[1] += pm; c.shadow[2] += col; continue; }
+          if (o.body && X > 775 && Y > 315 && (!o.shadow || s2.d > 18)) { c.body[0]++; c.body[1] += pm; c.body[2] += col; }
+        }
+        const at = r.puck ? +Math.hypot(r.puck.x - sc.P.x * k, r.puck.y - sc.P.y * k).toFixed(2) : null;
+        return { r, c, at, stickAt: r.stick ? +Math.hypot(r.stick.x - ((B.x0 + B.x1) / 2) * k, r.stick.y - ((B.y0 + B.y1) / 2) * k).toFixed(2) : null, v };
+      };
+      const frac = (a) => (a[0] ? +(a[1] / a[0]).toFixed(3) : null), colorFrac = (a) => (a[0] ? +(a[2] / a[0]).toFixed(3) : null);
+
+      // SH1 보통 그림자 (바닥의 45%) + 샤프트에 테이프 색 점: 색만 보면 샤프트·그림자 모두 퍽 색
+      const r1 = run(mkS({ shadow: 0.45, specks: true }), { shadow: true });
+      check('SH1 shaft and stick shadow are puck-colored but not read as the puck; only the blade tape is the stick',
+        colorFrac(r1.c.shaft) > 0.9 && colorFrac(r1.c.shadow) > 0.9 && frac(r1.c.shaft) < 0.03 && frac(r1.c.shadow) < 0.03 && frac(r1.c.puck) > 0.9 && r1.at !== null && r1.at < 1.5
+        && frac(r1.c.blade) > 0.85 && r1.c.stickOut === 0 && r1.stickAt !== null && r1.stickAt < 3,
+        { shaft: [frac(r1.c.shaft), colorFrac(r1.c.shaft)], shadow: [frac(r1.c.shadow), colorFrac(r1.c.shadow)], puck: frac(r1.c.puck), at: r1.at, blade: frac(r1.c.blade), stickOut: r1.c.stickOut, stickAt: r1.stickAt, cut: r1.v.shadow, thin: r1.v.thinRemoved });
+      // SH2 아주 진한 그림자 (바닥의 30% — 밝기로는 못 가름): 가늘고 긴 모양으로 지운다 (그림자 줄·날 그림자)
+      const r2 = run(mkS({ shadow: 0.3 }), { shadow: true });
+      check('SH2 a very dark stick + blade shadow (brightness alone cannot tell) is dropped by its thin, long shape',
+        colorFrac(r2.c.shadow) > 0.9 && frac(r2.c.shadow) < 0.05 && frac(r2.c.shaft) < 0.03 && frac(r2.c.puck) > 0.9 && r2.at !== null && r2.at < 1.5,
+        { shadow: [frac(r2.c.shadow), colorFrac(r2.c.shadow)], shaft: frac(r2.c.shaft), puck: frac(r2.c.puck), at: r2.at, thin: r2.v.thinRemoved });
+      // SH3 퍽이 샤프트에 닿아 있음: 샤프트만 떨어져 나가고 퍽 자리는 그대로 (예전: 한 덩어리 '너무 큼'으로 놓치거나 중심이 샤프트 쪽으로)
+      const tP = 0.45, nx = 0.672, ny = -0.741, Pt = { x: heel.x + (top.x - heel.x) * tP + nx * 36, y: heel.y + (top.y - heel.y) * tP + ny * 36, r: 30 };
+      const r3 = run(mkS({ P: Pt }));
+      check('SH3 puck touching the shaft: the shaft breaks off, the puck is found where it is',
+        r3.at !== null && r3.at < 1.5 && frac(r3.c.shaft) < 0.05 && frac(r3.c.puck) > 0.9, { at: r3.at, shaft: frac(r3.c.shaft), puck: frac(r3.c.puck) });
+      // SH4 사람 그림자(바닥의 42%) 안에 퍽: 그림자는 칠하지 않고 퍽은 그대로 (그 자리 바닥 밝기 기준)
+      const r4 = run(mkS({ body: 0.42, shadow: 0.45 }), { body: true, shadow: true });
+      check('SH4 a person\'s shadow over the area is not painted; the puck inside it is still found',
+        colorFrac(r4.c.body) > 0.9 && frac(r4.c.body) < 0.02 && frac(r4.c.puck) > 0.9 && r4.at !== null && r4.at < 1.5,
+        { body: [frac(r4.c.body), colorFrac(r4.c.body)], puck: frac(r4.c.puck), at: r4.at });
+      // SH5 자동 맞춤: 추적이 지우는 가늘고 긴 줄은 '퍽만 한 가짜 덩어리'로 세지 않는다 (같은 넓이의 둥근 덩어리는 센다)
+      const Rr = 5, ar5 = Math.round(Math.PI * Rr * Rr), mkMap = () => ({ D: new Float32Array(120 * 80).fill(Infinity), w: 120, h: 80, n: 9600 });
+      const line = mkMap(); for (let y = 40; y < 44; y++) for (let x = 20; x < 52; x++) line.D[y * 120 + x] = 0;
+      const blob = mkMap(); for (let y = 30; y < 42; y++) for (let x = 30; x < 42; x++) blob.D[y * 120 + x] = 0;
+      check('SH5 auto-tune does not count a thin line (dropped by tracking) as a fake puck; a round blob of the same size still counts',
+        !falseBlobs(line, 50, ar5).bad && falseBlobs(blob, 50, ar5).bad);
+      // SH6 그림자 규칙은 바닥이 밝고 물체가 검정·회색일 때만 (색 있는 테이프·퍽은 색으로 이미 갈리고, 어두운 바닥에선 끔)
+      const blk = { r: 20, g: 20, b: 22 }, org = { r: 249, g: 115, b: 22 }, c6 = shadowCut(blk, makeMatcher(blk, 95), 230);
+      check('SH6 shadow rule: only gray/black objects on a light floor', c6 > 0.3 && c6 < 0.45 && shadowCut(org, makeMatcher(org, 70), 230) === 0 && shadowCut(blk, makeMatcher(blk, 95), 90) === 0, { cut: +c6.toFixed(3) });
     }
     // K) 추적기: 영역 안쪽에서 사라진 퍽(가림)은 1.5초 동안 흐리게 그 자리에, 가장자리에서 사라지면 0.4초. 다시 보이면 바로 그 자리
     {
